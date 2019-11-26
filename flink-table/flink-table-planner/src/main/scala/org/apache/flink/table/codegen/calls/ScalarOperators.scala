@@ -909,7 +909,14 @@ object ScalarOperators {
 
       case (SqlTimeTypeInfo.TIME, TimeIntervalTypeInfo.INTERVAL_MILLIS) =>
         generateOperatorIfNotNull(nullCheck, SqlTimeTypeInfo.TIME, left, right) {
-            (l, r) => s"$l $op ((int) ($r))"
+          (l, r) =>
+            s"((($l % ${MILLIS_PER_DAY} == 0) ? ${MILLIS_PER_DAY} : $l) " +
+              s"+ ((int) ($r % ${MILLIS_PER_DAY} == 0 ? 0 : $r))) % ${MILLIS_PER_DAY}"
+        }
+
+      case (SqlTimeTypeInfo.TIME, TimeIntervalTypeInfo.INTERVAL_MONTHS) =>
+        generateOperatorIfNotNull(nullCheck, SqlTimeTypeInfo.TIME, left, right) {
+          (l, r) => s"$l"
         }
 
       case (SqlTimeTypeInfo.TIMESTAMP, TimeIntervalTypeInfo.INTERVAL_MILLIS) =>
