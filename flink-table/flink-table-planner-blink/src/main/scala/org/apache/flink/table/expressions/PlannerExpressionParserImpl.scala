@@ -17,14 +17,22 @@
  */
 package org.apache.flink.table.expressions
 
-import org.apache.flink.api.common.typeinfo.{SqlTimeTypeInfo, TypeInformation}
 import org.apache.flink.table.api._
 import org.apache.flink.table.delegation.PlannerExpressionParser
 import org.apache.flink.table.expressions.utils.ApiExpressionUtils._
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions
-import org.apache.flink.table.types.utils.TypeConversions.fromLegacyInfoToDataType
-
-import _root_.java.math.{BigDecimal => JBigDecimal}
+import org.apache.flink.table.planner.JBoolean
+import org.apache.flink.table.planner.JByte
+import org.apache.flink.table.planner.JShort
+import org.apache.flink.table.planner.JFloat
+import org.apache.flink.table.planner.JInt
+import org.apache.flink.table.planner.JLong
+import org.apache.flink.table.planner.JDouble
+import org.apache.flink.table.planner.JString
+import org.apache.flink.table.planner.JBigDecimal
+import org.apache.flink.table.types.DataType
+import org.apache.flink.table.types.logical.{CharType, DecimalType, VarCharType}
+import _root_.java.sql.{Date => JDate, Time => JTime, Timestamp => JTimestamp}
 import _root_.java.util.{List => JList}
 
 import _root_.scala.collection.JavaConversions._
@@ -32,7 +40,7 @@ import _root_.scala.language.implicitConversions
 import _root_.scala.util.parsing.combinator.{JavaTokenParsers, PackratParsers}
 
 /**
-  * The implementation of a [[PlannerExpressionParser]] which parsers expressions inside a String.
+  * The implementation of a [[PlannerExpressionParser]] which parses expressions inside a String.
   *
   * <p><strong>WARNING</strong>: please keep this class in sync with PlannerExpressionParserImpl
   * variant in flink-table-planner module.
@@ -139,6 +147,8 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
   lazy val TRIM_MODE_TRAILING: Keyword = Keyword("TRAILING")
   lazy val TRIM_MODE_BOTH: Keyword = Keyword("BOTH")
   lazy val TO: Keyword = Keyword("TO")
+  lazy val CHAR: Keyword = Keyword("CHAR")
+  lazy val VARCHAR: Keyword = Keyword("VARCHAR")
 
   def functionIdent: PlannerExpressionParserImpl.Parser[String] = super.ident
 
@@ -176,24 +186,45 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
 
   // data types
 
-  lazy val dataType: PackratParser[TypeInformation[_]] =
-    PRIMITIVE_ARRAY ~ "(" ~> dataType <~ ")" ^^ { ct => Types.PRIMITIVE_ARRAY(ct) } |
-    OBJECT_ARRAY ~ "(" ~> dataType <~ ")" ^^ { ct => Types.OBJECT_ARRAY(ct) } |
-    MAP ~ "(" ~> dataType ~ "," ~ dataType <~ ")" ^^ { mt => Types.MAP(mt._1._1, mt._2)} |
-    BYTE ^^ { e => Types.BYTE } |
-    SHORT ^^ { e => Types.SHORT } |
-    INTERVAL_MONTHS ^^ { e => Types.INTERVAL_MONTHS } |
-    INTERVAL_MILLIS ^^ { e => Types.INTERVAL_MILLIS } |
-    INT ^^ { e => Types.INT } |
-    LONG ^^ { e => Types.LONG } |
-    FLOAT ^^ { e => Types.FLOAT } |
-    DOUBLE ^^ { e => Types.DOUBLE } |
-    BOOLEAN ^^ { { e => Types.BOOLEAN } } |
-    STRING ^^ { e => Types.STRING } |
-    SQL_DATE ^^ { e => Types.SQL_DATE } |
-    SQL_TIMESTAMP ^^ { e => Types.SQL_TIMESTAMP } |
-    SQL_TIME ^^ { e => Types.SQL_TIME } |
-    DECIMAL ^^ { e => Types.DECIMAL }
+  lazy val dataType: PackratParser[DataType] =
+    PRIMITIVE_ARRAY ~ "(" ~> dataType <~ ")" ^^ { ct => DataTypes.ARRAY(ct) } |
+    OBJECT_ARRAY ~ "(" ~> dataType <~ ")" ^^ { ct => DataTypes.ARRAY(ct) } |
+    MAP ~ "(" ~> dataType ~ "," ~ dataType <~ ")" ^^ { mt => DataTypes.MAP(mt._1._1, mt._2) } |
+    BYTE ^^ { e => DataTypes.TINYINT().bridgedTo(classOf[JByte]) } |
+    SHORT ^^ { e => DataTypes.SMALLINT().bridgedTo(classOf[JShort]) } |
+    INTERVAL_MONTHS ^^ { e => DataTypes.INTERVAL(DataTypes.MONTH()).bridgedTo(classOf[JInt]) } |
+    INTERVAL_MILLIS ^^ { e => DataTypes.INTERVAL(DataTypes.SECOND(3)).bridgedTo(classOf[JLong]) } |
+    INT ^^ { e => DataTypes.INT().bridgedTo(classOf[JInt]) } |
+    LONG ^^ { e => DataTypes.BIGINT().bridgedTo(classOf[JLong]) } |
+    FLOAT ^^ { e => DataTypes.FLOAT().bridgedTo(classOf[JFloat]) } |
+    DOUBLE ^^ { e => DataTypes.DOUBLE().bridgedTo(classOf[JDouble]) } |
+    BOOLEAN ^^ { { e => DataTypes.BOOLEAN().bridgedTo(classOf[JBoolean]) } } |
+    STRING ^^ { e => DataTypes.STRING().bridgedTo(classOf[JString]) } |
+    SQL_DATE ^^ { e => DataTypes.DATE().bridgedTo(classOf[JDate]) } |
+    SQL_TIMESTAMP ^^ { e => DataTypes.TIMESTAMP(3).bridgedTo(classOf[JTimestamp]) } |
+    SQL_TIME ^^ { e => DataTypes.TIME(0).bridgedTo(classOf[JTime]) } |
+    DECIMAL ~ "(" ~> wholeNumber ~ "," ~ wholeNumber <~ ")" ^^ {
+      e =>
+        val precision = e._1._1.toInt
+        val scale = e._2.toInt
+        DataTypes.DECIMAL(precision, scale)
+    } |
+    DECIMAL ^^ {
+      e =>
+        DataTypes.DECIMAL(DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE)
+    } |
+    CHAR ~ "(" ~> wholeNumber <~ ")" ^^ {
+      e =>
+        val length = e.toInt
+        DataTypes.CHAR(length)
+    } |
+    CHAR ^^ { e => DataTypes.CHAR(CharType.DEFAULT_LENGTH) } |
+    VARCHAR ~ "(" ~> wholeNumber <~ ")" ^^ {
+      e =>
+        val length = e.toInt
+        DataTypes.VARCHAR(length)
+    } |
+    VARCHAR ^^ { e => DataTypes.VARCHAR(VarCharType.DEFAULT_LENGTH) }
 
   // literals
 
@@ -234,7 +265,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
   }
 
   lazy val nullLiteral: PackratParser[Expression] = (NULL | NULL_OF) ~ "(" ~> dataType <~ ")" ^^ {
-    dt => valueLiteral(null, fromLegacyInfoToDataType(dt))
+    dt => valueLiteral(null, dt)
   }
 
   lazy val literalExpr: PackratParser[Expression] =
@@ -268,7 +299,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
         unresolvedCall(
           BuiltInFunctionDefinitions.CAST,
           e,
-          typeLiteral(fromLegacyInfoToDataType(dt)))
+          typeLiteral(dt))
     }
 
   lazy val suffixTrim: PackratParser[Expression] =
@@ -342,7 +373,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.DATE)))
+        typeLiteral(DataTypes.DATE().bridgedTo(classOf[JDate])))
     }
 
   lazy val suffixToTimestamp: PackratParser[Expression] =
@@ -350,7 +381,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.TIMESTAMP)))
+        typeLiteral(DataTypes.TIMESTAMP(3).bridgedTo(classOf[JTimestamp])))
     }
 
   lazy val suffixToTime: PackratParser[Expression] =
@@ -358,7 +389,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.TIME)))
+        typeLiteral(DataTypes.TIME(0).bridgedTo(classOf[JTime])))
     }
 
   lazy val suffixTimeInterval : PackratParser[Expression] =
@@ -442,7 +473,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
         unresolvedCall(
           BuiltInFunctionDefinitions.CAST,
           e,
-          typeLiteral(fromLegacyInfoToDataType(dt)))
+          typeLiteral(dt))
     }
 
   lazy val prefixIf: PackratParser[Expression] =
@@ -525,7 +556,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.DATE)))
+        typeLiteral(DataTypes.DATE().bridgedTo(classOf[JDate])))
     }
 
   lazy val prefixToTimestamp: PackratParser[Expression] =
@@ -533,7 +564,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.TIMESTAMP)))
+        typeLiteral(DataTypes.TIMESTAMP(3).bridgedTo(classOf[JTimestamp])))
     }
 
   lazy val prefixToTime: PackratParser[Expression] =
@@ -541,7 +572,7 @@ object PlannerExpressionParserImpl extends JavaTokenParsers
       unresolvedCall(
         BuiltInFunctionDefinitions.CAST,
         e,
-        typeLiteral(fromLegacyInfoToDataType(SqlTimeTypeInfo.TIME)))
+        typeLiteral(DataTypes.TIME(0).bridgedTo(classOf[JTime])))
     }
 
   lazy val prefixDistinct: PackratParser[Expression] =
