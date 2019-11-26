@@ -78,12 +78,16 @@ import org.junit.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.apache.flink.util.ExceptionUtils.findThrowable;
 import static org.apache.flink.util.ExceptionUtils.findThrowableWithMessage;
@@ -93,6 +97,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThan;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -165,6 +170,24 @@ public class DefaultSchedulerTest extends TestLogger {
 
 		final ExecutionVertexID executionVertexId = new ExecutionVertexID(onlyJobVertex.getID(), 0);
 		assertThat(deployedExecutionVertices, contains(executionVertexId));
+	}
+
+	@Test
+	public void taskScheduledAreInOrder() throws Exception {
+		final JobGraph jobGraph = sourceSinkJobGraph(100);
+
+		final List<ExecutionVertexID> deployedExecutionVertexIdsSorted = getAllExecutionVertexIdsSorted(jobGraph);
+		final Set<ExecutionVertexID> deployedExecutionVertexIdSet = new HashSet<>(deployedExecutionVertexIdsSorted);
+
+		final TestSchedulingStrategy.Factory schedulingStrategyFactory = new TestSchedulingStrategy.Factory();
+		createScheduler(jobGraph, schedulingStrategyFactory);
+		final TestSchedulingStrategy schedulingStrategy = schedulingStrategyFactory.getLastCreatedSchedulingStrategy();
+
+		schedulingStrategy.schedule(deployedExecutionVertexIdSet);
+
+		final List<ExecutionVertexID> deployedExecutionVertices = testExecutionVertexOperations.getDeployedVertices();
+
+		assertEquals(deployedExecutionVertexIdsSorted, deployedExecutionVertices);
 	}
 
 	@Test
@@ -609,15 +632,21 @@ public class DefaultSchedulerTest extends TestLogger {
 	}
 
 	private static JobGraph nonParallelSourceSinkJobGraph() {
+		return sourceSinkJobGraph(1);
+	}
+
+	private static JobGraph sourceSinkJobGraph(final int parallelism) {
 		final JobGraph jobGraph = new JobGraph(TEST_JOB_ID, "Testjob");
 		jobGraph.setScheduleMode(ScheduleMode.EAGER);
 
 		final JobVertex source = new JobVertex("source");
 		source.setInvokableClass(NoOpInvokable.class);
+		source.setParallelism(parallelism);
 		jobGraph.addVertex(source);
 
 		final JobVertex sink = new JobVertex("sink");
 		sink.setInvokableClass(NoOpInvokable.class);
+		sink.setParallelism(parallelism);
 		jobGraph.addVertex(sink);
 
 		sink.connectNewDataSetAsInput(source, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
@@ -678,5 +707,20 @@ public class DefaultSchedulerTest extends TestLogger {
 	private void startScheduling(final SchedulerNG scheduler) {
 		scheduler.setMainThreadExecutor(ComponentMainThreadExecutorServiceAdapter.forMainThread());
 		scheduler.startScheduling();
+	}
+
+	private static List<ExecutionVertexID> getAllExecutionVertexIdsSorted(final JobGraph jobGraph) {
+		final List<ExecutionVertexID> executionVertexIdsSorted = new ArrayList<>();
+
+		for (JobVertex vertex : jobGraph.getVerticesSortedTopologicallyFromSources()) {
+			final List<ExecutionVertexID> vertexIdsSorted = IntStream
+				.range(0, vertex.getParallelism())
+				.mapToObj(index -> new ExecutionVertexID(vertex.getID(), index))
+				.collect(Collectors.toList());
+
+			executionVertexIdsSorted.addAll(vertexIdsSorted);
+		}
+
+		return executionVertexIdsSorted;
 	}
 }

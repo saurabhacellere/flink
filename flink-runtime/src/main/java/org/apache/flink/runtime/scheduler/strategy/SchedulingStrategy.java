@@ -23,7 +23,7 @@ import org.apache.flink.runtime.executiongraph.Execution;
 import org.apache.flink.runtime.executiongraph.IntermediateResultPartition;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 
-import java.util.Set;
+import java.util.List;
 
 /**
  * Component which encapsulates the scheduling logic.
@@ -40,9 +40,9 @@ public interface SchedulingStrategy {
 	/**
 	 * Called whenever vertices need to be restarted (due to task failure).
 	 *
-	 * @param verticesToRestart The tasks need to be restarted
+	 * @param verticesToRestart The tasks to be restarted, topologically sorted
 	 */
-	void restartTasks(Set<ExecutionVertexID> verticesToRestart);
+	void restartTasks(List<ExecutionVertexID> verticesToRestart);
 
 	/**
 	 * Called whenever an {@link Execution} changes its state.

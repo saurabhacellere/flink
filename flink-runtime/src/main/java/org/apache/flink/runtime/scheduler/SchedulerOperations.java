@@ -20,7 +20,7 @@ package org.apache.flink.runtime.scheduler;
 
 import org.apache.flink.runtime.scheduler.strategy.SchedulingStrategy;
 
-import java.util.Collection;
+import java.util.List;
 
 /**
  * Component which is used by {@link SchedulingStrategy} to commit scheduling decisions.
@@ -33,5 +33,5 @@ public interface SchedulerOperations {
 	 *
 	 * @param executionVertexDeploymentOptions The tasks to be deployed and deployment options
 	 */
-	void allocateSlotsAndDeploy(Collection<ExecutionVertexDeploymentOption> executionVertexDeploymentOptions);
+	void allocateSlotsAndDeploy(List<ExecutionVertexDeploymentOption> executionVertexDeploymentOptions);
 }
