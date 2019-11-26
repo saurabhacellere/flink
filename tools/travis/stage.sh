@@ -81,12 +81,12 @@ flink-formats/flink-parquet,\
 flink-formats/flink-sequence-file,\
 flink-formats/flink-json,\
 flink-formats/flink-csv,\
-flink-formats/flink-orc,\
 flink-connectors/flink-hbase,\
 flink-connectors/flink-hcatalog,\
 flink-connectors/flink-hadoop-compatibility,\
 flink-connectors/flink-jdbc,\
 flink-connectors,\
+flink-connectors/flink-orc,\
 flink-connectors/flink-connector-cassandra,\
 flink-connectors/flink-connector-elasticsearch2,\
 flink-connectors/flink-connector-elasticsearch5,\
@@ -210,10 +210,10 @@ function get_test_modules_for_stage() {
             echo "-pl $modules_tests"
         ;;
         (${STAGE_SCHEDULER_NG_CORE})
-            echo "-Dscheduler-ng -pl $MODULES_CORE"
+            echo "-Dlegacy-scheduler -pl $MODULES_CORE"
         ;;
         (${STAGE_SCHEDULER_NG_TESTS})
-            echo "-Dscheduler-ng -pl $MODULES_TESTS"
+            echo "-Dlegacy-scheduler -pl $MODULES_TESTS"
         ;;
         (${STAGE_MISC})
             echo "-pl $modules_misc"
