@@ -19,6 +19,7 @@
 
 package org.apache.flink.testutils;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.EntropyInjectingFileSystem;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
@@ -33,11 +34,18 @@ public class EntropyInjectingTestFileSystem extends LocalFileSystem implements E
 
 	public static final String ENTROPY_INJECTION_KEY = "_entropy_";
 
+	public static final String ENTROPY_KEY_REPLACEMENT = "";
+
 	public static final String ENTROPY = "_resolved_";
 
 	@Override
 	public String getEntropyInjectionKey() {
 		return ENTROPY_INJECTION_KEY;
+	}
+
+	@Override
+	public String getEntropyKeyReplacement() {
+		return ENTROPY_KEY_REPLACEMENT;
 	}
 
 	@Override
@@ -50,6 +58,10 @@ public class EntropyInjectingTestFileSystem extends LocalFileSystem implements E
 		@Override
 		public String getScheme() {
 			return "test-entropy";
+		}
+
+		@Override
+		public void configure(final Configuration config) {
 		}
 
 		@Override
