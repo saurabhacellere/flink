@@ -66,7 +66,6 @@ import org.apache.flink.runtime.shuffle.ShuffleEnvironment;
 import org.apache.flink.runtime.shuffle.ShuffleIOOwnerContext;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.TaskStateManager;
-import org.apache.flink.runtime.taskexecutor.BackPressureSampleableTask;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
 import org.apache.flink.runtime.taskexecutor.KvStateService;
 import org.apache.flink.runtime.taskexecutor.PartitionProducerStateChecker;
@@ -123,7 +122,7 @@ import static org.apache.flink.util.Preconditions.checkState;
  *
  * <p>Each Task is run by one dedicated thread.
  */
-public class Task implements Runnable, TaskActions, PartitionProducerStateProvider, CheckpointListener, BackPressureSampleableTask {
+public class Task implements Runnable, TaskActions, PartitionProducerStateProvider, CheckpointListener {
 
 	/** The class logger. */
 	private static final Logger LOG = LoggerFactory.getLogger(Task.class);
@@ -462,16 +461,16 @@ public class Task implements Runnable, TaskActions, PartitionProducerStateProvid
 		return invokable;
 	}
 
-	@Override
-	public boolean isBackPressured() {
-		if (invokable == null || consumableNotifyingPartitionWriters.length == 0 || !isRunning()) {
-			return false;
+	public StackTraceElement[] getStackTraceOfExecutingThread() {
+		final AbstractInvokable invokable = this.invokable;
+
+		if (invokable == null) {
+			return new StackTraceElement[0];
 		}
-		final CompletableFuture<?>[] outputFutures = new CompletableFuture[consumableNotifyingPartitionWriters.length];
-		for (int i = 0; i < outputFutures.length; ++i) {
-			outputFutures[i] = consumableNotifyingPartitionWriters[i].getAvailableFuture();
-		}
-		return !CompletableFuture.allOf(outputFutures).isDone();
+
+		return invokable.getExecutingThread()
+			.orElse(executingThread)
+			.getStackTrace();
 	}
 
 	// ------------------------------------------------------------------------
@@ -494,11 +493,6 @@ public class Task implements Runnable, TaskActions, PartitionProducerStateProvid
 		return executionState == ExecutionState.CANCELING ||
 				executionState == ExecutionState.CANCELED ||
 				executionState == ExecutionState.FAILED;
-	}
-
-	@Override
-	public boolean isRunning() {
-		return executionState == ExecutionState.RUNNING;
 	}
 
 	/**
@@ -1183,6 +1177,33 @@ public class Task implements Runnable, TaskActions, PartitionProducerStateProvid
 		}
 		else {
 			LOG.debug("Ignoring checkpoint commit notification for non-running task {}.", taskNameWithSubtask);
+		}
+	}
+
+	@Override
+	public void notifyCheckpointAbort(final long checkpointID) {
+		final AbstractInvokable invokable = this.invokable;
+
+		if (executionState == ExecutionState.RUNNING && invokable != null) {
+			try {
+				invokable.notifyCheckpointAbortAsync(checkpointID);
+			}
+			catch (RejectedExecutionException ex) {
+				// This may happen if the mailbox is closed. It means that the task is shutting down, so we just ignore it.
+				LOG.debug(
+					"Notify checkpoint abort {} for {} ({}) was rejected by the mailbox",
+					checkpointID, taskNameWithSubtask, executionId);
+			} catch (Throwable t) {
+				if (getExecutionState() == ExecutionState.RUNNING) {
+					// fail task if checkpoint confirmation failed.
+					failExternally(new RuntimeException(
+						"Error while aborting checkpoint",
+						t));
+				}
+			}
+		}
+		else {
+			LOG.info("Ignoring checkpoint commit notification for non-running task {}.", taskNameWithSubtask);
 		}
 	}
 

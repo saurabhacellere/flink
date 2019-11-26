@@ -28,12 +28,11 @@ import org.apache.flink.runtime.executiongraph.PartitionInfo;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.jobmanager.slots.TaskManagerGateway;
 import org.apache.flink.runtime.messages.Acknowledge;
-import org.apache.flink.runtime.messages.TaskBackPressureResponse;
+import org.apache.flink.runtime.messages.StackTraceSampleResponse;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
 import org.apache.flink.util.Preconditions;
 
-import java.util.Collections;
-import java.util.Set;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -56,12 +55,21 @@ public class RpcTaskManagerGateway implements TaskManagerGateway {
 	}
 
 	@Override
-	public CompletableFuture<TaskBackPressureResponse> requestTaskBackPressure(
+	public CompletableFuture<StackTraceSampleResponse> requestStackTraceSample(
 			ExecutionAttemptID executionAttemptID,
-			int requestId,
+			int sampleId,
+			int numSamples,
+			Time delayBetweenSamples,
+			int maxStackTraceDepth,
 			Time timeout) {
 
-		return taskExecutorGateway.requestTaskBackPressure(executionAttemptID, requestId, timeout);
+		return taskExecutorGateway.requestStackTraceSample(
+			executionAttemptID,
+			sampleId,
+			numSamples,
+			delayBetweenSamples,
+			maxStackTraceDepth,
+			timeout);
 	}
 
 	@Override
@@ -80,13 +88,18 @@ public class RpcTaskManagerGateway implements TaskManagerGateway {
 	}
 
 	@Override
-	public void releasePartitions(JobID jobId, Set<ResultPartitionID> partitionIds) {
-		taskExecutorGateway.releaseOrPromotePartitions(jobId, partitionIds, Collections.emptySet());
+	public void releasePartitions(JobID jobId, Collection<ResultPartitionID> partitionIds) {
+		taskExecutorGateway.releasePartitions(jobId, partitionIds);
 	}
 
 	@Override
 	public void notifyCheckpointComplete(ExecutionAttemptID executionAttemptID, JobID jobId, long checkpointId, long timestamp) {
 		taskExecutorGateway.confirmCheckpoint(executionAttemptID, checkpointId, timestamp);
+	}
+
+	@Override
+	public void notifyCheckpointAbort(ExecutionAttemptID executionAttemptID, JobID jobId, long checkpointId, long timestamp) {
+		taskExecutorGateway.abortCheckpoint(executionAttemptID, checkpointId, timestamp);
 	}
 
 	@Override

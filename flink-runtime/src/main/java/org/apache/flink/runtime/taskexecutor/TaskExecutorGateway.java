@@ -33,14 +33,14 @@ import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.jobmaster.AllocatedSlotReport;
 import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.messages.Acknowledge;
-import org.apache.flink.runtime.messages.TaskBackPressureResponse;
+import org.apache.flink.runtime.messages.StackTraceSampleResponse;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
 import org.apache.flink.runtime.rpc.RpcGateway;
 import org.apache.flink.runtime.rpc.RpcTimeout;
 import org.apache.flink.runtime.taskmanager.Task;
 import org.apache.flink.types.SerializableOptional;
 
-import java.util.Set;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -67,9 +67,12 @@ public interface TaskExecutorGateway extends RpcGateway {
 		ResourceManagerId resourceManagerId,
 		@RpcTimeout Time timeout);
 
-	CompletableFuture<TaskBackPressureResponse> requestTaskBackPressure(
+	CompletableFuture<StackTraceSampleResponse> requestStackTraceSample(
 		ExecutionAttemptID executionAttemptId,
-		int requestId,
+		int sampleId,
+		int numSamples,
+		Time delayBetweenSamples,
+		int maxStackTraceDepth,
 		@RpcTimeout Time timeout);
 
 	/**
@@ -99,12 +102,12 @@ public interface TaskExecutorGateway extends RpcGateway {
 		@RpcTimeout Time timeout);
 
 	/**
-	 * Batch release/promote intermediate result partitions.
+	 * Batch release intermediate result partitions.
+	 *
 	 * @param jobId id of the job that the partitions belong to
-	 * @param partitionToRelease partition ids to release
-	 * @param partitionsToPromote partitions ids to promote
+	 * @param partitionIds partition ids to release
 	 */
-	void releaseOrPromotePartitions(JobID jobId, Set<ResultPartitionID> partitionToRelease, Set<ResultPartitionID> partitionsToPromote);
+	void releasePartitions(JobID jobId, Collection<ResultPartitionID> partitionIds);
 
 	/**
 	 * Trigger the checkpoint for the given task. The checkpoint is identified by the checkpoint ID
@@ -135,6 +138,17 @@ public interface TaskExecutorGateway extends RpcGateway {
 	 * @return Future acknowledge if the checkpoint has been successfully confirmed
 	 */
 	CompletableFuture<Acknowledge> confirmCheckpoint(ExecutionAttemptID executionAttemptID, long checkpointId, long checkpointTimestamp);
+
+	/**
+	 * Abort a checkpoint for the given task. The checkpoint is identified by the checkpoint ID
+	 * and the checkpoint timestamp.
+	 *
+	 * @param executionAttemptID identifying the task
+	 * @param checkpointId unique id for the checkpoint
+	 * @param checkpointTimestamp is the timestamp when the checkpoint has been initiated
+	 * @return Future acknowledge if the checkpoint has been successfully confirmed
+	 */
+	CompletableFuture<Acknowledge> abortCheckpoint(ExecutionAttemptID executionAttemptID, long checkpointId, long checkpointTimestamp);
 
 	/**
 	 * Cancel the given task.
