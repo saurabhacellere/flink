@@ -71,6 +71,11 @@ The most frequent issues where users need to interact with Flink's data type han
   the data types due to Java's generic type erasure. See [Creating a TypeInformation or TypeSerializer](#creating-a-typeinformation-or-typeserializer)
   for details.
 
+* **Serializer for `Protobuf` generated message:** From Flink-1.8, we have built-in `ProtobufSerializer`, and no longer to use Kryo
+ to serialize Google protobuf's messages. Due to the incompatibility of `protobuf-java` package across different versions, Flink would not
+ directly include any specific `protobuf-java` classes in its classpath. And users must ensure to add the wanted `protobuf-java` in the classpath,
+ otherwise it might be covered by cluster environment, e.g. the version of `protobuf-java` used in Hadoop is `2.5.0`.
+
 
 ## Flink's TypeInformation class
 
@@ -89,7 +94,7 @@ Internally, Flink makes the following distinctions between types:
 
   * Flink Java Tuples (part of the Flink Java API): max 25 fields, null fields not supported
 
-  * Scala *case classes* (including Scala tuples): null fields not supported
+  * Scala *case classes* (including Scala tuples): max 22 fields, null fields not supported
 
   * Row: tuples with arbitrary number of fields and support for null fields
 
@@ -281,11 +286,11 @@ by all compilers (as of writing this document only reliably by the Eclipse JDT c
 
 #### Serialization of POJO types
 
-The `PojoTypeInfo` is creating serializers for all the fields inside the POJO. Standard types such as
+The PojoTypeInformation is creating serializers for all the fields inside the POJO. Standard types such as
 int, long, String etc. are handled by serializers we ship with Flink.
-For all other types, we fall back to [Kryo](https://github.com/EsotericSoftware/kryo).
+For all other types, we fall back to Kryo.
 
-If Kryo is not able to handle the type, you can ask the `PojoTypeInfo` to serialize the POJO using [Avro](https://avro.apache.org).
+If Kryo is not able to handle the type, you can ask the PojoTypeInfo to serialize the POJO using Avro.
 To do so, you have to call
 
 {% highlight java %}

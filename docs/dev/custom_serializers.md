@@ -26,9 +26,13 @@ under the License.
 If you use a custom type in your Flink program which cannot be serialized by the
 Flink type serializer, Flink falls back to using the generic Kryo
 serializer. You may register your own serializer or a serialization system like
-Google Protobuf or Apache Thrift with Kryo. To do that, simply register the type
+Apache Thrift with Kryo. To do that, simply register the type
 class and the serializer in the `ExecutionConfig` of your Flink program.
 
+**NOTE:** Before Flink-1.8, we use Kryo to (de)serialize Google protobuf's message and register them
+with `chill-protobuf`'s serializer. From Flink-1.8, we have built-in `ProtobufSerializer`, which means
+previous configuration and solution would not actually take effect. Meanwhile, previously
+serialized state within savepoint would be migrated to use new `ProtobufSerializer` automatically.
 
 {% highlight java %}
 final ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
@@ -42,15 +46,12 @@ env.getConfig().registerTypeWithKryoSerializer(MyCustomType.class, mySerializer)
 {% endhighlight %}
 
 Note that your custom serializer has to extend Kryo's Serializer class. In the
-case of Google Protobuf or Apache Thrift, this has already been done for
+case of Apache Thrift, this has already been done for
 you:
 
 {% highlight java %}
 
 final ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
-
-// register the Google Protobuf serializer with Kryo
-env.getConfig().registerTypeWithKryoSerializer(MyCustomType.class, ProtobufSerializer.class);
 
 // register the serializer included with Apache Thrift as the standard serializer
 // TBaseSerializer states it should be initialized as a default Kryo serializer
@@ -67,20 +68,13 @@ for Apache Thrift:
 <dependency>
 	<groupId>com.twitter</groupId>
 	<artifactId>chill-thrift</artifactId>
-	<version>0.7.6</version>
-	<!-- exclusions for dependency conversion -->
-	<exclusions>
-		<exclusion>
-			<groupId>com.esotericsoftware.kryo</groupId>
-			<artifactId>kryo</artifactId>
-		</exclusion>
-	</exclusions>
+	<version>0.5.2</version>
 </dependency>
 <!-- libthrift is required by chill-thrift -->
 <dependency>
 	<groupId>org.apache.thrift</groupId>
 	<artifactId>libthrift</artifactId>
-	<version>0.11.0</version>
+	<version>0.6.1</version>
 	<exclusions>
 		<exclusion>
 			<groupId>javax.servlet</groupId>
@@ -91,31 +85,6 @@ for Apache Thrift:
 			<artifactId>httpclient</artifactId>
 		</exclusion>
 	</exclusions>
-</dependency>
-
-{% endhighlight %}
-
-For Google Protobuf you need the following Maven dependency:
-
-{% highlight xml %}
-
-<dependency>
-	<groupId>com.twitter</groupId>
-	<artifactId>chill-protobuf</artifactId>
-	<version>0.7.6</version>
-	<!-- exclusions for dependency conversion -->
-	<exclusions>
-		<exclusion>
-			<groupId>com.esotericsoftware.kryo</groupId>
-			<artifactId>kryo</artifactId>
-		</exclusion>
-	</exclusions>
-</dependency>
-<!-- We need protobuf for chill-protobuf -->
-<dependency>
-	<groupId>com.google.protobuf</groupId>
-	<artifactId>protobuf-java</artifactId>
-	<version>3.7.0</version>
 </dependency>
 
 {% endhighlight %}
