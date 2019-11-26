@@ -45,11 +45,12 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOError;
 import java.io.IOException;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -237,6 +238,25 @@ public class CliClient {
 		}).orElse(false);
 	}
 
+	/**
+	 * Submits a SQL file and prints status information and/or errors on the terminal.
+	 *
+	 * @param sqlFile a SQL file to execute
+	 */
+	public void submitSQLFile(URL sqlFile) {
+		final String stmt;
+		try {
+			final Path path = Paths.get(sqlFile.toURI());
+			byte[] encoded = Files.readAllBytes(path);
+			stmt = new String(encoded, Charset.defaultCharset());
+		} catch (final IOException | URISyntaxException e) {
+			printExecutionException(e);
+			return;
+		}
+		final Optional<SqlCommandCall> cmdCall = parseCommand(stmt);
+		cmdCall.ifPresent(this::callCommand);
+	}
+
 	// --------------------------------------------------------------------------------------------
 
 	private Optional<SqlCommandCall> parseCommand(String line) {
@@ -275,9 +295,6 @@ public class CliClient {
 				break;
 			case SHOW_FUNCTIONS:
 				callShowFunctions();
-				break;
-			case SHOW_MODULES:
-				callShowModules();
 				break;
 			case USE_CATALOG:
 				callUseCatalog(cmdCall);
@@ -410,7 +427,7 @@ public class CliClient {
 	private void callShowFunctions() {
 		final List<String> functions;
 		try {
-			functions = executor.listFunctions(context);
+			functions = executor.listUserDefinedFunctions(context);
 		} catch (SqlExecutionException e) {
 			printExecutionException(e);
 			return;
@@ -418,25 +435,7 @@ public class CliClient {
 		if (functions.isEmpty()) {
 			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
 		} else {
-			Collections.sort(functions);
 			functions.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowModules() {
-		final List<String> modules;
-		try {
-			modules = executor.listModules(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (modules.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			// modules are already in the loaded order
-			modules.forEach((v) -> terminal.writer().println(v));
 		}
 		terminal.flush();
 	}
