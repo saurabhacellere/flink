@@ -28,6 +28,7 @@ import org.apache.flink.runtime.state.CheckpointMetadataOutputStream;
 import org.apache.flink.runtime.state.CheckpointStorageLocation;
 import org.apache.flink.runtime.state.CompletedCheckpointStorageLocation;
 import org.apache.flink.runtime.state.StateUtil;
+import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.Preconditions;
 
@@ -38,7 +39,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -89,9 +89,7 @@ public class PendingCheckpoint {
 
 	private final Map<ExecutionAttemptID, ExecutionVertex> notYetAcknowledgedTasks;
 
-	private final List<MasterState> masterStates;
-
-	private final Set<String> notYetAcknowledgedMasterStates;
+	private final List<MasterState> masterState;
 
 	/** Set of acknowledged tasks. */
 	private final Set<ExecutionAttemptID> acknowledgedTasks;
@@ -125,7 +123,6 @@ public class PendingCheckpoint {
 			long checkpointId,
 			long checkpointTimestamp,
 			Map<ExecutionAttemptID, ExecutionVertex> verticesToConfirm,
-			Collection<String> masterStateIdentifiers,
 			CheckpointProperties props,
 			CheckpointStorageLocation targetLocation,
 			Executor executor) {
@@ -142,8 +139,7 @@ public class PendingCheckpoint {
 		this.executor = Preconditions.checkNotNull(executor);
 
 		this.operatorStates = new HashMap<>();
-		this.masterStates = new ArrayList<>(masterStateIdentifiers.size());
-		this.notYetAcknowledgedMasterStates = new HashSet<>(masterStateIdentifiers);
+		this.masterState = new ArrayList<>();
 		this.acknowledgedTasks = new HashSet<>(verticesToConfirm.size());
 		this.onCompletionPromise = new CompletableFuture<>();
 	}
@@ -178,16 +174,8 @@ public class PendingCheckpoint {
 		return operatorStates;
 	}
 
-	public List<MasterState> getMasterStates() {
-		return masterStates;
-	}
-
-	public boolean areMasterStatesFullyAcknowledged() {
-		return notYetAcknowledgedMasterStates.isEmpty() && !discarded;
-	}
-
-	public boolean areTasksFullyAcknowledged() {
-		return notYetAcknowledgedTasks.isEmpty() && !discarded;
+	public boolean isFullyAcknowledged() {
+		return this.notYetAcknowledgedTasks.isEmpty() && !discarded;
 	}
 
 	public boolean isAcknowledgedBy(ExecutionAttemptID executionAttemptId) {
@@ -260,15 +248,12 @@ public class PendingCheckpoint {
 	public CompletedCheckpoint finalizeCheckpoint() throws IOException {
 
 		synchronized (lock) {
-			checkState(areMasterStatesFullyAcknowledged(),
-				"Pending checkpoint has not been fully acknowledged by master states yet.");
-			checkState(areTasksFullyAcknowledged(),
-				"Pending checkpoint has not been fully acknowledged by tasks yet.");
+			checkState(isFullyAcknowledged(), "Pending checkpoint has not been fully acknowledged yet.");
 
 			// make sure we fulfill the promise with an exception if something fails
 			try {
 				// write out the metadata
-				final Savepoint savepoint = new SavepointV2(checkpointId, operatorStates.values(), masterStates);
+				final Savepoint savepoint = new SavepointV2(checkpointId, operatorStates.values(), masterState);
 				final CompletedCheckpointStorageLocation finalizedLocation;
 
 				try (CheckpointMetadataOutputStream out = targetLocation.createMetadataOutputStream()) {
@@ -282,7 +267,7 @@ public class PendingCheckpoint {
 						checkpointTimestamp,
 						System.currentTimeMillis(),
 						operatorStates,
-						masterStates,
+						masterState,
 						props,
 						finalizedLocation);
 
@@ -343,6 +328,8 @@ public class PendingCheckpoint {
 
 			List<OperatorID> operatorIDs = vertex.getJobVertex().getOperatorIDs();
 			int subtaskIndex = vertex.getParallelSubtaskIndex();
+			TaskManagerLocation location = vertex.getCurrentAssignedResourceLocation();
+			String locationString = location == null ? "(unassigned)" : location.getHostname() + ":" + location.dataPort();
 			long ackTimestamp = System.currentTimeMillis();
 
 			long stateSize = 0L;
@@ -384,6 +371,7 @@ public class PendingCheckpoint {
 
 				SubtaskStateStats subtaskStateStats = new SubtaskStateStats(
 					subtaskIndex,
+					locationString,
 					ackTimestamp,
 					stateSize,
 					metrics.getSyncDurationMillis(),
@@ -399,52 +387,77 @@ public class PendingCheckpoint {
 	}
 
 	/**
-	 * Acknowledges a master state (state generated on the checkpoint coordinator) to
+	 * Adds a master state (state generated on the checkpoint coordinator) to
 	 * the pending checkpoint.
 	 *
-	 * @param identifier The identifier of the master state
-	 * @param state The state to acknowledge
+	 * @param state The state to add
 	 */
-	public void acknowledgeMasterState(String identifier, @Nullable MasterState state) {
+	public void addMasterState(MasterState state) {
+		checkNotNull(state);
 
 		synchronized (lock) {
 			if (!discarded) {
-				if (notYetAcknowledgedMasterStates.remove(identifier) && state != null) {
-					masterStates.add(state);
-				}
+				masterState.add(state);
 			}
 		}
 	}
+
 
 	// ------------------------------------------------------------------------
 	//  Cancellation
 	// ------------------------------------------------------------------------
 
 	/**
-	 * Aborts a checkpoint with reason and cause.
+	 * Aborts a checkpoint because it expired (took too long).
 	 */
-	public void abort(CheckpointFailureReason reason, @Nullable Throwable cause) {
+	public void abortExpired() {
 		try {
-			CheckpointException exception = new CheckpointException(reason, cause);
-			onCompletionPromise.completeExceptionally(exception);
-			reportFailedCheckpoint(exception);
-			assertAbortSubsumedForced(reason);
+			Exception cause = new Exception("Checkpoint expired before completing");
+			onCompletionPromise.completeExceptionally(cause);
+			reportFailedCheckpoint(cause);
 		} finally {
 			dispose(true);
 		}
 	}
 
 	/**
-	 * Aborts a checkpoint with reason and cause.
+	 * Aborts the pending checkpoint because a newer completed checkpoint subsumed it.
 	 */
-	public void abort(CheckpointFailureReason reason) {
-		abort(reason, null);
+	public void abortSubsumed() {
+		try {
+			Exception cause = new Exception("Checkpoints has been subsumed");
+			onCompletionPromise.completeExceptionally(cause);
+			reportFailedCheckpoint(cause);
+
+			if (props.forceCheckpoint()) {
+				throw new IllegalStateException("Bug: forced checkpoints must never be subsumed");
+			}
+		} finally {
+			dispose(true);
+		}
 	}
 
-	private void assertAbortSubsumedForced(CheckpointFailureReason reason) {
-		if (props.forceCheckpoint() && reason == CheckpointFailureReason.CHECKPOINT_SUBSUMED) {
-			throw new IllegalStateException("Bug: forced checkpoints must never be subsumed, " +
-				"the abort reason is : " + reason.message());
+	public void abortDeclined() {
+		try {
+			Exception cause = new Exception("Checkpoint was declined (tasks not ready)");
+			onCompletionPromise.completeExceptionally(cause);
+			reportFailedCheckpoint(cause);
+		} finally {
+			dispose(true);
+		}
+	}
+
+	/**
+	 * Aborts the pending checkpoint due to an error.
+	 * @param cause The error's exception.
+	 */
+	public void abortError(Throwable cause) {
+		try {
+			Exception failure = new Exception("Checkpoint failed: " + cause.getMessage(), cause);
+			onCompletionPromise.completeExceptionally(failure);
+			reportFailedCheckpoint(failure);
+		} finally {
+			dispose(true);
 		}
 	}
 
