@@ -64,7 +64,7 @@ public class YarnEntrypointUtils {
 	public static Configuration loadConfiguration(String workingDirectory, Map<String, String> env, Logger log) {
 		Configuration configuration = GlobalConfiguration.loadConfiguration(workingDirectory);
 
-		final String remoteKeytabPrincipal = env.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
+		final String keytabPrincipal = env.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
 
 		final String zooKeeperNamespace = env.get(YarnConfigKeys.ENV_ZOOKEEPER_NAMESPACE);
 
@@ -98,9 +98,9 @@ public class YarnEntrypointUtils {
 			configuration.setInteger(WebOptions.PORT, 0);
 		}
 
-		if (!configuration.contains(RestOptions.BIND_PORT)) {
+		if (configuration.getInteger(RestOptions.PORT) >= 0) {
 			// set the REST port to 0 to select it randomly
-			configuration.setString(RestOptions.BIND_PORT, "0");
+			configuration.setInteger(RestOptions.PORT, 0);
 		}
 
 		// if the user has set the deprecated YARN-specific config keys, we add the
@@ -117,16 +117,27 @@ public class YarnEntrypointUtils {
 
 		final String keytabPath;
 
-		if (env.get(YarnConfigKeys.KEYTAB_PATH) == null) {
+		if (env.get(YarnConfigKeys.LOCAL_KEYTAB_PATH) == null) { // keytab not exist
 			keytabPath = null;
 		} else {
-			File f = new File(workingDirectory, Utils.KEYTAB_FILE_NAME);
-			keytabPath = f.getAbsolutePath();
+			File f;
+			f = new File(env.get(YarnConfigKeys.LOCAL_KEYTAB_PATH));
+			if (f.exists()) { // keytab file exist in host environment.
+				keytabPath = f.getAbsolutePath();
+			} else {
+				f = new File(workingDirectory, env.get(YarnConfigKeys.LOCAL_KEYTAB_PATH));
+				if (f.exists()) { // keytab file exist in working directory.
+					keytabPath = f.getAbsolutePath();
+				} else { // fall back to default keytab file
+					f = new File(workingDirectory, Utils.DEFAULT_KEYTAB_FILE_NAME);
+					keytabPath = f.getAbsolutePath();
+				}
+			}
 		}
 
-		if (keytabPath != null && remoteKeytabPrincipal != null) {
+		if (keytabPath != null && keytabPrincipal != null) {
 			configuration.setString(SecurityOptions.KERBEROS_LOGIN_KEYTAB, keytabPath);
-			configuration.setString(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL, remoteKeytabPrincipal);
+			configuration.setString(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL, keytabPrincipal);
 		}
 
 		final String localDirs = env.get(ApplicationConstants.Environment.LOCAL_DIRS.key());

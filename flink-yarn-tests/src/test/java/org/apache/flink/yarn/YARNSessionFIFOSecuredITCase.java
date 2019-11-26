@@ -25,11 +25,9 @@ import org.apache.flink.runtime.security.SecurityUtils;
 import org.apache.flink.runtime.security.modules.HadoopModule;
 import org.apache.flink.test.util.SecureTestEnvironment;
 import org.apache.flink.test.util.TestingSecurityContext;
-
-import org.apache.flink.shaded.guava18.com.google.common.collect.Lists;
+import org.apache.flink.yarn.configuration.YarnConfigOptions;
 
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.security.AMRMTokenIdentifier;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.hamcrest.Matchers;
@@ -40,8 +38,10 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.Collections;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
@@ -68,9 +68,9 @@ public class YARNSessionFIFOSecuredITCase extends YARNSessionFIFOITCase {
 
 		Configuration flinkConfig = new Configuration();
 		flinkConfig.setString(SecurityOptions.KERBEROS_LOGIN_KEYTAB,
-				SecureTestEnvironment.getTestKeytab());
+			SecureTestEnvironment.getTestKeytab());
 		flinkConfig.setString(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL,
-				SecureTestEnvironment.getHadoopServicePrincipal());
+			SecureTestEnvironment.getHadoopServicePrincipal());
 
 		SecurityConfiguration securityConfig =
 			new SecurityConfiguration(
@@ -99,43 +99,62 @@ public class YARNSessionFIFOSecuredITCase extends YARNSessionFIFOITCase {
 	}
 
 	@AfterClass
-	public static void teardownSecureCluster() {
+	public static void teardownSecureCluster() throws Exception {
 		LOG.info("tearing down secure cluster environment");
 		SecureTestEnvironment.cleanup();
 	}
 
 	@Test(timeout = 60000) // timeout after a minute.
-	@Override
-	public void testDetachedMode() throws Exception {
-		runTest(() -> {
-			runDetachedModeTest();
-			final String[] mustHave = {"Login successful for user", "using keytab file"};
-			final boolean jobManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
-				mustHave,
-				"jobmanager.log");
-			final boolean taskManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
-				mustHave, "taskmanager.log");
+	public void testDetachedModeSecure() throws InterruptedException, IOException {
+		LOG.info("Starting testDetachedModeSecure()");
+		Map<String, String> securityProperties = new HashMap<>();
+		if (SecureTestEnvironment.getTestKeytab() != null) {
+			securityProperties.put(SecurityOptions.KERBEROS_LOGIN_KEYTAB.key(), SecureTestEnvironment.getTestKeytab());
+		}
+		if (SecureTestEnvironment.getHadoopServicePrincipal() != null) {
+			securityProperties.put(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL.key(), SecureTestEnvironment.getHadoopServicePrincipal());
+		}
+		testDetachedModeInternal(securityProperties);
+		final String[] mustHave = {"Login successful for user", "using keytab file"};
+		final boolean jobManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
+			mustHave,
+			"jobmanager.log");
+		final boolean taskManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
+			mustHave, "taskmanager.log");
 
-			Assert.assertThat(
-				"The JobManager and the TaskManager should both run with Kerberos.",
-				jobManagerRunsWithKerberos && taskManagerRunsWithKerberos,
-				Matchers.is(true));
+		Assert.assertThat(
+			"The JobManager and the TaskManager should both run with Kerberos.",
+			jobManagerRunsWithKerberos && taskManagerRunsWithKerberos,
+			Matchers.is(true));
+	}
 
-			final List<String> amRMTokens = Lists.newArrayList(AMRMTokenIdentifier.KIND_NAME.toString());
-			final String jobmanagerContainerId = getContainerIdByLogName("jobmanager.log");
-			final String taskmanagerContainerId = getContainerIdByLogName("taskmanager.log");
-			final boolean jobmanagerWithAmRmToken = verifyTokenKindInContainerCredentials(amRMTokens, jobmanagerContainerId);
-			final boolean taskmanagerWithAmRmToken = verifyTokenKindInContainerCredentials(amRMTokens, taskmanagerContainerId);
+	@Test(timeout = 60000) // timeout after a minute.
+	public void testDetachedModeSecureWithPreInstallKeytab() throws InterruptedException, IOException {
+		LOG.info("Starting testDetachedModeSecureWithPreInstallKeytab()");
+		Map<String, String> securityProperties = new HashMap<>();
+		if (SecureTestEnvironment.getTestKeytab() != null) {
+			// client login keytab
+			securityProperties.put(SecurityOptions.KERBEROS_LOGIN_KEYTAB.key(), SecureTestEnvironment.getTestKeytab());
+			// pre-install Yarn local keytab, since both reuse the same temporary folder "tmp"
+			securityProperties.put(YarnConfigOptions.LOCALIZED_KEYTAB_PATH.key(), SecureTestEnvironment.getTestKeytab());
+			// unset keytab localization
+			securityProperties.put(YarnConfigOptions.REQUIRE_LOCALIZE_KEYTAB.key(), "false");
+		}
+		if (SecureTestEnvironment.getHadoopServicePrincipal() != null) {
+			securityProperties.put(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL.key(), SecureTestEnvironment.getHadoopServicePrincipal());
+		}
+		testDetachedModeInternal(securityProperties);
+		final String[] mustHave = {"Login successful for user", "using keytab file"};
+		final boolean jobManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
+			mustHave,
+			"jobmanager.log");
+		final boolean taskManagerRunsWithKerberos = verifyStringsInNamedLogFiles(
+			mustHave, "taskmanager.log");
 
-			Assert.assertThat(
-				"The JobManager should have AMRMToken.",
-				jobmanagerWithAmRmToken,
-				Matchers.is(true));
-			Assert.assertThat(
-				"The TaskManager should not have AMRMToken.",
-				taskmanagerWithAmRmToken,
-				Matchers.is(false));
-		});
+		Assert.assertThat(
+			"The JobManager and the TaskManager should both run with Kerberos.",
+			jobManagerRunsWithKerberos && taskManagerRunsWithKerberos,
+			Matchers.is(true));
 	}
 
 	/* For secure cluster testing, it is enough to run only one test and override below test methods
