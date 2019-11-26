@@ -55,11 +55,14 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 
 	public static final String ARG_HOST = "host";
 	public static final String ARG_PORT = "port";
+	public static final String ARG_MAX_COMPONENT_LENGTH = "maxComponentLength";
 
 	private boolean closed = false;
 
 	private DatagramSocket socket;
 	private InetSocketAddress address;
+
+	private int maxComponentLength = 80;
 
 	@Override
 	public void open(MetricConfig config) {
@@ -77,7 +80,9 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 		} catch (SocketException e) {
 			throw new RuntimeException("Could not create datagram socket. ", e);
 		}
-		log.info("Configured StatsDReporter with {host:{}, port:{}}", host, port);
+		
+		maxComponentLength = config.getInteger(ARG_MAX_COMPONENT_LENGTH, 80);
+		log.info("Configured StatsDReporter with {host:{}, port:{}, maxComponentLength:{}}", host, port, maxComponentLength);
 	}
 
 	@Override
@@ -127,20 +132,14 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 	// ------------------------------------------------------------------------
 
 	private void reportCounter(final String name, final Counter counter) {
-		send(name, counter.getCount());
+		send(name, String.valueOf(counter.getCount()));
 	}
 
 	private void reportGauge(final String name, final Gauge<?> gauge) {
 		Object value = gauge.getValue();
-		if (value == null) {
-			return;
+		if (value != null) {
+			send(name, value.toString());
 		}
-
-		if (value instanceof Number) {
-			send(numberIsNegative((Number) value), name, value.toString());
-		}
-
-		send(name, value.toString());
 	}
 
 	private void reportHistogram(final String name, final Histogram histogram) {
@@ -149,25 +148,25 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 			HistogramStatistics statistics = histogram.getStatistics();
 
 			if (statistics != null) {
-				send(prefix(name, "count"), histogram.getCount());
-				send(prefix(name, "max"), statistics.getMax());
-				send(prefix(name, "min"), statistics.getMin());
-				send(prefix(name, "mean"), statistics.getMean());
-				send(prefix(name, "stddev"), statistics.getStdDev());
-				send(prefix(name, "p50"), statistics.getQuantile(0.5));
-				send(prefix(name, "p75"), statistics.getQuantile(0.75));
-				send(prefix(name, "p95"), statistics.getQuantile(0.95));
-				send(prefix(name, "p98"), statistics.getQuantile(0.98));
-				send(prefix(name, "p99"), statistics.getQuantile(0.99));
-				send(prefix(name, "p999"), statistics.getQuantile(0.999));
+				send(prefix(name, "count"), String.valueOf(histogram.getCount()));
+				send(prefix(name, "max"), String.valueOf(statistics.getMax()));
+				send(prefix(name, "min"), String.valueOf(statistics.getMin()));
+				send(prefix(name, "mean"), String.valueOf(statistics.getMean()));
+				send(prefix(name, "stddev"), String.valueOf(statistics.getStdDev()));
+				send(prefix(name, "p50"), String.valueOf(statistics.getQuantile(0.5)));
+				send(prefix(name, "p75"), String.valueOf(statistics.getQuantile(0.75)));
+				send(prefix(name, "p95"), String.valueOf(statistics.getQuantile(0.95)));
+				send(prefix(name, "p98"), String.valueOf(statistics.getQuantile(0.98)));
+				send(prefix(name, "p99"), String.valueOf(statistics.getQuantile(0.99)));
+				send(prefix(name, "p999"), String.valueOf(statistics.getQuantile(0.999)));
 			}
 		}
 	}
 
 	private void reportMeter(final String name, final Meter meter) {
 		if (meter != null) {
-			send(prefix(name, "rate"), meter.getRate());
-			send(prefix(name, "count"), meter.getCount());
+			send(prefix(name, "rate"), String.valueOf(meter.getRate()));
+			send(prefix(name, "count"), String.valueOf(meter.getCount()));
 		}
 	}
 
@@ -185,23 +184,6 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 		}
 	}
 
-	private void send(String name, double value) {
-		send(numberIsNegative(value), name, String.valueOf(value));
-	}
-
-	private void send(String name, long value) {
-		send(value < 0, name, String.valueOf(value));
-	}
-
-	private void send(boolean resetToZero, String name, String value) {
-		if (resetToZero) {
-			// negative values are interpreted as reductions instead of absolute values
-			// reset value to 0 before applying reduction as a workaround
-			send(name, "0");
-		}
-		send(name, value);
-	}
-
 	private void send(final String name, final String value) {
 		try {
 			String formatted = String.format("%s:%s|g", name, value);
@@ -216,7 +198,11 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 	@Override
 	public String filterCharacters(String input) {
 		char[] chars = null;
-		final int strLen = input.length();
+		int strLen = input.length();
+		if (strLen > maxComponentLength) {
+			log.warn("The metric name component {} exceeded the {} characters length limit and was truncated.", input, maxComponentLength);
+			strLen = maxComponentLength;
+		}
 		int pos = 0;
 
 		for (int i = 0; i < strLen; i++) {
@@ -238,9 +224,5 @@ public class StatsDReporter extends AbstractReporter implements Scheduled {
 		}
 
 		return chars == null ? input : new String(chars, 0, pos);
-	}
-
-	private boolean numberIsNegative(Number input) {
-		return Double.compare(input.doubleValue(), 0) < 0;
 	}
 }
