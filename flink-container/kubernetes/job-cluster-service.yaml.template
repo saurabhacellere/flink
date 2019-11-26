@@ -16,20 +16,26 @@
 # limitations under the License.
 ################################################################################
 
-apiVersion: extensions/v1beta1
-kind: Deployment
+apiVersion: v1
+kind: Service
 metadata:
-  name: ${FLINK_APPLICATION_NAME}-task-manager
+  name: ${FLINK_APPLICATION_NAME}-master
+  labels:
+    app: ${FLINK_APPLICATION_NAME}
+    component: master
 spec:
-  replicas: ${FLINK_JOB_PARALLELISM}
-  template:
-    metadata:
-      labels:
-        app: ${FLINK_APPLICATION_NAME}
-        component: task-manager
-    spec:
-      containers:
-      - name: flink-task-manager
-        image: ${FLINK_IMAGE_NAME}
-        imagePullPolicy: IfNotPresent
-        args: ["task-manager", "-Djobmanager.rpc.address=${FLINK_APPLICATION_NAME}-master"]
+  ports:
+  - name: rpc
+    port: 6123
+  - name: blob
+    port: 6124
+  - name: query
+    port: 6125
+    nodePort: 30025
+  - name: ui
+    port: 8081
+    nodePort: 30081
+  type: NodePort
+  selector:
+    app: ${FLINK_APPLICATION_NAME}
+    component: master
