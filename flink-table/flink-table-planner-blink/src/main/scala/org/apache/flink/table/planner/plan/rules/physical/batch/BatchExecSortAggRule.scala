@@ -22,9 +22,10 @@ import org.apache.flink.table.planner.calcite.FlinkContext
 import org.apache.flink.table.planner.plan.`trait`.FlinkRelDistribution
 import org.apache.flink.table.planner.plan.nodes.FlinkConventions
 import org.apache.flink.table.planner.plan.nodes.logical.FlinkLogicalAggregate
-import org.apache.flink.table.planner.plan.nodes.physical.batch.BatchExecSortAggregate
+import org.apache.flink.table.planner.plan.nodes.physical.batch.{BatchExecLocalSortAggregate, BatchExecSortAggregate}
 import org.apache.flink.table.planner.plan.utils.{AggregateUtil, OperatorType}
 import org.apache.flink.table.planner.utils.TableConfigUtils.isOperatorDisabled
+import org.apache.flink.table.runtime.types.LogicalTypeDataTypeConverter.fromDataTypeToLogicalType
 
 import org.apache.calcite.plan.RelOptRule.{any, operand}
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall}
@@ -64,12 +65,12 @@ class BatchExecSortAggRule
   with BatchExecAggRuleBase {
 
   override def matches(call: RelOptRuleCall): Boolean = {
-    val tableConfig = call.getPlanner.getContext.asInstanceOf[FlinkContext].getTableConfig
+    val tableConfig = call.getPlanner.getContext.unwrap(classOf[FlinkContext]).getTableConfig
     !isOperatorDisabled(tableConfig, OperatorType.SortAgg)
   }
 
   override def onMatch(call: RelOptRuleCall): Unit = {
-    val tableConfig = call.getPlanner.getContext.asInstanceOf[FlinkContext].getTableConfig
+    val tableConfig = call.getPlanner.getContext.unwrap(classOf[FlinkContext]).getTableConfig
     val agg: FlinkLogicalAggregate = call.rel(0)
     val input: RelNode = call.rel(1)
     val inputRowType = input.getRowType
@@ -89,6 +90,13 @@ class BatchExecSortAggRule
 
     // create two-phase agg if possible
     if (isTwoPhaseAggWorkable(aggFunctions, tableConfig)) {
+      val localAggRelType = inferLocalAggType(
+        inputRowType,
+        agg,
+        groupSet,
+        auxGroupSet,
+        aggFunctions,
+        aggBufferTypes.map(_.map(fromDataTypeToLogicalType)))
       // create BatchExecLocalSortAggregate
       var localRequiredTraitSet = input.getTraitSet.replace(FlinkConventions.BATCH_PHYSICAL)
       if (agg.getGroupCount != 0) {
@@ -97,21 +105,20 @@ class BatchExecSortAggRule
       }
       val newLocalInput = RelOptRule.convert(input, localRequiredTraitSet)
       val providedLocalTraitSet = localRequiredTraitSet
-
-      val localSortAgg = createLocalAgg(
+      val localSortAgg = new BatchExecLocalSortAggregate(
         agg.getCluster,
         call.builder(),
         providedLocalTraitSet,
         newLocalInput,
-        agg.getRowType,
+        localAggRelType,
+        newLocalInput.getRowType,
         groupSet,
         auxGroupSet,
-        aggBufferTypes,
-        aggCallToAggFunction,
-        isLocalHashAgg = false)
+        aggCallToAggFunction)
 
       // create global BatchExecSortAggregate
-      val (globalGroupSet, globalAuxGroupSet) = getGlobalAggGroupSetPair(groupSet, auxGroupSet)
+      val globalGroupSet = groupSet.indices.toArray
+      val globalAuxGroupSet = (groupSet.length until groupSet.length + auxGroupSet.length).toArray
       val (globalDistributions, globalCollation) = if (agg.getGroupCount != 0) {
         // global agg should use groupSet's indices as distribution fields
         val distributionFields = globalGroupSet.map(Integer.valueOf).toList
