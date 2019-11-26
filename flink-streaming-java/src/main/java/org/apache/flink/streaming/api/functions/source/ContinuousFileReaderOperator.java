@@ -39,6 +39,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -69,6 +70,7 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 
 	private FileInputFormat<OUT> format;
 	private TypeSerializer<OUT> serializer;
+	private FileMissingSplitsMode missingSplitsMode;
 
 	private transient Object checkpointLock;
 
@@ -80,6 +82,12 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 
 	public ContinuousFileReaderOperator(FileInputFormat<OUT> format) {
 		this.format = checkNotNull(format);
+		this.missingSplitsMode = FileMissingSplitsMode.FAIL_ON_MISSING_SPLITS;
+	}
+
+	public ContinuousFileReaderOperator(FileInputFormat<OUT> format, FileMissingSplitsMode missingSplitsMode) {
+		this.format = checkNotNull(format);
+		this.missingSplitsMode = checkNotNull(missingSplitsMode);
 	}
 
 	@Override
@@ -304,15 +312,26 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 							}
 						}
 
-						if (this.format instanceof CheckpointableInputFormat && currentSplit.getSplitState() != null) {
-							// recovering after a node failure with an input
-							// format that supports resetting the offset
-							((CheckpointableInputFormat<TimestampedFileInputSplit, Serializable>) this.format).
-								reopen(currentSplit, currentSplit.getSplitState());
-						} else {
-							// we either have a new split, or we recovered from a node
-							// failure but the input format does not support resetting the offset.
-							this.format.open(currentSplit);
+						try {
+							if (this.format instanceof CheckpointableInputFormat && currentSplit.getSplitState() != null) {
+								// recovering after a node failure with an input
+								// format that supports resetting the offset
+								((CheckpointableInputFormat<TimestampedFileInputSplit, Serializable>) this.format).
+									reopen(currentSplit, currentSplit.getSplitState());
+							} else {
+								// we either have a new split, or we recovered from a node
+								// failure but the input format does not support resetting the offset.
+								this.format.open(currentSplit);
+							}
+						} catch (FileNotFoundException e) {
+							if (missingSplitsMode.equals(FileMissingSplitsMode.SKIP_MISSING_SPLITS)) {
+								LOG.warn("Input split {} doesn't exist, since FileMissingSplitsMode " +
+									"is SKIP_MISSING_SPLITS, ignore the exception and continue", this.currentSplit.getPath());
+							}
+							else {
+								getContainingTask().handleAsyncException("File Not Found: " + currentSplit, e);
+								throw new FileNotFoundException("File Not Found: " + currentSplit);
+							}
 						}
 
 						// reset the restored state to null for the next iteration
