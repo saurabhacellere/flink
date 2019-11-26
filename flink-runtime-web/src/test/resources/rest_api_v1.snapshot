@@ -1302,10 +1302,7 @@
       } ]
     },
     "query-parameters" : {
-      "queryParameters" : [ {
-        "key" : "maxExceptions",
-        "mandatory" : false
-      } ]
+      "queryParameters" : [ ]
     },
     "request" : {
       "type" : "any"
@@ -1518,6 +1515,9 @@
         },
         "cancel-job" : {
           "type" : "boolean"
+        },
+        "timeout" : {
+          "type" : "integer"
         }
       }
     },
@@ -1590,6 +1590,9 @@
         },
         "drain" : {
           "type" : "boolean"
+        },
+        "timeout" : {
+          "type" : "integer"
         }
       }
     },

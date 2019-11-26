@@ -22,49 +22,24 @@ import org.apache.flink.util.Preconditions;
 
 import org.apache.commons.cli.CommandLine;
 
-import static org.apache.flink.client.cli.CliFrontendParser.CANCEL_WITH_SAVEPOINT_OPTION;
 import static org.apache.flink.client.cli.CliFrontendParser.SAVEPOINT_TIMEOUT_OPTION;
 
 /**
- * Command line options for the CANCEL command.
+ * Command line options for the RUN command.
  */
-public class CancelOptions extends CommandLineOptions {
+public class RunOptions extends ProgramOptions {
 
-	private final String[] args;
-
-	/** Flag indicating whether to cancel with a savepoint. */
-	private final boolean withSavepoint;
-
-	/** Optional target directory for the savepoint. Overwrites cluster default. */
-	private final String targetDirectory;
-
-	/** Optional timeout for the savepoint. */
 	private final long savepointTimeout;
 
-	public CancelOptions(CommandLine line) {
+	public RunOptions(CommandLine line) throws CliArgsException {
 		super(line);
-		this.args = line.getArgs();
-		this.withSavepoint = line.hasOption(CANCEL_WITH_SAVEPOINT_OPTION.getOpt());
-		this.targetDirectory = line.getOptionValue(CANCEL_WITH_SAVEPOINT_OPTION.getOpt());
-		if (this.withSavepoint && line.hasOption(SAVEPOINT_TIMEOUT_OPTION.getOpt())) {
+		if (getSavepointRestoreSettings().restoreSavepoint() && line.hasOption(SAVEPOINT_TIMEOUT_OPTION.getOpt())) {
 			this.savepointTimeout = Long.parseLong(line.getOptionValue(SAVEPOINT_TIMEOUT_OPTION.getOpt()));
 			Preconditions.checkArgument(savepointTimeout == -1L || savepointTimeout >= 1L,
 				"Checkpoint timeout must be larger than zero or equal to -1.");
 		} else {
 			this.savepointTimeout = -1L;
 		}
-	}
-
-	public String[] getArgs() {
-		return args == null ? new String[0] : args;
-	}
-
-	public boolean isWithSavepoint() {
-		return withSavepoint;
-	}
-
-	public String getSavepointTargetDirectory() {
-		return targetDirectory;
 	}
 
 	public long getSavepointTimeout() {

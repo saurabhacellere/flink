@@ -38,9 +38,8 @@ import org.apache.flink.runtime.heartbeat.HeartbeatListener;
 import org.apache.flink.runtime.heartbeat.HeartbeatManager;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.HeartbeatTarget;
-import org.apache.flink.runtime.heartbeat.NoOpHeartbeatManager;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.io.network.partition.JobMasterPartitionTracker;
+import org.apache.flink.runtime.io.network.partition.PartitionTracker;
 import org.apache.flink.runtime.io.network.partition.PartitionTrackerFactory;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
@@ -198,7 +197,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 
 	private Map<String, Object> accumulators;
 
-	private final JobMasterPartitionTracker partitionTracker;
+	private final PartitionTracker partitionTracker;
 
 	// ------------------------------------------------------------------------
 
@@ -220,7 +219,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 			ShuffleMaster<?> shuffleMaster,
 			PartitionTrackerFactory partitionTrackerFactory) throws Exception {
 
-		super(rpcService, AkkaRpcServiceUtils.createRandomName(JOB_MANAGER_NAME), null);
+		super(rpcService, AkkaRpcServiceUtils.createRandomName(JOB_MANAGER_NAME));
 
 		this.jobMasterConfiguration = checkNotNull(jobMasterConfiguration);
 		this.resourceId = checkNotNull(resourceId);
@@ -270,8 +269,6 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		this.establishedResourceManagerConnection = null;
 
 		this.accumulators = new HashMap<>();
-		this.taskManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
-		this.resourceManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
 	}
 
 	private SchedulerNG createScheduler(final JobManagerJobMetricGroup jobManagerJobMetricGroup) throws Exception {
@@ -636,18 +633,20 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	public CompletableFuture<String> triggerSavepoint(
 			@Nullable final String targetDirectory,
 			final boolean cancelJob,
-			final Time timeout) {
+			final Time timeout,
+			final long savepointTimeout) {
 
-		return schedulerNG.triggerSavepoint(targetDirectory, cancelJob);
+		return schedulerNG.triggerSavepoint(targetDirectory, cancelJob, savepointTimeout);
 	}
 
 	@Override
 	public CompletableFuture<String> stopWithSavepoint(
 			@Nullable final String targetDirectory,
 			final boolean advanceToEndOfEventTime,
-			final Time timeout) {
+			final Time timeout,
+			final long savepointTimeout) {
 
-		return schedulerNG.stopWithSavepoint(targetDirectory, advanceToEndOfEventTime);
+		return schedulerNG.stopWithSavepoint(targetDirectory, advanceToEndOfEventTime, savepointTimeout);
 	}
 
 	@Override
@@ -788,8 +787,15 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	}
 
 	private void stopHeartbeatServices() {
-		taskManagerHeartbeatManager.stop();
-		resourceManagerHeartbeatManager.stop();
+		if (taskManagerHeartbeatManager != null) {
+			taskManagerHeartbeatManager.stop();
+			taskManagerHeartbeatManager = null;
+		}
+
+		if (resourceManagerHeartbeatManager != null) {
+			resourceManagerHeartbeatManager.stop();
+			resourceManagerHeartbeatManager = null;
+		}
 	}
 
 	private void startHeartbeatServices() {
@@ -893,9 +899,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 
 		if (newJobStatus.isGloballyTerminalState()) {
 			runAsync(() -> registeredTaskManagers.keySet()
-				.forEach(newJobStatus == JobStatus.FINISHED
-					? partitionTracker::stopTrackingAndReleaseOrPromotePartitionsFor
-					: partitionTracker::stopTrackingAndReleasePartitionsFor));
+				.forEach(partitionTracker::stopTrackingAndReleasePartitionsFor));
 
 			final ArchivedExecutionGraph archivedExecutionGraph = schedulerNG.requestJob();
 			scheduledExecutorService.execute(() -> jobCompletionActions.jobReachedGloballyTerminalState(archivedExecutionGraph));
