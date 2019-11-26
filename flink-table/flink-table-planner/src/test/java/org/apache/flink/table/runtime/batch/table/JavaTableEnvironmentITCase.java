@@ -28,11 +28,10 @@ import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.tuple.Tuple5;
 import org.apache.flink.api.java.typeutils.GenericTypeInfo;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
-import org.apache.flink.table.api.PlannerConfig;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableException;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.java.BatchTableEnvironment;
+import org.apache.flink.table.calcite.CalciteConfig;
 import org.apache.flink.table.calcite.CalciteConfigBuilder;
 import org.apache.flink.table.runtime.utils.TableProgramsCollectionTestBase;
 import org.apache.flink.table.runtime.utils.TableProgramsTestBase;
@@ -71,28 +70,6 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		});
 	}
 
-	@Test(expected = ValidationException.class)
-	public void testIllegalEmptyName() throws Exception {
-		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
-		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
-
-		DataSet<Tuple3<Integer, Long, String>> ds = CollectionDataSets.get3TupleDataSet(env);
-		Table t = tableEnv.fromDataSet(ds);
-		// Must fail. Table is empty
-		tableEnv.registerTable("", t);
-	}
-
-	@Test(expected = ValidationException.class)
-	public void testIllegalWhitespaceOnlyName() throws Exception {
-		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
-		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
-
-		DataSet<Tuple3<Integer, Long, String>> ds = CollectionDataSets.get3TupleDataSet(env);
-		Table t = tableEnv.fromDataSet(ds);
-		// Must fail. Table is empty
-		tableEnv.registerTable("     ", t);
-	}
-
 	@Test
 	public void testSimpleRegister() throws Exception {
 		final String tableName = "MyTable";
@@ -107,9 +84,9 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<Row> resultSet = tableEnv.toDataSet(result, Row.class);
 		List<Row> results = resultSet.collect();
-		String expected = "1,1\n" + "2,2\n" + "3,2\n" + "4,3\n" + "5,3\n" + "6,3\n" + "7,4\n" +
-				"8,4\n" + "9,4\n" + "10,4\n" + "11,5\n" + "12,5\n" + "13,5\n" + "14,5\n" + "15,5\n" +
-				"16,6\n" + "17,6\n" + "18,6\n" + "19,6\n" + "20,6\n" + "21,6\n";
+		String expected = "(1,1)\n" + "(2,2)\n" + "(3,2)\n" + "(4,3)\n" + "(5,3)\n" + "(6,3)\n" + "(7,4)\n" +
+				"(8,4)\n" + "(9,4)\n" + "(10,4)\n" + "(11,5)\n" + "(12,5)\n" + "(13,5)\n" + "(14,5)\n" + "(15,5)\n" +
+				"(16,6)\n" + "(17,6)\n" + "(18,6)\n" + "(19,6)\n" + "(20,6)\n" + "(21,6)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -127,17 +104,17 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<Row> resultSet = tableEnv.toDataSet(result, Row.class);
 		List<Row> results = resultSet.collect();
-		String expected = "1,1,Hi\n" + "2,2,Hello\n" + "3,2,Hello world\n" +
-				"4,3,Hello world, how are you?\n" + "5,3,I am fine.\n" + "6,3,Luke Skywalker\n" +
-				"7,4,Comment#1\n" + "8,4,Comment#2\n" + "9,4,Comment#3\n" + "10,4,Comment#4\n" +
-				"11,5,Comment#5\n" + "12,5,Comment#6\n" + "13,5,Comment#7\n" +
-				"14,5,Comment#8\n" + "15,5,Comment#9\n" + "16,6,Comment#10\n" +
-				"17,6,Comment#11\n" + "18,6,Comment#12\n" + "19,6,Comment#13\n" +
-				"20,6,Comment#14\n" + "21,6,Comment#15\n";
+		String expected = "(1,1,Hi)\n" + "(2,2,Hello)\n" + "(3,2,Hello world)\n" +
+				"(4,3,Hello world, how are you?)\n" + "(5,3,I am fine.)\n" + "(6,3,Luke Skywalker)\n" +
+				"(7,4,Comment#1)\n" + "(8,4,Comment#2)\n" + "(9,4,Comment#3)\n" + "(10,4,Comment#4)\n" +
+				"(11,5,Comment#5)\n" + "(12,5,Comment#6)\n" + "(13,5,Comment#7)\n" +
+				"(14,5,Comment#8)\n" + "(15,5,Comment#9)\n" + "(16,6,Comment#10)\n" +
+				"(17,6,Comment#11)\n" + "(18,6,Comment#12)\n" + "(19,6,Comment#13)\n" +
+				"(20,6,Comment#14)\n" + "(21,6,Comment#15)\n";
 		compareResultAsText(results, expected);
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testRegisterExistingDatasetTable() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -172,10 +149,21 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<Row> resultSet = tableEnv.toDataSet(result, Row.class);
 		List<Row> results = resultSet.collect();
-		String expected = "8,4\n" + "9,4\n" + "10,4\n" + "11,5\n" + "12,5\n" +
-				"13,5\n" + "14,5\n" + "15,5\n" +
-				"16,6\n" + "17,6\n" + "18,6\n" + "19,6\n" + "20,6\n" + "21,6\n";
+		String expected = "(8,4)\n" + "(9,4)\n" + "(10,4)\n" + "(11,5)\n" + "(12,5)\n" +
+				"(13,5)\n" + "(14,5)\n" + "(15,5)\n" +
+				"(16,6)\n" + "(17,6)\n" + "(18,6)\n" + "(19,6)\n" + "(20,6)\n" + "(21,6)\n";
 		compareResultAsText(results, expected);
+	}
+
+	@Test(expected = TableException.class)
+	public void testIllegalName() throws Exception {
+		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
+
+		DataSet<Tuple3<Integer, Long, String>> ds = CollectionDataSets.get3TupleDataSet(env);
+		Table t = tableEnv.fromDataSet(ds);
+		// Must fail. Table name matches internal name pattern.
+		tableEnv.registerTable("_DataSetTable_42", t);
 	}
 
 	@Test(expected = TableException.class)
@@ -200,13 +188,13 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
-		String expected = "1,1,Hi\n" + "2,2,Hello\n" + "3,2,Hello world\n" +
-			"4,3,Hello world, how are you?\n" + "5,3,I am fine.\n" + "6,3,Luke Skywalker\n" +
-			"7,4,Comment#1\n" + "8,4,Comment#2\n" + "9,4,Comment#3\n" + "10,4,Comment#4\n" +
-			"11,5,Comment#5\n" + "12,5,Comment#6\n" + "13,5,Comment#7\n" +
-			"14,5,Comment#8\n" + "15,5,Comment#9\n" + "16,6,Comment#10\n" +
-			"17,6,Comment#11\n" + "18,6,Comment#12\n" + "19,6,Comment#13\n" +
-			"20,6,Comment#14\n" + "21,6,Comment#15\n";
+		String expected = "(1,1,Hi)\n" + "(2,2,Hello)\n" + "(3,2,Hello world)\n" +
+			"(4,3,Hello world, how are you?)\n" + "(5,3,I am fine.)\n" + "(6,3,Luke Skywalker)\n" +
+			"(7,4,Comment#1)\n" + "(8,4,Comment#2)\n" + "(9,4,Comment#3)\n" + "(10,4,Comment#4)\n" +
+			"(11,5,Comment#5)\n" + "(12,5,Comment#6)\n" + "(13,5,Comment#7)\n" +
+			"(14,5,Comment#8)\n" + "(15,5,Comment#9)\n" + "(16,6,Comment#10)\n" +
+			"(17,6,Comment#11)\n" + "(18,6,Comment#12)\n" + "(19,6,Comment#13)\n" +
+			"(20,6,Comment#14)\n" + "(21,6,Comment#15)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -219,13 +207,13 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
-		String expected = "Hi\n" + "Hello\n" + "Hello world\n" +
-			"Hello world, how are you?\n" + "I am fine.\n" + "Luke Skywalker\n" +
-			"Comment#1\n" + "Comment#2\n" + "Comment#3\n" + "Comment#4\n" +
-			"Comment#5\n" + "Comment#6\n" + "Comment#7\n" +
-			"Comment#8\n" + "Comment#9\n" + "Comment#10\n" +
-			"Comment#11\n" + "Comment#12\n" + "Comment#13\n" +
-			"Comment#14\n" + "Comment#15\n";
+		String expected = "(Hi)\n" + "(Hello)\n" + "(Hello world)\n" +
+			"(Hello world, how are you?)\n" + "(I am fine.)\n" + "(Luke Skywalker)\n" +
+			"(Comment#1)\n" + "(Comment#2)\n" + "(Comment#3)\n" + "(Comment#4)\n" +
+			"(Comment#5)\n" + "(Comment#6)\n" + "(Comment#7)\n" +
+			"(Comment#8)\n" + "(Comment#9)\n" + "(Comment#10)\n" +
+			"(Comment#11)\n" + "(Comment#12)\n" + "(Comment#13)\n" +
+			"(Comment#14)\n" + "(Comment#15)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -272,7 +260,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 
 		DataSet<SmallPojo2> ds = tableEnv.toDataSet(table, SmallPojo2.class);
 		List<SmallPojo2> results = ds.collect();
-		String expected = "Rofl,1,1.0,Hi\n" + "lol,2,1.0,Hi\n" + "Test me,4,3.33,Hello world\n";
+		String expected = "(Rofl,1,1.0,Hi)\n" + "(lol,2,1.0,Hi)\n" + "(Test me,4,3.33,Hello world)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -298,9 +286,9 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
 		String expected =
-			"Sales,28,4000.0,Peter,[42]\n" +
-			"Engineering,56,10000.0,Anna,[]\n" +
-			"HR,42,6000.0,Lucy,[1, 2, 3]\n";
+			"(Sales,28,4000.0,Peter,[42])\n" +
+			"(Engineering,56,10000.0,Anna,[])\n" +
+			"(HR,42,6000.0,Lucy,[1, 2, 3])\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -326,9 +314,9 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
 		String expected =
-			"Left(Hello)\n" +
-			"Left(World)\n" +
-			"Right(42)\n";
+			"(Left(Hello))\n" +
+			"(Left(World))\n" +
+			"(Right(42))\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -349,9 +337,9 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
 		String expected =
-			"Peter\n" +
-			"Anna\n" +
-			"Lucy\n";
+			"(Peter)\n" +
+			"(Anna)\n" +
+			"(Lucy)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -376,9 +364,9 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
 		String expected =
-			"Sales,28,4000.0,Peter\n" +
-			"Engineering,56,10000.0,Anna\n" +
-			"HR,42,6000.0,Lucy\n";
+			"(Sales,28,4000.0,Peter)\n" +
+			"(Engineering,56,10000.0,Anna)\n" +
+			"(HR,42,6000.0,Lucy)\n";
 		compareResultAsText(results, expected);
 	}
 
@@ -463,13 +451,13 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		DataSet<Row> ds = tableEnv.toDataSet(table, Row.class);
 		List<Row> results = ds.collect();
 		String expected =
-			"Peter,28,{},true,[]\n" +
-			"Anna,56,{test1=test1},true,[]\n" +
-			"Lucy,42,{abc=cde},true,[]\n";
+			"(Peter,28,{},true,[])\n" +
+			"(Anna,56,{test1=test1},true,[])\n" +
+			"(Lucy,42,{abc=cde},true,[])\n";
 		compareResultAsText(results, expected);
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testGenericRow() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -483,7 +471,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(dataSet);
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testGenericRowWithAlias() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -497,8 +485,8 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(dataSet, "nullField");
 	}
 
-	@Test(expected = ValidationException.class)
-	public void testAsWithTooManyFields() throws Exception {
+	@Test(expected = TableException.class)
+	public void testAsWithToManyFields() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
 
@@ -506,7 +494,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(CollectionDataSets.get3TupleDataSet(env), "a, b, c, d");
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testAsWithAmbiguousFields() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -515,7 +503,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(CollectionDataSets.get3TupleDataSet(env), "a, b, b");
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testAsWithNonFieldReference1() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -524,7 +512,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(CollectionDataSets.get3TupleDataSet(env), "a + 1, b, c");
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testAsWithNonFieldReference2() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -533,7 +521,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(CollectionDataSets.get3TupleDataSet(env), "a as foo, b,  c");
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testNonStaticClassInput() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -542,7 +530,7 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		tableEnv.fromDataSet(env.fromElements(new MyNonStatic()), "name");
 	}
 
-	@Test(expected = ValidationException.class)
+	@Test(expected = TableException.class)
 	public void testNonStaticClassOutput() throws Exception {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
@@ -557,11 +545,11 @@ public class JavaTableEnvironmentITCase extends TableProgramsCollectionTestBase 
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		BatchTableEnvironment tableEnv = BatchTableEnvironment.create(env, config());
 
-		PlannerConfig cc = new CalciteConfigBuilder()
+		CalciteConfig cc = new CalciteConfigBuilder()
 				.replaceLogicalOptRuleSet(RuleSets.ofList())
 				.replacePhysicalOptRuleSet(RuleSets.ofList())
 				.build();
-		tableEnv.getConfig().setPlannerConfig(cc);
+		tableEnv.getConfig().setCalciteConfig(cc);
 
 		DataSet<Tuple3<Integer, Long, String>> ds = CollectionDataSets.get3TupleDataSet(env);
 		Table t = tableEnv.fromDataSet(ds);

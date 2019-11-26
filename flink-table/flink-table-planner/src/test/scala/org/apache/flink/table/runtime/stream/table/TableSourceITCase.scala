@@ -30,7 +30,7 @@ import org.apache.flink.streaming.api.environment.{StreamExecutionEnvironment =>
 import org.apache.flink.streaming.api.functions.ProcessFunction
 import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
 import org.apache.flink.table.api.scala._
-import org.apache.flink.table.api.{TableException, TableSchema, Tumble, Types}
+import org.apache.flink.table.api.{TableException, TableSchema, Types}
 import org.apache.flink.table.runtime.utils.{CommonTestData, StreamITCase}
 import org.apache.flink.table.sources.StreamTableSource
 import org.apache.flink.table.utils._
@@ -75,31 +75,6 @@ class TableSourceITCase extends AbstractTestBase {
   }
 
   @Test
-  def testUnregisteredCsvTableSource(): Unit = {
-
-    val csvTable = CommonTestData.getCsvTableSource
-    StreamITCase.testResults = mutable.MutableList()
-
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    val tEnv = StreamTableEnvironment.create(env)
-
-    tEnv.fromTableSource(csvTable)
-      .where('id > 4)
-      .select('last, 'score * 2)
-      .toAppendStream[Row]
-      .addSink(new StreamITCase.StringSink[Row])
-
-    env.execute()
-
-    val expected = Seq(
-      "Williams,69.0",
-      "Miller,13.56",
-      "Smith,180.2",
-      "Williams,4.68")
-    assertEquals(expected.sorted, StreamITCase.testResults.sorted)
-  }
-
-  @Test
   def testCsvTableSource(): Unit = {
 
     val csvTable = CommonTestData.getCsvTableSource
@@ -118,10 +93,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Williams,69.0",
-      "Miller,13.56",
-      "Smith,180.2",
-      "Williams,4.68")
+      "(Williams,69.0)",
+      "(Miller,13.56)",
+      "(Smith,180.2)",
+      "(Williams,4.68)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -139,7 +114,7 @@ class TableSourceITCase extends AbstractTestBase {
 
     env.execute()
 
-    val expected = Seq("5,Record_5", "6,Record_6", "7,Record_7", "8,Record_8")
+    val expected = Seq("(5,Record_5)", "(6,Record_6)", "(7,Record_7)", "(8,Record_8)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -174,9 +149,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -212,10 +187,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,10",
-      "Bob,20",
-      "Mary,30",
-      "Liz,40")
+      "(Mary,10)",
+      "(Bob,20)",
+      "(Mary,30)",
+      "(Liz,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -252,9 +227,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -289,9 +264,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -319,9 +294,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.0,3",
-      "1970-01-01 00:00:02.0,1",
-      "1970-01-01 00:00:04.0,1")
+      "(1970-01-01 00:00:00.0,3)",
+      "(1970-01-01 00:00:02.0,1)",
+      "(1970-01-01 00:00:04.0,1)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -354,10 +329,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.0,1",
-      "1970-01-01 00:00:01.0,2",
-      "1970-01-01 00:00:02.0,1",
-      "1970-01-01 00:00:04.0,1")
+      "(1970-01-01 00:00:00.0,1)",
+      "(1970-01-01 00:00:01.0,2)",
+      "(1970-01-01 00:00:02.0,1)",
+      "(1970-01-01 00:00:04.0,1)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -383,7 +358,7 @@ class TableSourceITCase extends AbstractTestBase {
       .addSink(new StreamITCase.StringSink[Row])
     env.execute()
 
-    val expected = Seq("Mary", "Peter", "Bob", "Liz")
+    val expected = Seq("(Mary)", "(Peter)", "(Bob)", "(Liz)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -414,9 +389,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.0,3",
-      "1970-01-01 00:00:02.0,1",
-      "1970-01-01 00:00:04.0,1")
+      "(1970-01-01 00:00:00.0,3)",
+      "(1970-01-01 00:00:02.0,1)",
+      "(1970-01-01 00:00:04.0,1)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -451,9 +426,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -488,10 +463,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,10,1",
-      "Bob,20,2",
-      "Mike,30,3",
-      "Liz,40,4")
+      "(Mary,10,1)",
+      "(Bob,20,2)",
+      "(Mike,30,3)",
+      "(Liz,40,4)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -526,10 +501,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.001,Mary,1",
-      "1970-01-01 00:00:00.002,Bob,2",
-      "1970-01-01 00:00:00.002,Mike,3",
-      "1970-01-01 00:00:02.001,Liz,4")
+      "(1970-01-01 00:00:00.001,Mary,1)",
+      "(1970-01-01 00:00:00.002,Bob,2)",
+      "(1970-01-01 00:00:00.002,Mike,3)",
+      "(1970-01-01 00:00:02.001,Liz,4)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -565,10 +540,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1",
-      "Bob,2",
-      "Mike,3",
-      "Liz,4")
+      "(Mary,1)",
+      "(Bob,2)",
+      "(Mike,3)",
+      "(Liz,4)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -602,7 +577,7 @@ class TableSourceITCase extends AbstractTestBase {
       .addSink(new StreamITCase.StringSink[Row])
     env.execute()
 
-    val expected = Seq("4")
+    val expected = Seq("(4)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -636,10 +611,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.001",
-      "1970-01-01 00:00:00.002",
-      "1970-01-01 00:00:00.002",
-      "1970-01-01 00:00:02.001")
+      "(1970-01-01 00:00:00.001)",
+      "(1970-01-01 00:00:00.002)",
+      "(1970-01-01 00:00:00.002)",
+      "(1970-01-01 00:00:02.001)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -675,10 +650,10 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.001,10",
-      "Bob,1970-01-01 00:00:00.002,20",
-      "Mike,1970-01-01 00:00:00.002,30",
-      "Liz,1970-01-01 00:00:02.001,40")
+      "(Mary,1970-01-01 00:00:00.001,10)",
+      "(Bob,1970-01-01 00:00:00.002,20)",
+      "(Mike,1970-01-01 00:00:00.002,30)",
+      "(Liz,1970-01-01 00:00:02.001,40)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -748,9 +723,9 @@ class TableSourceITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "1,Sarah,10000,true,1000",
-      "2,Rob,20000,false,2000",
-      "3,Mike,30000,true,3000")
+      "(1,Sarah,10000,true,1000)",
+      "(2,Rob,20000,false,2000)",
+      "(3,Mike,30000,true,3000)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 
@@ -799,7 +774,7 @@ class TableSourceITCase extends AbstractTestBase {
       .addSink(new StreamITCase.StringSink[(Row, Long)])
     env.execute()
 
-    val expected = Seq("(1,A,1)", "(6,C,10)", "(6,D,20)")
+    val expected = Seq("((1,A),1)", "((6,C),10)", "((6,D),20)")
     assertEquals(expected.sorted, StreamITCase.testResults.sorted)
   }
 

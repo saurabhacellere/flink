@@ -27,12 +27,12 @@ import org.apache.flink.api.java.tuple.{Tuple2 => JTuple2}
 import org.apache.flink.api.java.typeutils.RowTypeInfo
 import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.datastream.{DataStream, DataStreamSink}
+import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.functions.ProcessFunction
 import org.apache.flink.streaming.api.functions.sink.SinkFunction
 import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
 import org.apache.flink.table.api.scala._
-import org.apache.flink.table.api.{TableException, Tumble, Types}
+import org.apache.flink.table.api.{TableException, Types}
 import org.apache.flink.table.runtime.utils.{StreamITCase, StreamTestData}
 import org.apache.flink.table.sinks._
 import org.apache.flink.table.utils.MemoryTableSourceSinkUtil
@@ -61,7 +61,7 @@ class TableSinkITCase extends AbstractTestBase {
     val fieldNames = Array("d", "e", "t")
     val fieldTypes: Array[TypeInformation[_]] = Array(Types.STRING, Types.SQL_TIMESTAMP, Types.LONG)
     val sink = new MemoryTableSourceSinkUtil.UnsafeMemoryAppendTableSink
-    tEnv.registerTableSink("targetTable", sink.configure(fieldNames, fieldTypes))
+    tEnv.registerTableSink("targetTable", fieldNames, fieldTypes, sink)
 
     input.toTable(tEnv, 'a, 'b, 'c, 't.rowtime)
       .where('a < 3 || 'a > 19)
@@ -70,10 +70,10 @@ class TableSinkITCase extends AbstractTestBase {
     env.execute()
 
     val expected = Seq(
-      "Hi,1970-01-01 00:00:00.001,1",
-      "Hello,1970-01-01 00:00:00.002,2",
-      "Comment#14,1970-01-01 00:00:00.006,6",
-      "Comment#15,1970-01-01 00:00:00.006,6").mkString("\n")
+      "(Hi,1970-01-01 00:00:00.001,1)",
+      "(Hello,1970-01-01 00:00:00.002,2)",
+      "(Comment#14,1970-01-01 00:00:00.006,6)",
+      "(Comment#15,1970-01-01 00:00:00.006,6)").mkString("\n")
 
     TestBaseUtils.compareResultAsText(MemoryTableSourceSinkUtil.tableData.asJava, expected)
   }
@@ -95,8 +95,8 @@ class TableSinkITCase extends AbstractTestBase {
     tEnv.registerTableSink(
       "csvSink",
       new CsvTableSink(path).configure(
-        Array[String]("nullableCol", "c", "b"),
-        Array[TypeInformation[_]](Types.INT, Types.STRING, Types.SQL_TIMESTAMP)))
+        Array[String]("c", "b"),
+        Array[TypeInformation[_]](Types.STRING, Types.SQL_TIMESTAMP)))
 
     val input = StreamTestData.get3TupleDataStream(env)
       .assignAscendingTimestamps(_._2)
@@ -104,21 +104,20 @@ class TableSinkITCase extends AbstractTestBase {
 
     input.toTable(tEnv, 'a, 'b.rowtime, 'c)
       .where('a < 5 || 'a > 17)
-      .select(ifThenElse('a < 4, nullOf(Types.INT()), 'a), 'c, 'b)
+      .select('c, 'b)
       .insertInto("csvSink")
 
     env.execute()
 
     val expected = Seq(
-      ",Hello world,1970-01-01 00:00:00.002",
-      ",Hello,1970-01-01 00:00:00.002",
-      ",Hi,1970-01-01 00:00:00.001",
-      "18,Comment#12,1970-01-01 00:00:00.006",
-      "19,Comment#13,1970-01-01 00:00:00.006",
-      "20,Comment#14,1970-01-01 00:00:00.006",
-      "21,Comment#15,1970-01-01 00:00:00.006",
-      "4,Hello world, how are you?,1970-01-01 00:00:00.003"
-    ).mkString("\n")
+      "Hi,1970-01-01 00:00:00.001",
+      "Hello,1970-01-01 00:00:00.002",
+      "Hello world,1970-01-01 00:00:00.002",
+      "Hello world, how are you?,1970-01-01 00:00:00.003",
+      "Comment#12,1970-01-01 00:00:00.006",
+      "Comment#13,1970-01-01 00:00:00.006",
+      "Comment#14,1970-01-01 00:00:00.006",
+      "Comment#15,1970-01-01 00:00:00.006").mkString("\n")
 
     TestBaseUtils.compareResultsByLinesInMemory(expected, path)
   }
@@ -149,11 +148,11 @@ class TableSinkITCase extends AbstractTestBase {
 
     val result = RowCollector.getAndClearValues.map(_.f1.toString).sorted
     val expected = List(
-      "1970-01-01 00:00:00.005,4,8",
-      "1970-01-01 00:00:00.01,5,18",
-      "1970-01-01 00:00:00.015,5,24",
-      "1970-01-01 00:00:00.02,5,29",
-      "1970-01-01 00:00:00.025,2,12")
+      "(1970-01-01 00:00:00.005,4,8)",
+      "(1970-01-01 00:00:00.01,5,18)",
+      "(1970-01-01 00:00:00.015,5,24)",
+      "(1970-01-01 00:00:00.02,5,29)",
+      "(1970-01-01 00:00:00.025,2,12)")
       .sorted
     assertEquals(expected, result)
   }
@@ -181,7 +180,7 @@ class TableSinkITCase extends AbstractTestBase {
     env.execute()
 
     val result = RowCollector.getAndClearValues.map(_.f1.toString).sorted
-    val expected = List("Hi,Hallo", "Hello,Hallo Welt", "Hello world,Hallo Welt").sorted
+    val expected = List("(Hi,Hallo)", "(Hello,Hallo Welt)", "(Hello world,Hallo Welt)").sorted
     assertEquals(expected, result)
   }
 
@@ -212,13 +211,13 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = RowCollector.retractResults(results).sorted
     val expected = List(
-      "2,1,1",
-      "5,1,2",
-      "11,1,2",
-      "25,1,3",
-      "10,7,39",
-      "14,1,3",
-      "9,9,41").sorted
+      "(2,1,1)",
+      "(5,1,2)",
+      "(11,1,2)",
+      "(25,1,3)",
+      "(10,7,39)",
+      "(14,1,3)",
+      "(9,9,41)").sorted
     assertEquals(expected, retracted)
 
   }
@@ -254,11 +253,11 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = RowCollector.retractResults(results).sorted
     val expected = List(
-      "1970-01-01 00:00:00.005,4,8",
-      "1970-01-01 00:00:00.01,5,18",
-      "1970-01-01 00:00:00.015,5,24",
-      "1970-01-01 00:00:00.02,5,29",
-      "1970-01-01 00:00:00.025,2,12")
+      "(1970-01-01 00:00:00.005,4,8)",
+      "(1970-01-01 00:00:00.01,5,18)",
+      "(1970-01-01 00:00:00.015,5,24)",
+      "(1970-01-01 00:00:00.02,5,29)",
+      "(1970-01-01 00:00:00.025,2,12)")
       .sorted
     assertEquals(expected, retracted)
 
@@ -298,9 +297,9 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 2)).sorted
     val expected = List(
-      "1,5,true",
-      "7,1,true",
-      "9,1,true").sorted
+      "(1,5,true)",
+      "(7,1,true)",
+      "(9,1,true)").sorted
     assertEquals(expected, retracted)
 
   }
@@ -336,16 +335,16 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 1, 2)).sorted
     val expected = List(
-      "1,1970-01-01 00:00:00.005,1",
-      "2,1970-01-01 00:00:00.005,2",
-      "3,1970-01-01 00:00:00.005,1",
-      "3,1970-01-01 00:00:00.01,2",
-      "4,1970-01-01 00:00:00.01,3",
-      "4,1970-01-01 00:00:00.015,1",
-      "5,1970-01-01 00:00:00.015,4",
-      "5,1970-01-01 00:00:00.02,1",
-      "6,1970-01-01 00:00:00.02,4",
-      "6,1970-01-01 00:00:00.025,2").sorted
+      "(1,1970-01-01 00:00:00.005,1)",
+      "(2,1970-01-01 00:00:00.005,2)",
+      "(3,1970-01-01 00:00:00.005,1)",
+      "(3,1970-01-01 00:00:00.01,2)",
+      "(4,1970-01-01 00:00:00.01,3)",
+      "(4,1970-01-01 00:00:00.015,1)",
+      "(5,1970-01-01 00:00:00.015,4)",
+      "(5,1970-01-01 00:00:00.02,1)",
+      "(6,1970-01-01 00:00:00.02,4)",
+      "(6,1970-01-01 00:00:00.025,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -381,16 +380,16 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 1, 2)).sorted
     val expected = List(
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,1,1",
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,2,2",
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,3,1",
-      "1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,3,2",
-      "1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,4,3",
-      "1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,4,1",
-      "1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,5,4",
-      "1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,5,1",
-      "1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,6,4",
-      "1970-01-01 00:00:00.02,1970-01-01 00:00:00.025,6,2").sorted
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,1,1)",
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,2,2)",
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,3,1)",
+      "(1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,3,2)",
+      "(1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,4,3)",
+      "(1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,4,1)",
+      "(1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,5,4)",
+      "(1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,5,1)",
+      "(1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,6,4)",
+      "(1970-01-01 00:00:00.02,1970-01-01 00:00:00.025,6,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -425,16 +424,16 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = results.map(_.f1.toString).sorted
     val expected = List(
-      "1970-01-01 00:00:00.005,1",
-      "1970-01-01 00:00:00.005,2",
-      "1970-01-01 00:00:00.005,1",
-      "1970-01-01 00:00:00.01,2",
-      "1970-01-01 00:00:00.01,3",
-      "1970-01-01 00:00:00.015,1",
-      "1970-01-01 00:00:00.015,4",
-      "1970-01-01 00:00:00.02,1",
-      "1970-01-01 00:00:00.02,4",
-      "1970-01-01 00:00:00.025,2").sorted
+      "(1970-01-01 00:00:00.005,1)",
+      "(1970-01-01 00:00:00.005,2)",
+      "(1970-01-01 00:00:00.005,1)",
+      "(1970-01-01 00:00:00.01,2)",
+      "(1970-01-01 00:00:00.01,3)",
+      "(1970-01-01 00:00:00.015,1)",
+      "(1970-01-01 00:00:00.015,4)",
+      "(1970-01-01 00:00:00.02,1)",
+      "(1970-01-01 00:00:00.02,4)",
+      "(1970-01-01 00:00:00.025,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -469,16 +468,16 @@ class TableSinkITCase extends AbstractTestBase {
 
     val retracted = results.map(_.f1.toString).sorted
     val expected = List(
-      "1,1",
-      "2,2",
-      "3,1",
-      "3,2",
-      "4,3",
-      "4,1",
-      "5,4",
-      "5,1",
-      "6,4",
-      "6,2").sorted
+      "(1,1)",
+      "(2,2)",
+      "(3,1)",
+      "(3,2)",
+      "(4,3)",
+      "(4,1)",
+      "(5,4)",
+      "(5,1)",
+      "(6,4)",
+      "(6,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -516,16 +515,16 @@ class TableSinkITCase extends AbstractTestBase {
     env.execute()
 
     val expected = List(
-      "1,1970-01-01 00:00:00.004,4",
-      "2,1970-01-01 00:00:00.004,4",
-      "3,1970-01-01 00:00:00.004,4",
-      "3,1970-01-01 00:00:00.009,9",
-      "4,1970-01-01 00:00:00.009,9",
-      "4,1970-01-01 00:00:00.014,14",
-      "5,1970-01-01 00:00:00.014,14",
-      "5,1970-01-01 00:00:00.019,19",
-      "6,1970-01-01 00:00:00.019,19",
-      "6,1970-01-01 00:00:00.024,24")
+      "(1,1970-01-01 00:00:00.004,4)",
+      "(2,1970-01-01 00:00:00.004,4)",
+      "(3,1970-01-01 00:00:00.004,4)",
+      "(3,1970-01-01 00:00:00.009,9)",
+      "(4,1970-01-01 00:00:00.009,9)",
+      "(4,1970-01-01 00:00:00.014,14)",
+      "(5,1970-01-01 00:00:00.014,14)",
+      "(5,1970-01-01 00:00:00.019,19)",
+      "(6,1970-01-01 00:00:00.019,19)",
+      "(6,1970-01-01 00:00:00.024,24)")
 
     assertEquals(expected, StreamITCase.testResults.sorted)
   }
@@ -563,16 +562,16 @@ class TableSinkITCase extends AbstractTestBase {
     env.execute()
 
     val expected = List(
-      "1,1970-01-01 00:00:00.004,4",
-      "2,1970-01-01 00:00:00.004,4",
-      "3,1970-01-01 00:00:00.004,4",
-      "3,1970-01-01 00:00:00.009,9",
-      "4,1970-01-01 00:00:00.009,9",
-      "4,1970-01-01 00:00:00.014,14",
-      "5,1970-01-01 00:00:00.014,14",
-      "5,1970-01-01 00:00:00.019,19",
-      "6,1970-01-01 00:00:00.019,19",
-      "6,1970-01-01 00:00:00.024,24")
+      "(1,1970-01-01 00:00:00.004,4)",
+      "(2,1970-01-01 00:00:00.004,4)",
+      "(3,1970-01-01 00:00:00.004,4)",
+      "(3,1970-01-01 00:00:00.009,9)",
+      "(4,1970-01-01 00:00:00.009,9)",
+      "(4,1970-01-01 00:00:00.014,14)",
+      "(5,1970-01-01 00:00:00.014,14)",
+      "(5,1970-01-01 00:00:00.019,19)",
+      "(6,1970-01-01 00:00:00.019,19)",
+      "(6,1970-01-01 00:00:00.024,24)")
 
     assertEquals(expected, StreamITCase.testResults.sorted)
   }
@@ -622,11 +621,7 @@ private[flink] class TestAppendSink extends AppendStreamTableSink[Row] {
   var fTypes: Array[TypeInformation[_]] = _
 
   override def emitDataStream(s: DataStream[Row]): Unit = {
-    consumeDataStream(s)
-  }
-
-  override def consumeDataStream(dataStream: DataStream[Row]): DataStreamSink[_] = {
-    dataStream.map(
+    s.map(
       new MapFunction[Row, JTuple2[JBool, Row]] {
         override def map(value: Row): JTuple2[JBool, Row] = new JTuple2(true, value)
       })
@@ -685,19 +680,18 @@ private[flink] class TestUpsertSink(
 
   override def setKeyFields(keys: Array[String]): Unit =
     if (keys != null) {
-      if (!expectedKeys.sorted.mkString(",").equals(keys.sorted.mkString(","))) {
-        throw new AssertionError("Provided key fields do not match expected keys")
-      }
+      assertEquals("Provided key fields do not match expected keys",
+        expectedKeys.sorted.mkString(","),
+        keys.sorted.mkString(","))
     } else {
-      if (expectedKeys != null) {
-        throw new AssertionError("Provided key fields should not be null.")
-      }
+      assertNull("Provided key fields should not be null.", expectedKeys)
     }
 
   override def setIsAppendOnly(isAppendOnly: JBool): Unit =
-    if (expectedIsAppendOnly != isAppendOnly) {
-      throw new AssertionError("Provided isAppendOnly does not match expected isAppendOnly")
-    }
+    assertEquals(
+      "Provided isAppendOnly does not match expected isAppendOnly",
+      expectedIsAppendOnly,
+      isAppendOnly)
 
   override def getRecordType: TypeInformation[Row] = new RowTypeInfo(fTypes, fNames)
 
@@ -755,9 +749,9 @@ object RowCollector {
         }
       }.filter{ case (_, c: Int) => c != 0 }
 
-    if (retracted.exists{ case (_, c: Int) => c < 0}) {
-      throw new AssertionError("Received retracted rows which have not been accumulated.")
-    }
+    assertFalse(
+      "Received retracted rows which have not been accumulated.",
+      retracted.exists{ case (_, c: Int) => c < 0})
 
     retracted.flatMap { case (r: String, c: Int) => (0 until c).map(_ => r) }.toList
   }
