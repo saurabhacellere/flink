@@ -83,6 +83,22 @@ public class CheckpointingOptions {
 				"deactivated. Local recovery currently only covers keyed state backends. Currently, MemoryStateBackend does " +
 				"not support local recovery and ignore this option.");
 
+
+	/**
+	 * This option configures the compression decorator for state backend. By default, compression is deactivated.
+	 */
+	public static final ConfigOption<String> COMPRESSION_DECORATOR = ConfigOptions
+			.key("state.backend.compression-decorator")
+			.noDefaultValue()
+			.withDescription("Option of class name defines what compression algorithm used for checkpoints and savepoint. " +
+				"Specifically, RocksDBKeyedStateBackend would not use this option to compress data" +
+				" when executing incremental checkpoints as RocksDB has its own compressed format. " +
+				"This option has no default value and would be treated as no compression. " +
+				"This option could be configure as Flink built-in compression decorator as " +
+				"'org.apache.flink.runtime.state.compression.LZ4StreamCompressionDecorator', " +
+				"or 'org.apache.flink.runtime.state.compression.SnappyStreamCompressionDecorator'. " +
+				"User could also define its own compression decorator and configure this option via class name.");
+
 	/**
 	 * The config parameter defining the root directories for storing file-based state for local recovery.
 	 *
@@ -129,14 +145,4 @@ public class CheckpointingOptions {
 			.defaultValue(1024)
 			.withDescription("The minimum size of state data files. All state chunks smaller than that are stored" +
 				" inline in the root checkpoint metadata file.");
-
-	/**
-	 * The default size of the write buffer for the checkpoint streams that write to file systems.
-	 */
-	public static final ConfigOption<Integer> FS_WRITE_BUFFER_SIZE = ConfigOptions
-		.key("state.backend.fs.write-buffer-size")
-		.defaultValue(4 * 1024)
-		.withDescription(String.format("The default size of the write buffer for the checkpoint streams that write to file systems. " +
-			"The actual write buffer size is determined to be the maximum of the value of this option and option '%s'.", FS_SMALL_FILE_THRESHOLD.key()));
-
 }

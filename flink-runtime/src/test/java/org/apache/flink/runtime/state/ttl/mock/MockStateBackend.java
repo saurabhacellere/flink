@@ -74,11 +74,6 @@ public class MockStateBackend extends AbstractStateBackend {
 			}
 
 			@Override
-			public void initializeBaseLocations() {
-
-			}
-
-			@Override
 			public CheckpointStorageLocation initializeLocationForCheckpoint(long checkpointId) {
 				return new CheckpointStorageLocation() {
 
@@ -143,7 +138,7 @@ public class MockStateBackend extends AbstractStateBackend {
 			env.getExecutionConfig(),
 			ttlTimeProvider,
 			stateHandles,
-			AbstractStateBackend.getCompressionDecorator(env.getExecutionConfig()),
+			this.determineCompressionDecorator(env.getExecutionConfig()),
 			cancelStreamRegistry).build();
 	}
 

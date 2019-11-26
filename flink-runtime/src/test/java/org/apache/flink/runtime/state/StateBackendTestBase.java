@@ -67,9 +67,12 @@ import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.query.KvStateRegistryListener;
+import org.apache.flink.runtime.state.compression.LZ4StreamCompressionDecorator;
+import org.apache.flink.runtime.state.compression.SnappyStreamCompressionDecorator;
+import org.apache.flink.runtime.state.compression.StreamCompressionDecorator;
+import org.apache.flink.runtime.state.compression.UncompressedStreamCompressionDecorator;
 import org.apache.flink.runtime.state.heap.AbstractHeapState;
 import org.apache.flink.runtime.state.heap.NestedMapsStateTable;
-import org.apache.flink.runtime.state.heap.NestedStateMap;
 import org.apache.flink.runtime.state.heap.StateTable;
 import org.apache.flink.runtime.state.internal.InternalAggregatingState;
 import org.apache.flink.runtime.state.internal.InternalKvState;
@@ -2573,6 +2576,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		List<Integer> expectedKeys = Arrays.asList(103, 1031, 1032);
 		assertEquals(keys.size(), expectedKeys.size());
 		keys.removeAll(expectedKeys);
+		assertTrue(keys.isEmpty());
 
 		List<String> values = new ArrayList<>();
 		for (String value : state.values()) {
@@ -2581,6 +2585,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		List<String> expectedValues = Arrays.asList("103", "1031", "1032");
 		assertEquals(values.size(), expectedValues.size());
 		values.removeAll(expectedValues);
+		assertTrue(values.isEmpty());
 
 		// make some more modifications
 		backend.setCurrentKey("1");
@@ -2651,34 +2656,6 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				getSerializedMap(restoredKvState2, "3", keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, userKeySerializer, userValueSerializer));
 
 		backend.dispose();
-	}
-
-	@Test
-	public void testMapStateIsEmpty() throws Exception {
-		MapStateDescriptor<Integer, Long> kvId = new MapStateDescriptor<>("id", Integer.class, Long.class);
-
-		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE);
-
-		try {
-			MapState<Integer, Long> state = backend.getPartitionedState(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
-			backend.setCurrentKey(1);
-			assertTrue(state.isEmpty());
-
-			int stateSize = 1024;
-			for (int i = 0; i < stateSize; i++) {
-				state.put(i, i * 2L);
-				assertFalse(state.isEmpty());
-			}
-
-			for (int i = 0; i < stateSize; i++) {
-				assertFalse(state.isEmpty());
-				state.remove(i);
-			}
-			assertTrue(state.isEmpty());
-
-		} finally {
-			backend.dispose();
-		}
 	}
 
 	/**
@@ -3455,9 +3432,8 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		if (stateTable instanceof NestedMapsStateTable) {
 			int keyGroupIndex = KeyGroupRangeAssignment.assignToKeyGroup(1, numberOfKeyGroups);
 			NestedMapsStateTable<?, ?, ?> nestedMapsStateTable = (NestedMapsStateTable<?, ?, ?>) stateTable;
-			NestedStateMap<?, ?, ?>[] nestedStateMaps = (NestedStateMap<?, ?, ?>[]) nestedMapsStateTable.getState();
-			assertTrue(nestedStateMaps[keyGroupIndex].getNamespaceMap() instanceof ConcurrentHashMap);
-			assertTrue(nestedStateMaps[keyGroupIndex].getNamespaceMap().get(VoidNamespace.INSTANCE) instanceof ConcurrentHashMap);
+			assertTrue(nestedMapsStateTable.getState()[keyGroupIndex] instanceof ConcurrentHashMap);
+			assertTrue(nestedMapsStateTable.getState()[keyGroupIndex].get(VoidNamespace.INSTANCE) instanceof ConcurrentHashMap);
 		}
 	}
 
@@ -3902,6 +3878,43 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		} finally {
 			backend.dispose();
+		}
+	}
+
+	@Test
+	public void testSetCompressionDecorator() throws Exception {
+		B stateBackend = getStateBackend();
+
+		List<StreamCompressionDecorator> streamCompressionDecorators = asList(LZ4StreamCompressionDecorator.INSTANCE,
+			SnappyStreamCompressionDecorator.INSTANCE,
+			UncompressedStreamCompressionDecorator.INSTANCE);
+
+		for (StreamCompressionDecorator streamCompressionDecorator : streamCompressionDecorators) {
+			stateBackend.setStreamCompressionDecorator(streamCompressionDecorator);
+
+			AbstractKeyedStateBackend<Integer> keyedStateBackend = null;
+			DummyEnvironment env = new DummyEnvironment();
+			try {
+				keyedStateBackend = stateBackend.createKeyedStateBackend(
+					env,
+					new JobID(),
+					"test_op",
+					IntSerializer.INSTANCE,
+					10,
+					KeyGroupRange.of(0, 9),
+					env.getTaskKvStateRegistry(),
+					TtlTimeProvider.DEFAULT,
+					new UnregisteredMetricsGroup(),
+					Collections.emptyList(),
+					new CloseableRegistry());
+
+				assertEquals(streamCompressionDecorator, keyedStateBackend.getKeyGroupCompressionDecorator());
+			} finally {
+				if (null != keyedStateBackend) {
+					IOUtils.closeQuietly(keyedStateBackend);
+					keyedStateBackend.dispose();
+				}
+			}
 		}
 	}
 
