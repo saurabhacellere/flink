@@ -22,39 +22,29 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.functions.FunctionDefinition;
 
-import java.util.List;
-
 /**
- * Validator for checking the input data types of a function call.
- *
- * <p>Note: Implementations should implement {@link Object#hashCode()} and {@link Object#equals(Object)}.
- *
- * @see InputTypeValidators
+ * Validator that checks a single input argument type of a function call.
  */
 @PublicEvolving
-public interface InputTypeValidator {
+public interface ArgumentTypeValidator {
 
 	/**
-	 * Initial input validation based on the number of arguments.
-	 */
-	ArgumentCount getArgumentCount();
-
-	/**
-	 * Main logic for validating the input. Returns {@code true} if the arguments are valid for the
+	 * Main logic for validating a single input type. Returns {@code true} if the argument is valid for the
 	 * given call, {@code false} otherwise.
 	 *
 	 * @param callContext provides details about the function call
+	 * @param argumentPos argument index in the {@link CallContext}
 	 * @param throwOnFailure whether this function is allowed to throw an {@link ValidationException}
 	 *                       with a meaningful exception in case the validation is not successful or
 	 *                       if this function should simply return {@code false}.
-	 * @see CallContext#newValidationError(String, Object...)
 	 */
-	boolean validate(CallContext callContext, boolean throwOnFailure);
+	boolean validateArgument(CallContext callContext, int argumentPos, boolean throwOnFailure);
 
 	/**
-	 * Returns a summary of the function's expected signatures.
+	 * Returns a summary of the function's expected argument at {@code argumentPos}.
 	 *
-	 * @param definition the function definition that defines the function currently being called.
+	 * @param functionDefinition the function definition that defines the function currently being called.
+	 * @param argumentPos the position within the function call for which the signature should be retrieved
 	 */
-	List<Signature> getExpectedSignatures(FunctionDefinition definition);
+	Signature.Argument getExpectedArgument(FunctionDefinition functionDefinition, int argumentPos);
 }

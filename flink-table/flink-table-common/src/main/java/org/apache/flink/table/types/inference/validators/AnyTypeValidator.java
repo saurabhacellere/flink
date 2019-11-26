@@ -1,13 +1,12 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to you under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,22 +25,29 @@ import org.apache.flink.table.types.inference.CallContext;
 import org.apache.flink.table.types.inference.ConstantArgumentCount;
 import org.apache.flink.table.types.inference.InputTypeValidator;
 import org.apache.flink.table.types.inference.Signature;
-import org.apache.flink.table.types.inference.Signature.Argument;
 
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Validator that does not perform any validation and always passes.
+ * Validator that checks for a single argument that can be of any type.
  */
 @Internal
-public final class PassingTypeValidator implements InputTypeValidator, ArgumentTypeValidator {
+public final class AnyTypeValidator implements ArgumentTypeValidator, InputTypeValidator {
 
-	private static final ArgumentCount PASSING_ARGUMENT_COUNT = ConstantArgumentCount.any();
+	@Override
+	public boolean validateArgument(CallContext callContext, int argumentPos, boolean throwOnFailure) {
+		return true;
+	}
+
+	@Override
+	public Signature.Argument getExpectedArgument(FunctionDefinition functionDefinition, int argumentPos) {
+		return Signature.Argument.of("<ANY>");
+	}
 
 	@Override
 	public ArgumentCount getArgumentCount() {
-		return PASSING_ARGUMENT_COUNT;
+		return ConstantArgumentCount.of(1);
 	}
 
 	@Override
@@ -51,26 +57,16 @@ public final class PassingTypeValidator implements InputTypeValidator, ArgumentT
 
 	@Override
 	public List<Signature> getExpectedSignatures(FunctionDefinition definition) {
-		return Collections.singletonList(Signature.of(Argument.of("*")));
+		return Collections.singletonList(Signature.of(getExpectedArgument(definition, 0)));
 	}
 
 	@Override
 	public boolean equals(Object o) {
-		return this == o || o instanceof PassingTypeValidator;
+		return this == o || o instanceof AnyTypeValidator;
 	}
 
 	@Override
 	public int hashCode() {
-		return PassingTypeValidator.class.hashCode();
-	}
-
-	@Override
-	public boolean validateArgument(CallContext callContext, int argumentPos, boolean throwOnFailure) {
-		return true;
-	}
-
-	@Override
-	public Argument getExpectedArgument(FunctionDefinition functionDefinition, int argumentPos) {
-		return Argument.of("*");
+		return AnyTypeValidator.class.hashCode();
 	}
 }
