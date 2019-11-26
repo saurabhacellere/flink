@@ -37,13 +37,9 @@ import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.ParsedLine;
 import org.jline.reader.Parser;
 import org.jline.terminal.Terminal;
-import org.jline.terminal.impl.DumbTerminal;
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,10 +49,6 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 
 /**
  * Tests for the {@link CliClient}.
@@ -93,49 +85,26 @@ public class CliClientTest extends TestLogger {
 	}
 
 	@Test
-	public void testUseNonExistingDB() throws Exception {
-		Executor executor = mock(Executor.class);
-		doThrow(new SqlExecutionException("mocked exception")).when(executor).useDatabase(any(), any());
-		InputStream inputStream = new ByteArrayInputStream("use db;\n".getBytes());
-		// don't care about the output
-		OutputStream outputStream = new OutputStream() {
-			@Override
-			public void write(int b) throws IOException {
-			}
-		};
-		CliClient cliClient = null;
-		try (Terminal terminal = new DumbTerminal(inputStream, outputStream)) {
-			cliClient = new CliClient(terminal, new SessionContext("test-session", new Environment()), executor);
-			cliClient.open();
-			verify(executor).useDatabase(any(), any());
-		} finally {
-			if (cliClient != null) {
-				cliClient.close();
-			}
-		}
-	}
+	public void testParseMultiLineStatement() throws Exception {
+		String actual = "CREATE   VIEW    MyTable  |        \n AS     SELECT 1+1 FROM y";
+		String expected = "CREATE   VIEW    MyTable   AS     SELECT 1+1 FROM y";
+		verifySqlCombination(actual, expected);
 
-	@Test
-	public void testUseNonExistingCatalog() throws Exception {
-		Executor executor = mock(Executor.class);
-		doThrow(new SqlExecutionException("mocked exception")).when(executor).useCatalog(any(), any());
-		InputStream inputStream = new ByteArrayInputStream("use catalog cat;\n".getBytes());
-		// don't care about the output
-		OutputStream outputStream = new OutputStream() {
-			@Override
-			public void write(int b) throws IOException {
-			}
-		};
-		CliClient cliClient = null;
-		try (Terminal terminal = new DumbTerminal(inputStream, outputStream)) {
-			cliClient = new CliClient(terminal, new SessionContext("test-session", new Environment()), executor);
-			cliClient.open();
-			verify(executor).useCatalog(any(), any());
-		} finally {
-			if (cliClient != null) {
-				cliClient.close();
-			}
-		}
+		actual = "CREATE   VIEW    MyTable  |\n AS     SELECT 1+1 FROM y";
+		expected = "CREATE   VIEW    MyTable   AS     SELECT 1+1 FROM y";
+		verifySqlCombination(actual, expected);
+
+		actual = "CREATE   VIEW    MyTable  |\n;";
+		expected = "CREATE   VIEW    MyTable  ;";
+		verifySqlCombination(actual, expected);
+
+		actual = "|\n;";
+		expected = ";";
+		verifySqlCombination(actual, expected);
+
+		actual = "| \n CREATE   VIEW    MyTable  |\n AS     SELECT 1+1 FROM y";
+		expected = " CREATE   VIEW    MyTable   AS     SELECT 1+1 FROM y";
+		verifySqlCombination(actual, expected);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -192,6 +161,37 @@ public class CliClientTest extends TestLogger {
 		}
 	}
 
+	private void verifySqlCombination(String actual, String expected) throws Exception {
+		String[] paritials = actual.split("\n");
+		StringBuilder lineAppender = new StringBuilder();
+
+		int i = 0;
+		while (paritials.length > i) {
+			final String line = paritials[i];
+			i++;
+
+			if (line == null) {
+				continue;
+			}
+
+			boolean waitingNextLine = line.trim().endsWith("|");
+			if (!waitingNextLine) {
+				lineAppender.append(line);
+				assertEquals(expected, lineAppender.toString());
+				lineAppender = new StringBuilder();
+			} else {
+				int idx = line.lastIndexOf("|");
+				if (idx == 0) {
+					continue;
+				} else {
+					String preprocessedLine = line.substring(0, line.lastIndexOf("|"));
+					lineAppender.append(preprocessedLine);
+				}
+			}
+		}
+
+	}
+
 	// --------------------------------------------------------------------------------------------
 
 	private static class MockExecutor implements Executor {
@@ -213,16 +213,6 @@ public class CliClientTest extends TestLogger {
 		}
 
 		@Override
-		public List<String> listCatalogs(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
-		public List<String> listDatabases(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
 		public List<String> listTables(SessionContext session) throws SqlExecutionException {
 			return null;
 		}
@@ -230,26 +220,6 @@ public class CliClientTest extends TestLogger {
 		@Override
 		public List<String> listUserDefinedFunctions(SessionContext session) throws SqlExecutionException {
 			return null;
-		}
-
-		@Override
-		public List<String> listFunctions(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
-		public List<String> listModules(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
-		public void useCatalog(SessionContext session, String catalogName) throws SqlExecutionException {
-
-		}
-
-		@Override
-		public void useDatabase(SessionContext session, String databaseName) throws SqlExecutionException {
-
 		}
 
 		@Override

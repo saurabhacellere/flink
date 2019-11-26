@@ -49,7 +49,6 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -78,6 +77,8 @@ public class CliClient {
 	private static final int PLAIN_TERMINAL_HEIGHT = 30;
 
 	private static final int SOURCE_MAX_SIZE = 50_000;
+
+	private static final String MULTI_LINE_PIPE_IDENTIFIER = "|";
 
 	/**
 	 * Creates a CLI instance with a custom terminal. Make sure to close the CLI instance
@@ -176,6 +177,8 @@ public class CliClient {
 		// print welcome
 		terminal.writer().append(CliStrings.MESSAGE_WELCOME);
 
+		StringBuilder lineAppender = new StringBuilder();
+
 		// begin reading loop
 		while (isRunning) {
 			// make some space to previous command
@@ -197,8 +200,22 @@ public class CliClient {
 			if (line == null) {
 				continue;
 			}
-			final Optional<SqlCommandCall> cmdCall = parseCommand(line);
-			cmdCall.ifPresent(this::callCommand);
+
+			boolean waitingNextLine = line.trim().endsWith(MULTI_LINE_PIPE_IDENTIFIER);
+			if (!waitingNextLine) {
+				lineAppender.append(line);
+				final Optional<SqlCommandCall> cmdCall = parseCommand(lineAppender.toString());
+				cmdCall.ifPresent(this::callCommand);
+				lineAppender = new StringBuilder();
+			} else {
+				int idx = line.lastIndexOf("|");
+				if (idx == 0) {
+					continue;
+				} else {
+					String preprocessedLine = line.substring(0, line.lastIndexOf(MULTI_LINE_PIPE_IDENTIFIER));
+					lineAppender.append(preprocessedLine);
+				}
+			}
 		}
 	}
 
@@ -264,26 +281,11 @@ public class CliClient {
 			case HELP:
 				callHelp();
 				break;
-			case SHOW_CATALOGS:
-				callShowCatalogs();
-				break;
-			case SHOW_DATABASES:
-				callShowDatabases();
-				break;
 			case SHOW_TABLES:
 				callShowTables();
 				break;
 			case SHOW_FUNCTIONS:
 				callShowFunctions();
-				break;
-			case SHOW_MODULES:
-				callShowModules();
-				break;
-			case USE_CATALOG:
-				callUseCatalog(cmdCall);
-				break;
-			case USE:
-				callUseDatabase(cmdCall);
 				break;
 			case DESCRIBE:
 				callDescribe(cmdCall);
@@ -359,38 +361,6 @@ public class CliClient {
 		terminal.flush();
 	}
 
-	private void callShowCatalogs() {
-		final List<String> catalogs;
-		try {
-			catalogs = executor.listCatalogs(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (catalogs.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			catalogs.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowDatabases() {
-		final List<String> dbs;
-		try {
-			dbs = executor.listDatabases(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (dbs.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			dbs.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
 	private void callShowTables() {
 		final List<String> tables;
 		try {
@@ -410,7 +380,7 @@ public class CliClient {
 	private void callShowFunctions() {
 		final List<String> functions;
 		try {
-			functions = executor.listFunctions(context);
+			functions = executor.listUserDefinedFunctions(context);
 		} catch (SqlExecutionException e) {
 			printExecutionException(e);
 			return;
@@ -418,45 +388,7 @@ public class CliClient {
 		if (functions.isEmpty()) {
 			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
 		} else {
-			Collections.sort(functions);
 			functions.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowModules() {
-		final List<String> modules;
-		try {
-			modules = executor.listModules(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (modules.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			// modules are already in the loaded order
-			modules.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callUseCatalog(SqlCommandCall cmdCall) {
-		try {
-			executor.useCatalog(context, cmdCall.operands[0]);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		terminal.flush();
-	}
-
-	private void callUseDatabase(SqlCommandCall cmdCall) {
-		try {
-			executor.useDatabase(context, cmdCall.operands[0]);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
 		}
 		terminal.flush();
 	}
