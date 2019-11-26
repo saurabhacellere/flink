@@ -21,6 +21,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.connectors.elasticsearch.ElasticsearchApiCallBridge;
 import org.apache.flink.streaming.connectors.elasticsearch.ElasticsearchSinkBase;
 import org.apache.flink.streaming.connectors.elasticsearch.RequestIndexer;
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.http.HttpHost;
@@ -75,15 +76,7 @@ public class Elasticsearch6ApiCallBridge implements ElasticsearchApiCallBridge<R
 		RestHighLevelClient rhlClient = new RestHighLevelClient(builder);
 
 		if (LOG.isInfoEnabled()) {
-			LOG.info("Pinging Elasticsearch cluster via hosts {} ...", httpHosts);
-		}
-
-		if (!rhlClient.ping()) {
-			throw new RuntimeException("There are no reachable Elasticsearch nodes!");
-		}
-
-		if (LOG.isInfoEnabled()) {
-			LOG.info("Created Elasticsearch RestHighLevelClient connected to {}", httpHosts.toString());
+			LOG.info("Created Elasticsearch RestHighLevelClient with {}", httpHosts.toString());
 		}
 
 		return rhlClient;
