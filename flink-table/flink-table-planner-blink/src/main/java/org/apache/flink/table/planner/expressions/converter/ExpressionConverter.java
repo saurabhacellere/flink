@@ -30,7 +30,6 @@ import org.apache.flink.table.expressions.TimePointUnit;
 import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.planner.calcite.FlinkContext;
-import org.apache.flink.table.planner.calcite.FlinkRelBuilder;
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory;
 import org.apache.flink.table.planner.calcite.RexFieldVariable;
 import org.apache.flink.table.planner.expressions.RexNodeExpression;
@@ -138,8 +137,12 @@ public class ExpressionConverter implements ExpressionVisitor<RexNode> {
 				return relBuilder.getRexBuilder().makeTimestampLiteral(TimestampString.fromCalendarFields(
 						valueAsCalendar(extractValue(valueLiteral, java.sql.Timestamp.class))), 3);
 			case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-				TimeZone timeZone = TimeZone.getTimeZone(((FlinkContext) ((FlinkRelBuilder) this.relBuilder)
-						.getCluster().getPlanner().getContext()).getTableConfig().getLocalTimeZone());
+				TimeZone timeZone = TimeZone.getTimeZone(this.relBuilder.getCluster()
+					.getPlanner()
+					.getContext()
+					.unwrap(FlinkContext.class)
+					.getTableConfig()
+					.getLocalTimeZone());
 				return this.relBuilder.getRexBuilder().makeTimestampWithLocalTimeZoneLiteral(
 						new TimestampWithTimeZoneString(
 								TimestampString.fromMillisSinceEpoch(
