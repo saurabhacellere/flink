@@ -108,7 +108,7 @@ impact.
 
 For state to be snapshotted asynchronsously, you need to use a state backend which supports asynchronous snapshotting.
 Starting from Flink 1.3, both RocksDB-based as well as heap-based state backends (`filesystem`) support asynchronous
-snapshotting and use it by default. This applies to both managed operator state as well as managed keyed state (incl. timers state).
+snapshotting and use it by default. This applies to to both managed operator state as well as managed keyed state (incl. timers state).
 
 <span class="label label-info">Note</span> *The combination RocksDB state backend with heap-based timers currently does NOT support asynchronous snapshots for the timers state.
 Other state like keyed state is still snapshotted asynchronously. Please note that this is not a regression from previous versions and will be resolved with `FLINK-10026`.*
@@ -246,20 +246,22 @@ executing the program with a low parallelism.
 
 ## Compression
 
-Flink offers optional compression (default: off) for all checkpoints and savepoints. Currently, compression always uses 
-the [snappy compression algorithm (version 1.1.4)](https://github.com/xerial/snappy-java) but we are planning to support
-custom compression algorithms in the future. Compression works on the granularity of key-groups in keyed state, i.e.
-each key-group can be decompressed individually, which is important for rescaling. 
+Flink offers optional compression (default: off) for all checkpoints and savepoints. Currently, we support two types of compression algorithms,
+[snappy (version 1.1.4)](https://github.com/xerial/snappy-java) and [LZ4 (version 1.5.0)](https://github.com/lz4/lz4-java).
+Compression works on the granularity of key-groups in keyed state, i.e.
+each key-group can be decompressed individually, which is important for rescaling.
+Users could also define their own compression decorator by implementing `org.apache.flink.runtime.state.compression.StreamCompressionDecorator` 
+and pass it to `AbstractStateBackend` in two ways:
+ 
+ - Configure option `state.backend.compression-decorator` with class name via configuration.
+ - Set the compression decorator programmatically: 
+   `AbstractStateBackend.setStreamCompressionDecorator(StreamCompressionDecorator)`. 
 
-Compression can be activated through the `ExecutionConfig`:
-
-{% highlight java %}
-		ExecutionConfig executionConfig = new ExecutionConfig();
-		executionConfig.setUseSnapshotCompression(true);
-{% endhighlight %}
+There also existed a deprecated way to configure the compression algorithm as snappy through the `ExecutionConfig`: 
+`ExecutionConfig.setUseSnapshotCompression(true)`.
 
 <span class="label label-info">Note</span> The compression option has no impact on incremental snapshots, because they are using RocksDB's internal
-format which is always using snappy compression out of the box.
+format which is using snappy compression out of the box by default.
 
 ## Task-Local Recovery
 
