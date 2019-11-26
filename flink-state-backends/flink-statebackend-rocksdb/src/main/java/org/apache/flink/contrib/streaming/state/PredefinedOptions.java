@@ -18,11 +18,15 @@
 
 package org.apache.flink.contrib.streaming.state;
 
+import org.apache.flink.util.IOUtils;
+
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.CompactionStyle;
 import org.rocksdb.DBOptions;
+
+import java.util.ArrayList;
 
 /**
  * The {@code PredefinedOptions} are configuration settings for the {@link RocksDBStateBackend}.
@@ -32,7 +36,7 @@ import org.rocksdb.DBOptions;
  * <p>Some of these settings are based on experiments by the Flink community, some follow
  * guides from the RocksDB project.
  */
-public enum PredefinedOptions {
+public enum PredefinedOptions implements AutoCloseable {
 
 	/**
 	 * Default options for all settings, except that writes are not forced to the
@@ -122,6 +126,7 @@ public enum PredefinedOptions {
 	 * there is no need to sync data to stable storage.
 	 */
 	SPINNING_DISK_OPTIMIZED_HIGH_MEM {
+		private ArrayList<BloomFilter> bloomFilters = new ArrayList<>();
 
 		@Override
 		public DBOptions createDBOptions() {
@@ -140,6 +145,8 @@ public enum PredefinedOptions {
 			final long targetFileSize = 256 * 1024 * 1024;
 			final long writeBufferSize = 64 * 1024 * 1024;
 
+			BloomFilter bloomFilter = new BloomFilter();
+			bloomFilters.add(bloomFilter);
 			return new ColumnFamilyOptions()
 					.setCompactionStyle(CompactionStyle.LEVEL)
 					.setLevelCompactionDynamicLevelBytes(true)
@@ -152,8 +159,15 @@ public enum PredefinedOptions {
 							new BlockBasedTableConfig()
 									.setBlockCacheSize(blockCacheSize)
 									.setBlockSize(blockSize)
-									.setFilter(new BloomFilter())
+									.setFilter(bloomFilter)
 					);
+		}
+
+		@Override
+		public void close() {
+			bloomFilters.forEach(IOUtils::closeQuietly);
+			bloomFilters.clear();
+			bloomFilters = new ArrayList<>();
 		}
 	},
 
@@ -205,5 +219,10 @@ public enum PredefinedOptions {
 	 * @return The pre-defined options object.
 	 */
 	public abstract ColumnFamilyOptions createColumnOptions();
+
+	@Override
+	public void close() {
+		// do nothing by default
+	}
 
 }
