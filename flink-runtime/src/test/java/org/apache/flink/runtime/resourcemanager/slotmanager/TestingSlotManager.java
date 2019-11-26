@@ -86,6 +86,11 @@ public class TestingSlotManager implements SlotManager {
 	}
 
 	@Override
+	public void cancelAllPendingSlotRequests(Exception cause) {
+
+	}
+
+	@Override
 	public boolean unregisterSlotRequest(AllocationID allocationId) {
 		return false;
 	}
@@ -96,7 +101,7 @@ public class TestingSlotManager implements SlotManager {
 	}
 
 	@Override
-	public boolean unregisterTaskManager(InstanceID instanceId, Exception cause) {
+	public boolean unregisterTaskManager(InstanceID instanceId) {
 		return false;
 	}
 

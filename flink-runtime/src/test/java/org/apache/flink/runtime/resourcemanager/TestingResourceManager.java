@@ -22,9 +22,11 @@ import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRater;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
@@ -41,15 +43,17 @@ import java.util.Collections;
 public class TestingResourceManager extends ResourceManager<ResourceID> {
 
 	public TestingResourceManager(
-			RpcService rpcService,
-			String resourceManagerEndpointId,
-			ResourceID resourceId,
-			HighAvailabilityServices highAvailabilityServices,
-			HeartbeatServices heartbeatServices,
-			SlotManager slotManager,
-			JobLeaderIdService jobLeaderIdService,
-			FatalErrorHandler fatalErrorHandler,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) {
+		RpcService rpcService,
+		String resourceManagerEndpointId,
+		ResourceID resourceId,
+		HighAvailabilityServices highAvailabilityServices,
+		HeartbeatServices heartbeatServices,
+		SlotManager slotManager,
+		MetricRegistry metricRegistry,
+		JobLeaderIdService jobLeaderIdService,
+		FatalErrorHandler fatalErrorHandler,
+		JobManagerMetricGroup jobManagerMetricGroup,
+		FailureRater failureRater) {
 		super(
 			rpcService,
 			resourceManagerEndpointId,
@@ -57,10 +61,12 @@ public class TestingResourceManager extends ResourceManager<ResourceID> {
 			highAvailabilityServices,
 			heartbeatServices,
 			slotManager,
+			metricRegistry,
 			jobLeaderIdService,
 			new ClusterInformation("localhost", 1234),
 			fatalErrorHandler,
-			resourceManagerMetricGroup);
+			jobManagerMetricGroup,
+			failureRater);
 	}
 
 	@Override

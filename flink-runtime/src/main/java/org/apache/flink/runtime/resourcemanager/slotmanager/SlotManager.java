@@ -79,6 +79,13 @@ public interface SlotManager extends AutoCloseable {
 	boolean registerSlotRequest(SlotRequest slotRequest) throws ResourceManagerException;
 
 	/**
+	 * Cancel all pending slot requests.
+ 	 *
+	 * @param cause the exception caused the cancellation
+	 */
+	public void cancelAllPendingSlotRequests(Exception cause);
+
+	/**
 	 * Cancels and removes a pending slot request with the given allocation id. If there is no such
 	 * pending request, then nothing is done.
 	 *
@@ -101,10 +108,9 @@ public interface SlotManager extends AutoCloseable {
 	 * from the slot manager.
 	 *
 	 * @param instanceId identifying the task manager to unregister
-	 * @param cause for unregistering the TaskManager
 	 * @return True if there existed a registered task manager with the given instance id
 	 */
-	boolean unregisterTaskManager(InstanceID instanceId, Exception cause);
+	boolean unregisterTaskManager(InstanceID instanceId);
 
 	/**
 	 * Reports the current slot allocations for a task manager identified by the given instance id.

@@ -19,11 +19,15 @@
 package org.apache.flink.runtime.resourcemanager;
 
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRater;
+import org.apache.flink.runtime.failurerate.FailureRaterUtil;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.resourcemanager.slotmanager.TestingSlotManagerBuilder;
@@ -110,6 +114,7 @@ public class StandaloneResourceManagerTest extends TestLogger {
 			TIMEOUT,
 			slotManager);
 
+		final FailureRater failureRater = FailureRaterUtil.createFailureRater(new Configuration());
 		final TestingStandaloneResourceManager rm = new TestingStandaloneResourceManager(
 			rmServices.rpcService,
 			UUID.randomUUID().toString(),
@@ -117,11 +122,13 @@ public class StandaloneResourceManagerTest extends TestLogger {
 			rmServices.highAvailabilityServices,
 			rmServices.heartbeatServices,
 			rmServices.slotManager,
+			rmServices.metricRegistry,
 			rmServices.jobLeaderIdService,
 			new ClusterInformation("localhost", 1234),
 			fatalErrorHandler,
-			UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup(),
+			UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup(),
 			startupPeriod,
+			failureRater,
 			rmServices);
 
 		rm.start();
@@ -140,11 +147,13 @@ public class StandaloneResourceManagerTest extends TestLogger {
 				HighAvailabilityServices highAvailabilityServices,
 				HeartbeatServices heartbeatServices,
 				SlotManager slotManager,
+				MetricRegistry metricRegistry,
 				JobLeaderIdService jobLeaderIdService,
 				ClusterInformation clusterInformation,
 				FatalErrorHandler fatalErrorHandler,
-				ResourceManagerMetricGroup resourceManagerMetricGroup,
+				JobManagerMetricGroup jobManagerMetricGroup,
 				Time startupPeriodTime,
+				FailureRater failureRater,
 				MockResourceManagerRuntimeServices rmServices) {
 			super(
 				rpcService,
@@ -153,11 +162,13 @@ public class StandaloneResourceManagerTest extends TestLogger {
 				highAvailabilityServices,
 				heartbeatServices,
 				slotManager,
+				metricRegistry,
 				jobLeaderIdService,
 				clusterInformation,
 				fatalErrorHandler,
-				resourceManagerMetricGroup,
-				startupPeriodTime);
+				jobManagerMetricGroup,
+				startupPeriodTime,
+				failureRater);
 			this.rmServices = rmServices;
 		}
 	}

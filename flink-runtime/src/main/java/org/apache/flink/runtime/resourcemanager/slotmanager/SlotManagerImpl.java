@@ -24,6 +24,7 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.clusterframework.types.SlotID;
+import org.apache.flink.runtime.clusterframework.types.TaskManagerSlot;
 import org.apache.flink.runtime.concurrent.ScheduledExecutor;
 import org.apache.flink.runtime.instance.InstanceID;
 import org.apache.flink.runtime.messages.Acknowledge;
@@ -38,7 +39,6 @@ import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
 import org.apache.flink.runtime.taskexecutor.exceptions.SlotAllocationException;
 import org.apache.flink.runtime.taskexecutor.exceptions.SlotOccupiedException;
 import org.apache.flink.util.FlinkException;
-import org.apache.flink.util.OptionalConsumer;
 import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
@@ -97,8 +97,6 @@ public class SlotManagerImpl implements SlotManager {
 
 	private final HashMap<TaskManagerSlotId, PendingTaskManagerSlot> pendingSlots;
 
-	private final SlotMatchingStrategy slotMatchingStrategy;
-
 	/** ResourceManager's id. */
 	private ResourceManagerId resourceManagerId;
 
@@ -126,14 +124,12 @@ public class SlotManagerImpl implements SlotManager {
 	private boolean failUnfulfillableRequest = true;
 
 	public SlotManagerImpl(
-			SlotMatchingStrategy slotMatchingStrategy,
 			ScheduledExecutor scheduledExecutor,
 			Time taskManagerRequestTimeout,
 			Time slotRequestTimeout,
 			Time taskManagerTimeout,
 			boolean waitResultConsumedBeforeRelease) {
 
-		this.slotMatchingStrategy = Preconditions.checkNotNull(slotMatchingStrategy);
 		this.scheduledExecutor = Preconditions.checkNotNull(scheduledExecutor);
 		this.taskManagerRequestTimeout = Preconditions.checkNotNull(taskManagerRequestTimeout);
 		this.slotRequestTimeout = Preconditions.checkNotNull(slotRequestTimeout);
@@ -266,7 +262,7 @@ public class SlotManagerImpl implements SlotManager {
 		ArrayList<InstanceID> registeredTaskManagers = new ArrayList<>(taskManagerRegistrations.keySet());
 
 		for (InstanceID registeredTaskManager : registeredTaskManagers) {
-			unregisterTaskManager(registeredTaskManager, new SlotManagerException("The slot manager is being suspended."));
+			unregisterTaskManager(registeredTaskManager);
 		}
 
 		resourceManagerId = null;
@@ -321,6 +317,26 @@ public class SlotManagerImpl implements SlotManager {
 
 			return true;
 		}
+	}
+
+	/**
+	 * Cancel all pending slot requests.
+	 *
+	 * @param cause the exception caused the cancellation
+	 */
+	public void cancelAllPendingSlotRequests(Exception cause) {
+		for (PendingSlotRequest pendingSlotRequest : pendingSlotRequests.values()) {
+			cancelPendingSlotRequest(pendingSlotRequest);
+
+			// notify each job master about this exception
+			resourceActions.notifyAllocationFailure(
+				pendingSlotRequest.getJobId(),
+				pendingSlotRequest.getAllocationId(),
+				cause
+			);
+		}
+
+		pendingSlotRequests.clear();
 	}
 
 	/**
@@ -392,8 +408,15 @@ public class SlotManagerImpl implements SlotManager {
 
 	}
 
+	/**
+	 * Unregisters the task manager identified by the given instance id and its associated slots
+	 * from the slot manager.
+	 *
+	 * @param instanceId identifying the task manager to unregister
+	 * @return True if there existed a registered task manager with the given instance id
+	 */
 	@Override
-	public boolean unregisterTaskManager(InstanceID instanceId, Exception cause) {
+	public boolean unregisterTaskManager(InstanceID instanceId) {
 		checkInit();
 
 		LOG.debug("Unregister TaskManager {} from the SlotManager.", instanceId);
@@ -401,7 +424,7 @@ public class SlotManagerImpl implements SlotManager {
 		TaskManagerRegistration taskManagerRegistration = taskManagerRegistrations.remove(instanceId);
 
 		if (null != taskManagerRegistration) {
-			internalUnregisterTaskManager(taskManagerRegistration, cause);
+			internalUnregisterTaskManager(taskManagerRegistration);
 
 			return true;
 		} else {
@@ -515,7 +538,7 @@ public class SlotManagerImpl implements SlotManager {
 	 * @return A matching slot request which can be deployed in a slot with the given resource
 	 * profile. Null if there is no such slot request pending.
 	 */
-	private PendingSlotRequest findMatchingRequest(ResourceProfile slotResourceProfile) {
+	protected PendingSlotRequest findMatchingRequest(ResourceProfile slotResourceProfile) {
 
 		for (PendingSlotRequest pendingSlotRequest : pendingSlotRequests.values()) {
 			if (!pendingSlotRequest.isAssigned() && slotResourceProfile.isMatching(pendingSlotRequest.getResourceProfile())) {
@@ -535,26 +558,28 @@ public class SlotManagerImpl implements SlotManager {
 	 * request fulfillment, then you should override this method.
 	 *
 	 * @param requestResourceProfile specifying the resource requirements for the a slot request
-	 * @return A matching slot which fulfills the given resource profile. {@link Optional#empty()}
-	 * if there is no such slot available.
+	 * @return A matching slot which fulfills the given resource profile. Null if there is no such
+	 * slot available.
 	 */
-	private Optional<TaskManagerSlot> findMatchingSlot(ResourceProfile requestResourceProfile) {
-		final Optional<TaskManagerSlot> optionalMatchingSlot = slotMatchingStrategy.findMatchingSlot(
-			requestResourceProfile,
-			freeSlots.values(),
-			this::getNumberRegisteredSlotsOf);
+	protected TaskManagerSlot findMatchingSlot(ResourceProfile requestResourceProfile) {
+		Iterator<Map.Entry<SlotID, TaskManagerSlot>> iterator = freeSlots.entrySet().iterator();
 
-		optionalMatchingSlot.ifPresent(taskManagerSlot -> {
+		while (iterator.hasNext()) {
+			TaskManagerSlot taskManagerSlot = iterator.next().getValue();
+
 			// sanity check
 			Preconditions.checkState(
 				taskManagerSlot.getState() == TaskManagerSlot.State.FREE,
 				"TaskManagerSlot %s is not in state FREE but %s.",
 				taskManagerSlot.getSlotId(), taskManagerSlot.getState());
 
-			freeSlots.remove(taskManagerSlot.getSlotId());
-		});
+			if (taskManagerSlot.getResourceProfile().isMatching(requestResourceProfile)) {
+				iterator.remove();
+				return taskManagerSlot;
+			}
+		}
 
-		return optionalMatchingSlot;
+		return null;
 	}
 
 	// ---------------------------------------------------------------------------------------------
@@ -580,12 +605,7 @@ public class SlotManagerImpl implements SlotManager {
 
 		if (slots.containsKey(slotId)) {
 			// remove the old slot first
-			removeSlot(
-				slotId,
-				new SlotManagerException(
-					String.format(
-						"Re-registration of slot %s. This indicates that the TaskExecutor has re-connected.",
-						slotId)));
+			removeSlot(slotId);
 		}
 
 		final TaskManagerSlot slot = createAndRegisterTaskManagerSlot(slotId, resourceProfile, taskManagerConnection);
@@ -749,29 +769,28 @@ public class SlotManagerImpl implements SlotManager {
 	 */
 	private void internalRequestSlot(PendingSlotRequest pendingSlotRequest) throws ResourceManagerException {
 		final ResourceProfile resourceProfile = pendingSlotRequest.getResourceProfile();
+		TaskManagerSlot taskManagerSlot = findMatchingSlot(resourceProfile);
 
-		OptionalConsumer.of(findMatchingSlot(resourceProfile))
-			.ifPresent(taskManagerSlot -> allocateSlot(taskManagerSlot, pendingSlotRequest))
-			.ifNotPresent(() -> fulfillPendingSlotRequestWithPendingTaskManagerSlot(pendingSlotRequest));
-	}
+		if (taskManagerSlot != null) {
+			allocateSlot(taskManagerSlot, pendingSlotRequest);
+		} else {
+			Optional<PendingTaskManagerSlot> pendingTaskManagerSlotOptional = findFreeMatchingPendingTaskManagerSlot(resourceProfile);
 
-	private void fulfillPendingSlotRequestWithPendingTaskManagerSlot(PendingSlotRequest pendingSlotRequest) throws ResourceManagerException {
-		ResourceProfile resourceProfile = pendingSlotRequest.getResourceProfile();
-		Optional<PendingTaskManagerSlot> pendingTaskManagerSlotOptional = findFreeMatchingPendingTaskManagerSlot(resourceProfile);
+			if (!pendingTaskManagerSlotOptional.isPresent()) {
+				pendingTaskManagerSlotOptional = allocateResource(resourceProfile);
+			}
 
-		if (!pendingTaskManagerSlotOptional.isPresent()) {
-			pendingTaskManagerSlotOptional = allocateResource(resourceProfile);
-		}
-
-		OptionalConsumer.of(pendingTaskManagerSlotOptional)
-			.ifPresent(pendingTaskManagerSlot -> assignPendingTaskManagerSlot(pendingSlotRequest, pendingTaskManagerSlot))
-			.ifNotPresent(() -> {
+			if (pendingTaskManagerSlotOptional.isPresent()) {
+				assignPendingTaskManagerSlot(pendingSlotRequest, pendingTaskManagerSlotOptional.get());
+			}
+			else {
 				// request can not be fulfilled by any free slot or pending slot that can be allocated,
 				// check whether it can be fulfilled by allocated slots
 				if (failUnfulfillableRequest && !isFulfillableByRegisteredSlots(pendingSlotRequest.getResourceProfile())) {
 					throw new UnfulfillableSlotRequestException(pendingSlotRequest.getAllocationId(), pendingSlotRequest.getResourceProfile());
 				}
-			});
+			}
+		}
 	}
 
 	private Optional<PendingTaskManagerSlot> findFreeMatchingPendingTaskManagerSlot(ResourceProfile requiredResourceProfile) {
@@ -923,11 +942,10 @@ public class SlotManagerImpl implements SlotManager {
 	 * Removes the given set of slots from the slot manager.
 	 *
 	 * @param slotsToRemove identifying the slots to remove from the slot manager
-	 * @param cause for removing the slots
 	 */
-	private void removeSlots(Iterable<SlotID> slotsToRemove, Exception cause) {
+	private void removeSlots(Iterable<SlotID> slotsToRemove) {
 		for (SlotID slotId : slotsToRemove) {
-			removeSlot(slotId, cause);
+			removeSlot(slotId);
 		}
 	}
 
@@ -935,9 +953,8 @@ public class SlotManagerImpl implements SlotManager {
 	 * Removes the given slot from the slot manager.
 	 *
 	 * @param slotId identifying the slot to remove
-	 * @param cause for removing the slot
 	 */
-	private void removeSlot(SlotID slotId, Exception cause) {
+	private void removeSlot(SlotID slotId) {
 		TaskManagerSlot slot = slots.remove(slotId);
 
 		if (null != slot) {
@@ -947,7 +964,7 @@ public class SlotManagerImpl implements SlotManager {
 				// reject the pending slot request --> triggering a new allocation attempt
 				rejectPendingSlotRequest(
 					slot.getAssignedSlotRequest(),
-					cause);
+					new Exception("The assigned slot " + slot.getSlotId() + " was removed."));
 			}
 
 			AllocationID oldAllocationId = slot.getAllocationId();
@@ -958,7 +975,7 @@ public class SlotManagerImpl implements SlotManager {
 				resourceActions.notifyAllocationFailure(
 					slot.getJobId(),
 					oldAllocationId,
-					cause);
+					new FlinkException("The assigned slot " + slot.getSlotId() + " was removed."));
 			}
 		} else {
 			LOG.debug("There was no slot registered with slot id {}.", slotId);
@@ -1146,10 +1163,10 @@ public class SlotManagerImpl implements SlotManager {
 	// Internal utility methods
 	// ---------------------------------------------------------------------------------------------
 
-	private void internalUnregisterTaskManager(TaskManagerRegistration taskManagerRegistration, Exception cause) {
+	private void internalUnregisterTaskManager(TaskManagerRegistration taskManagerRegistration) {
 		Preconditions.checkNotNull(taskManagerRegistration);
 
-		removeSlots(taskManagerRegistration.getSlots(), cause);
+		removeSlots(taskManagerRegistration.getSlots());
 	}
 
 	private boolean checkDuplicateRequest(AllocationID allocationId) {
@@ -1197,9 +1214,9 @@ public class SlotManagerImpl implements SlotManager {
 
 			taskManagerRegistrationIterator.remove();
 
-			final FlinkException cause = new FlinkException("Triggering of SlotManager#unregisterTaskManagersAndReleaseResources.");
-			internalUnregisterTaskManager(taskManagerRegistration, cause);
-			resourceActions.releaseResource(taskManagerRegistration.getInstanceId(), cause);
+			internalUnregisterTaskManager(taskManagerRegistration);
+
+			resourceActions.releaseResource(taskManagerRegistration.getInstanceId(), new FlinkException("Triggering of SlotManager#unregisterTaskManagersAndReleaseResources."));
 		}
 	}
 }
