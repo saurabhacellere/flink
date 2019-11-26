@@ -46,24 +46,11 @@ import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.client.program.ContextEnvironment;
 import org.apache.flink.client.program.OptimizerPlanEnvironment;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
-import org.apache.flink.configuration.DeploymentOptions;
-import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.configuration.PipelineOptions;
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.configuration.ReadableConfigToConfigurationAdapter;
 import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.core.execution.DefaultExecutorServiceLoader;
-import org.apache.flink.core.execution.DetachedJobExecutionResult;
-import org.apache.flink.core.execution.Executor;
-import org.apache.flink.core.execution.ExecutorFactory;
-import org.apache.flink.core.execution.ExecutorServiceLoader;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.state.AbstractStateBackend;
 import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.runtime.state.StateBackend;
-import org.apache.flink.runtime.state.StateBackendLoader;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -71,6 +58,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.functions.source.ContinuousFileMonitoringFunction;
 import org.apache.flink.streaming.api.functions.source.ContinuousFileReaderOperator;
+import org.apache.flink.streaming.api.functions.source.FileMissingSplitsMode;
 import org.apache.flink.streaming.api.functions.source.FileMonitoringFunction;
 import org.apache.flink.streaming.api.functions.source.FileProcessingMode;
 import org.apache.flink.streaming.api.functions.source.FileReadFunction;
@@ -85,11 +73,9 @@ import org.apache.flink.streaming.api.functions.source.StatefulSequenceSource;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamGraphGenerator;
 import org.apache.flink.streaming.api.operators.StreamSource;
-import org.apache.flink.util.DynamicCodeLoadingException;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SplittableIterator;
 import org.apache.flink.util.StringUtils;
-import org.apache.flink.util.WrappingRuntimeException;
 
 import com.esotericsoftware.kryo.Serializer;
 
@@ -100,8 +86,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -117,7 +101,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * @see org.apache.flink.streaming.api.environment.RemoteStreamEnvironment
  */
 @Public
-public class StreamExecutionEnvironment {
+public abstract class StreamExecutionEnvironment {
 
 	/** The default name to use for a streaming job if no other name has been specified. */
 	public static final String DEFAULT_JOB_NAME = "Flink Streaming Job";
@@ -161,36 +145,10 @@ public class StreamExecutionEnvironment {
 
 	protected final List<Tuple2<String, DistributedCache.DistributedCacheEntry>> cacheFile = new ArrayList<>();
 
-	private final ExecutorServiceLoader executorServiceLoader;
-
-	private final Configuration configuration;
-
-	private final ClassLoader userClassloader;
 
 	// --------------------------------------------------------------------------------------------
 	// Constructor and Properties
 	// --------------------------------------------------------------------------------------------
-
-	public StreamExecutionEnvironment() {
-		this(new Configuration());
-	}
-
-	public StreamExecutionEnvironment(final Configuration configuration) {
-		this(DefaultExecutorServiceLoader.INSTANCE, configuration, null);
-	}
-
-	public StreamExecutionEnvironment(
-			final ExecutorServiceLoader executorServiceLoader,
-			final Configuration configuration,
-			final ClassLoader userClassloader) {
-		this.executorServiceLoader = checkNotNull(executorServiceLoader);
-		this.configuration = checkNotNull(configuration);
-		this.userClassloader = userClassloader == null ? getClass().getClassLoader() : userClassloader;
-	}
-
-	protected Configuration getConfiguration() {
-		return this.configuration;
-	}
 
 	/**
 	 * Gets the config object.
@@ -701,66 +659,6 @@ public class StreamExecutionEnvironment {
 		return timeCharacteristic;
 	}
 
-	/**
-	 * Sets all relevant options contained in the {@link ReadableConfig} such as e.g.
-	 * {@link StreamPipelineOptions#TIME_CHARACTERISTIC}. It will reconfigure
-	 * {@link StreamExecutionEnvironment}, {@link ExecutionConfig} and {@link CheckpointConfig}.
-	 *
-	 * <p>It will change the value of a setting only if a corresponding option was set in the
-	 * {@code configuration}. If a key is not present, the current value of a field will remain
-	 * untouched.
-	 *
-	 * @param configuration a configuration to read the values from
-	 * @param classLoader a class loader to use when loading classes
-	 */
-	@PublicEvolving
-	public void configure(ReadableConfig configuration, ClassLoader classLoader) {
-		configuration.getOptional(StreamPipelineOptions.TIME_CHARACTERISTIC)
-			.ifPresent(this::setStreamTimeCharacteristic);
-		Optional.ofNullable(loadStateBackend(configuration, classLoader))
-			.ifPresent(this::setStateBackend);
-		configuration.getOptional(PipelineOptions.OPERATOR_CHAINING)
-			.ifPresent(c -> this.isChainingEnabled = c);
-		configuration.getOptional(ExecutionOptions.BUFFER_TIMEOUT)
-			.ifPresent(t -> this.setBufferTimeout(t.toMillis()));
-		configuration.getOptional(PipelineOptions.CACHED_FILES)
-			.ifPresent(f -> {
-				this.cacheFile.clear();
-				parseCachedFiles(f).forEach(t -> registerCachedFile(t.f1, t.f0, t.f2));
-			});
-		config.configure(configuration, classLoader);
-		checkpointCfg.configure(configuration);
-	}
-
-	private StateBackend loadStateBackend(ReadableConfig configuration, ClassLoader classLoader) {
-		try {
-			return StateBackendLoader.loadStateBackendFromConfig(
-				new ReadableConfigToConfigurationAdapter(configuration),
-				classLoader,
-				null);
-		} catch (DynamicCodeLoadingException | IOException e) {
-			throw new WrappingRuntimeException(e);
-		}
-	}
-
-	private List<Tuple3<String, String, Boolean>> parseCachedFiles(List<String> s) {
-		return s.stream()
-			.map(v -> Arrays.stream(v.split(","))
-				.map(p -> p.split(":"))
-				.collect(
-					Collectors.toMap(
-						arr -> arr[0], // key name
-						arr -> arr[1] // value
-					)
-				)
-			)
-			.map(m -> Tuple3.of(
-				m.get("name"),
-				m.get("path"),
-				Optional.ofNullable(m.get("executable")).map(Boolean::parseBoolean).orElse(false)))
-			.collect(Collectors.toList());
-	}
-
 	// --------------------------------------------------------------------------------------------
 	// Data stream creations
 	// --------------------------------------------------------------------------------------------
@@ -1069,7 +967,7 @@ public class StreamExecutionEnvironment {
 		TypeInformation<String> typeInfo = BasicTypeInfo.STRING_TYPE_INFO;
 		format.setCharsetName(charsetName);
 
-		return readFile(format, filePath, FileProcessingMode.PROCESS_ONCE, -1, typeInfo);
+		return readFile(format, filePath, FileProcessingMode.PROCESS_ONCE, -1, typeInfo, FileMissingSplitsMode.FAIL_ON_MISSING_SPLITS);
 	}
 
 	/**
@@ -1142,7 +1040,7 @@ public class StreamExecutionEnvironment {
 					"automatically determined. Please specify the TypeInformation of the produced type " +
 					"explicitly by using the 'createInput(InputFormat, TypeInformation)' method instead.");
 		}
-		return readFile(inputFormat, filePath, watchType, interval, typeInformation);
+		return readFile(inputFormat, filePath, watchType, interval, typeInformation, FileMissingSplitsMode.FAIL_ON_MISSING_SPLITS);
 	}
 
 	/**
@@ -1192,7 +1090,7 @@ public class StreamExecutionEnvironment {
 					"automatically determined. Please specify the TypeInformation of the produced type " +
 					"explicitly by using the 'createInput(InputFormat, TypeInformation)' method instead.");
 		}
-		return readFile(inputFormat, filePath, watchType, interval, typeInformation);
+		return readFile(inputFormat, filePath, watchType, interval, typeInformation, FileMissingSplitsMode.FAIL_ON_MISSING_SPLITS);
 	}
 
 	/**
@@ -1256,13 +1154,14 @@ public class StreamExecutionEnvironment {
 												String filePath,
 												FileProcessingMode watchType,
 												long interval,
-												TypeInformation<OUT> typeInformation) {
+												TypeInformation<OUT> typeInformation,
+												FileMissingSplitsMode missingSplitsMode) {
 
 		Preconditions.checkNotNull(inputFormat, "InputFormat must not be null.");
 		Preconditions.checkArgument(!StringUtils.isNullOrWhitespaceOnly(filePath), "The file path must not be null or blank.");
 
 		inputFormat.setFilePath(filePath);
-		return createFileInput(inputFormat, typeInformation, "Custom File Source", watchType, interval);
+		return createFileInput(inputFormat, typeInformation, "Custom File Source", watchType, interval, missingSplitsMode);
 	}
 
 	/**
@@ -1437,7 +1336,7 @@ public class StreamExecutionEnvironment {
 			FileInputFormat<OUT> format = (FileInputFormat<OUT>) inputFormat;
 
 			source = createFileInput(format, typeInfo, "Custom File source",
-					FileProcessingMode.PROCESS_ONCE, -1);
+					FileProcessingMode.PROCESS_ONCE, -1, FileMissingSplitsMode.FAIL_ON_MISSING_SPLITS);
 		} else {
 			source = createInput(inputFormat, typeInfo, "Custom Source");
 		}
@@ -1456,12 +1355,14 @@ public class StreamExecutionEnvironment {
 														TypeInformation<OUT> typeInfo,
 														String sourceName,
 														FileProcessingMode monitoringMode,
-														long interval) {
+														long interval,
+														FileMissingSplitsMode missingSplitsMode) {
 
 		Preconditions.checkNotNull(inputFormat, "Unspecified file input format.");
 		Preconditions.checkNotNull(typeInfo, "Unspecified output type information.");
 		Preconditions.checkNotNull(sourceName, "Unspecified name for the source.");
 		Preconditions.checkNotNull(monitoringMode, "Unspecified monitoring mode.");
+		Preconditions.checkNotNull(missingSplitsMode, "Unspecified missing splits mode.");
 
 		Preconditions.checkArgument(monitoringMode.equals(FileProcessingMode.PROCESS_ONCE) ||
 				interval >= ContinuousFileMonitoringFunction.MIN_MONITORING_INTERVAL,
@@ -1472,7 +1373,7 @@ public class StreamExecutionEnvironment {
 			new ContinuousFileMonitoringFunction<>(inputFormat, monitoringMode, getParallelism(), interval);
 
 		ContinuousFileReaderOperator<OUT> reader =
-			new ContinuousFileReaderOperator<>(inputFormat);
+			new ContinuousFileReaderOperator<>(inputFormat, missingSplitsMode);
 
 		SingleOutputStreamOperator<OUT> source = addSource(monitoringFunction, sourceName)
 				.transform("Split Reader: " + sourceName, typeInfo, reader);
@@ -1618,31 +1519,7 @@ public class StreamExecutionEnvironment {
 	 * @throws Exception which occurs during job execution.
 	 */
 	@Internal
-	public JobExecutionResult execute(StreamGraph streamGraph) throws Exception {
-		if (configuration.get(DeploymentOptions.TARGET) == null) {
-			throw new RuntimeException("No execution.target specified in your configuration file.");
-		}
-
-		consolidateParallelismDefinitionsInConfiguration();
-
-		final ExecutorFactory executorFactory =
-				executorServiceLoader.getExecutorFactory(configuration);
-
-		final Executor executor = executorFactory.getExecutor(configuration);
-
-		try (final JobClient jobClient = executor.execute(streamGraph, configuration).get()) {
-
-			return configuration.getBoolean(DeploymentOptions.ATTACHED)
-					? jobClient.getJobExecutionResult(userClassloader).get()
-					: new DetachedJobExecutionResult(jobClient.getJobID());
-		}
-	}
-
-	private void consolidateParallelismDefinitionsInConfiguration() {
-		if (getParallelism() == ExecutionConfig.PARALLELISM_DEFAULT) {
-			configuration.getOptional(CoreOptions.DEFAULT_PARALLELISM).ifPresent(this::setParallelism);
-		}
-	}
+	public abstract JobExecutionResult execute(StreamGraph streamGraph) throws Exception;
 
 	/**
 	 * Getter of the {@link org.apache.flink.streaming.api.graph.StreamGraph} of the streaming job.
