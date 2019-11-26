@@ -120,7 +120,7 @@ public class YARNSessionCapacitySchedulerITCase extends YarnTestBase {
 		YARN_CONFIGURATION.setInt("yarn.scheduler.capacity.root.default.capacity", 40);
 		YARN_CONFIGURATION.setInt("yarn.scheduler.capacity.root.qa-team.capacity", 60);
 		YARN_CONFIGURATION.set(YarnTestBase.TEST_CLUSTER_NAME_KEY, "flink-yarn-tests-capacityscheduler");
-		startYARNWithConfig(YARN_CONFIGURATION);
+		startYARNWithConfig(YARN_CONFIGURATION, false);
 
 		restClientExecutor = Executors.newSingleThreadExecutor();
 		restClient = new RestClient(RestClientConfiguration.fromConfiguration(new Configuration()), restClientExecutor);
@@ -221,7 +221,8 @@ public class YARNSessionCapacitySchedulerITCase extends YarnTestBase {
 					"-yjm", "768m",
 					"-ytm", taskManagerMemoryMB + "m",
 					"-yD", "taskmanager.memory.off-heap=true",
-					"-yD", "taskmanager.memory.size=" + offHeapMemory + "m", exampleJarLocation.getAbsolutePath()},
+					"-yD", "taskmanager.memory.size=" + offHeapMemory + "m",
+					"-yD", "taskmanager.memory.preallocate=true", exampleJarLocation.getAbsolutePath()},
 				/* test succeeded after this string */
 				"Program execution finished",
 				/* prohibited strings: (to verify the parallelism) */
@@ -394,7 +395,7 @@ public class YARNSessionCapacitySchedulerITCase extends YarnTestBase {
 	public void testNonexistingQueueWARNmessage() throws Exception {
 		runTest(() -> {
 			LOG.info("Starting testNonexistingQueueWARNmessage()");
-			addTestAppender(YarnClusterDescriptor.class, Level.WARN);
+			addTestAppender(AbstractYarnClusterDescriptor.class, Level.WARN);
 			try {
 				runWithArgs(new String[]{"-j", flinkUberjar.getAbsolutePath(),
 					"-t", flinkLibFolder.getAbsolutePath(),

@@ -69,7 +69,7 @@ public class YARNSessionFIFOITCase extends YarnTestBase {
 		YARN_CONFIGURATION.setInt(YarnConfiguration.NM_PMEM_MB, 768);
 		YARN_CONFIGURATION.setInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 512);
 		YARN_CONFIGURATION.set(YarnTestBase.TEST_CLUSTER_NAME_KEY, "flink-yarn-tests-fifo");
-		startYARNWithConfig(YARN_CONFIGURATION);
+		startYARNWithConfig(YARN_CONFIGURATION, false);
 	}
 
 	@After
@@ -239,7 +239,7 @@ public class YARNSessionFIFOITCase extends YarnTestBase {
 	@Test
 	public void testResourceComputation() throws Exception {
 		runTest(() -> {
-			addTestAppender(YarnClusterDescriptor.class, Level.WARN);
+			addTestAppender(AbstractYarnClusterDescriptor.class, Level.WARN);
 			LOG.info("Starting testResourceComputation()");
 			runWithArgs(new String[]{
 				"-j", flinkUberjar.getAbsolutePath(),
@@ -271,7 +271,7 @@ public class YARNSessionFIFOITCase extends YarnTestBase {
 	@Test
 	public void testfullAlloc() throws Exception {
 		runTest(() -> {
-			addTestAppender(YarnClusterDescriptor.class, Level.WARN);
+			addTestAppender(AbstractYarnClusterDescriptor.class, Level.WARN);
 			LOG.info("Starting testfullAlloc()");
 			runWithArgs(new String[]{
 				"-j", flinkUberjar.getAbsolutePath(),
