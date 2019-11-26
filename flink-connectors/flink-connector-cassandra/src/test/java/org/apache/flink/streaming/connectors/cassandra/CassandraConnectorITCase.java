@@ -37,6 +37,7 @@ import org.apache.flink.batch.connectors.cassandra.CassandraPojoOutputFormat;
 import org.apache.flink.batch.connectors.cassandra.CassandraRowOutputFormat;
 import org.apache.flink.batch.connectors.cassandra.CassandraTupleOutputFormat;
 import org.apache.flink.batch.connectors.cassandra.CustomCassandraAnnotatedPojo;
+import org.apache.flink.batch.connectors.cassandra.CustomCassandraAnnotatedPojo2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.InputSplit;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -45,7 +46,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.SinkContextUtil;
 import org.apache.flink.streaming.runtime.operators.WriteAheadSinkTestBase;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
-import org.apache.flink.testutils.junit.FailsOnJava11;
 import org.apache.flink.types.Row;
 
 import com.datastax.driver.core.Cluster;
@@ -54,6 +54,7 @@ import com.datastax.driver.core.QueryOptions;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.mapping.Mapper;
+import com.google.common.util.concurrent.FutureCallback;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -61,7 +62,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,7 +92,6 @@ import static org.junit.Assert.assertTrue;
  * IT cases for all cassandra sinks.
  */
 @SuppressWarnings("serial")
-@Category(FailsOnJava11.class)
 public class CassandraConnectorITCase extends WriteAheadSinkTestBase<Tuple3<String, Integer, Integer>, CassandraTupleWriteAheadSink<Tuple3<String, Integer, Integer>>> {
 
 	private static final Logger LOG = LoggerFactory.getLogger(CassandraConnectorITCase.class);
@@ -131,6 +130,7 @@ public class CassandraConnectorITCase extends WriteAheadSinkTestBase<Tuple3<Stri
 
 	private static final ArrayList<Tuple3<String, Integer, Integer>> collection = new ArrayList<>(20);
 	private static final ArrayList<Row> rowCollection = new ArrayList<>(20);
+	private static final ArrayList<String> successWrites = new ArrayList<>();
 
 	private static final TypeInformation[] FIELD_TYPES = {
 		BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.INT_TYPE_INFO, BasicTypeInfo.INT_TYPE_INFO};
@@ -461,13 +461,12 @@ public class CassandraConnectorITCase extends WriteAheadSinkTestBase<Tuple3<Stri
 
 		DataStreamSource<Row> source = env.fromCollection(rowCollection);
 
-		tEnv.registerDataStream("testFlinkTable", source);
+		tEnv.registerDataStreamInternal("testFlinkTable", source);
 		tEnv.registerTableSink(
 			"cassandraTable",
-			new CassandraAppendTableSink(builder, injectTableName(INSERT_DATA_QUERY)).configure(
-				new String[]{"f0", "f1", "f2"},
-				new TypeInformation[]{Types.STRING, Types.INT, Types.INT}
-			));
+			new String[]{"f0", "f1", "f2"},
+			new TypeInformation[]{Types.STRING, Types.INT, Types.INT},
+			new CassandraAppendTableSink(builder, injectTableName(INSERT_DATA_QUERY)));
 
 		tEnv.sqlQuery("select * from testFlinkTable").insertInto("cassandraTable");
 
@@ -528,6 +527,44 @@ public class CassandraConnectorITCase extends WriteAheadSinkTestBase<Tuple3<Stri
 		customCassandraAnnotatedPojos.sort(Comparator.comparingInt(CustomCassandraAnnotatedPojo::getCounter));
 
 		assertThat(result, samePropertyValuesAs(customCassandraAnnotatedPojos));
+	}
+
+	@Test
+	public void testCassandraBatchPojoFormatWithCustomCallback() throws Exception {
+
+		session.execute(CREATE_TABLE_QUERY.replace(TABLE_NAME_VARIABLE, CustomCassandraAnnotatedPojo2.TABLE_NAME));
+
+		FutureCallback<Void> callback = new FutureCallback<Void>() {
+			@Override
+			public void onSuccess(Void ignored) {
+				onWriteSuccess();
+			}
+
+			@Override
+			public void onFailure(Throwable t) {
+
+			}
+		};
+
+		OutputFormat<CustomCassandraAnnotatedPojo2> sink = new CassandraPojoOutputFormat<>(builder, CustomCassandraAnnotatedPojo2.class, () -> new Mapper.Option[]{Mapper.Option.saveNullFields(true)}, callback);
+
+		List<CustomCassandraAnnotatedPojo2> customCassandraAnnotatedPojos = IntStream.range(0, 20)
+			.mapToObj(x -> new CustomCassandraAnnotatedPojo2(UUID.randomUUID().toString(), x, 0))
+			.collect(Collectors.toList());
+		try {
+			sink.configure(new Configuration());
+			sink.open(0, 1);
+			for (CustomCassandraAnnotatedPojo2 customCassandraAnnotatedPojo : customCassandraAnnotatedPojos) {
+				sink.writeRecord(customCassandraAnnotatedPojo);
+			}
+		} finally {
+			sink.close();
+		}
+		Assert.assertEquals(20, successWrites.size());
+	}
+
+	private void onWriteSuccess() {
+		successWrites.add("Successful writing");
 	}
 
 	@Test
@@ -639,35 +676,5 @@ public class CassandraConnectorITCase extends WriteAheadSinkTestBase<Tuple3<Stri
 			scalaTupleCollection.remove(new scala.Tuple3<>(row.getString("id"), row.getInt("counter"), row.getInt("batch_id")));
 		}
 		Assert.assertEquals(0, scalaTupleCollection.size());
-	}
-
-	@Test
-	public void testCassandraScalaTuplePartialColumnUpdate() throws Exception {
-		CassandraSinkBaseConfig config = CassandraSinkBaseConfig.newBuilder().setIgnoreNullFields(true).build();
-		CassandraScalaProductSink<scala.Tuple3<String, Integer, Integer>> sink = new CassandraScalaProductSink<>(injectTableName(INSERT_DATA_QUERY), builder, config);
-
-		String id = UUID.randomUUID().toString();
-		Integer counter = 1;
-		Integer batchId = 0;
-
-		// Send partial records across multiple request
-		scala.Tuple3<String, Integer, Integer> scalaTupleRecordFirst = new scala.Tuple3<>(id, counter, null);
-		scala.Tuple3<String, Integer, Integer> scalaTupleRecordSecond = new scala.Tuple3<>(id, null, batchId);
-
-		try {
-			sink.open(new Configuration());
-			sink.invoke(scalaTupleRecordFirst, SinkContextUtil.forTimestamp(0));
-			sink.invoke(scalaTupleRecordSecond, SinkContextUtil.forTimestamp(0));
-		} finally {
-			sink.close();
-		}
-
-		ResultSet rs = session.execute(injectTableName(SELECT_DATA_QUERY));
-		List<com.datastax.driver.core.Row> rows = rs.all();
-		Assert.assertEquals(1, rows.size());
-		// Since nulls are ignored, we should be reading one complete record
-		for (com.datastax.driver.core.Row row : rows) {
-			Assert.assertEquals(new scala.Tuple3<>(id, counter, batchId), new scala.Tuple3<>(row.getString("id"), row.getInt("counter"), row.getInt("batch_id")));
-		}
 	}
 }
