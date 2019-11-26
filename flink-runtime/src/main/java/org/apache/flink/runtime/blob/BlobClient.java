@@ -86,14 +86,15 @@ public final class BlobClient implements Closeable {
 			if (SSLUtils.isInternalSSLEnabled(clientConfig) && clientConfig.getBoolean(BlobServerOptions.SSL_ENABLED)) {
 				LOG.info("Using ssl connection to the blob server");
 
-				socket = SSLUtils.createSSLClientSocketFactory(clientConfig).createSocket();
+				socket = SSLUtils.createSSLClientSocketFactory(clientConfig).createSocket(
+					serverAddress.getHostName(),
+					serverAddress.getPort());
 			}
 			else {
-				socket = new Socket();
+				// Establish the socket using the hostname and port. This avoids a potential issue where the
+				// InetSocketAddress can cache a failure in hostname resolution forever.
+				socket = new Socket(serverAddress.getHostName(), serverAddress.getPort());
 			}
-
-			socket.connect(serverAddress, clientConfig.getInteger(BlobServerOptions.CONNECT_TIMEOUT));
-			socket.setSoTimeout(clientConfig.getInteger(BlobServerOptions.SO_TIMEOUT));
 		}
 		catch (Exception e) {
 			BlobUtils.closeSilently(socket, LOG);
@@ -183,6 +184,10 @@ public final class BlobClient implements Closeable {
 
 	public boolean isClosed() {
 		return this.socket.isClosed();
+	}
+
+	public boolean isConnected() {
+		return socket.isConnected();
 	}
 
 	// --------------------------------------------------------------------------------------------
