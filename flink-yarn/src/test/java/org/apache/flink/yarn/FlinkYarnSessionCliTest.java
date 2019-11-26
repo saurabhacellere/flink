@@ -23,9 +23,9 @@ import org.apache.flink.client.deployment.ClusterClientServiceLoader;
 import org.apache.flink.client.deployment.ClusterSpecification;
 import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DeploymentOptions;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.JobManagerOptions;
+import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
@@ -127,18 +127,23 @@ public class FlinkYarnSessionCliTest extends TestLogger {
 
 	@Test
 	public void testCorrectSettingOfDetachedMode() throws Exception {
-		final String[] params = new String[] {"-yd"};
+		String[] params =
+			new String[] {"-yd"};
 
-		final FlinkYarnSessionCli yarnCLI = new FlinkYarnSessionCli(
+		FlinkYarnSessionCli yarnCLI = new FlinkYarnSessionCli(
 			new Configuration(),
 			tmp.getRoot().getAbsolutePath(),
 			"y",
 			"yarn");
 
 		final CommandLine commandLine = yarnCLI.parseCommandLineOptions(params, true);
-		final Configuration executorConfig = yarnCLI.applyCommandLineOptionsToConfiguration(commandLine);
 
-		assertThat(executorConfig.get(DeploymentOptions.ATTACHED), is(false));
+		final Configuration executorConfig = yarnCLI.applyCommandLineOptionsToConfiguration(commandLine);
+		final ClusterClientFactory<ApplicationId> clientFactory = getClusterClientFactory(executorConfig);
+		final YarnClusterDescriptor descriptor = (YarnClusterDescriptor) clientFactory.createClusterDescriptor(executorConfig);
+
+		// each task manager has 3 slots but the parallelism is 7. Thus the slots should be increased.
+		assertTrue(descriptor.isDetachedMode());
 	}
 
 	@Test
@@ -321,7 +326,7 @@ public class FlinkYarnSessionCliTest extends TestLogger {
 		final int taskManagerMemory = 7331;
 		final int slotsPerTaskManager = 30;
 
-		configuration.setString(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY, jobManagerMemory + "m");
+		configuration.set(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY, MemorySize.parse(jobManagerMemory + "m"));
 		configuration.setString(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY, taskManagerMemory + "m");
 		configuration.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, slotsPerTaskManager);
 
@@ -351,7 +356,7 @@ public class FlinkYarnSessionCliTest extends TestLogger {
 	public void testConfigurationClusterSpecification() throws Exception {
 		final Configuration configuration = new Configuration();
 		final int jobManagerMemory = 1337;
-		configuration.setString(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY, jobManagerMemory + "m");
+		configuration.set(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY, MemorySize.parse(jobManagerMemory + "m"));
 		final int taskManagerMemory = 7331;
 		configuration.setString(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY, taskManagerMemory + "m");
 		final int slotsPerTaskManager = 42;
@@ -445,7 +450,7 @@ public class FlinkYarnSessionCliTest extends TestLogger {
 	@Test
 	public void testHeapMemoryPropertyWithOldConfigKey() throws Exception {
 		Configuration configuration = new Configuration();
-		configuration.setInteger(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY_MB, 2048);
+		configuration.set(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY_MB, MemorySize.parse(2048 + "m"));
 		configuration.setInteger(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY_MB, 4096);
 
 		final FlinkYarnSessionCli flinkYarnSessionCli = new FlinkYarnSessionCli(
