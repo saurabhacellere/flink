@@ -23,6 +23,7 @@ import java.util
 import org.apache.flink.api.scala._
 import org.apache.flink.api.scala.util.CollectionDataSets
 import org.apache.flink.table.api.scala._
+import org.apache.flink.table.expressions.utils.UDFWithJobParameterChecking
 import org.apache.flink.table.runtime.utils.TableProgramsTestBase.TableConfigMode
 import org.apache.flink.table.runtime.utils.{TableProgramsCollectionTestBase, TableProgramsTestBase}
 import org.apache.flink.table.utils.MemoryTableSourceSinkUtil
@@ -202,6 +203,17 @@ class TableEnvironmentITCase(
 
     val expected = List("1,1,Hi", "2,2,Hello", "3,2,Hello world")
     assertEquals(expected.sorted, MemoryTableSourceSinkUtil.tableDataStrings.sorted)
+  }
+
+  @Test
+  def testMergeParameters(): Unit = {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    val tEnv = BatchTableEnvironment.create(env)
+    val t = CollectionDataSets.getSmall3TupleDataSet(env).toTable(tEnv).as('a, 'b, 'c)
+
+    tEnv.getConfig.getConfiguration.setString("testConf", "1")
+    val udfForChecking = new UDFWithJobParameterChecking(Map("testConf" -> "1"))
+    t.select(udfForChecking('a)).toDataSet[Int].collect()
   }
 }
 
