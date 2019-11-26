@@ -92,7 +92,7 @@ public class CoreOptions {
 	 */
 	public static final ConfigOption<String> ALWAYS_PARENT_FIRST_LOADER_PATTERNS = ConfigOptions
 		.key("classloader.parent-first-patterns.default")
-		.defaultValue("java.;scala.;org.apache.flink.;com.esotericsoftware.kryo;org.apache.hadoop.;javax.annotation.;org.slf4j;org.apache.log4j;org.apache.logging;org.apache.commons.logging;ch.qos.logback;org.xml;javax.xml;org.apache.xerces;org.w3c")
+		.defaultValue("java.;scala.;org.apache.flink.;com.esotericsoftware.kryo;org.apache.hadoop.;javax.annotation.;org.slf4j;org.apache.log4j;org.apache.logging;org.apache.commons.logging;ch.qos.logback")
 		.withDeprecatedKeys("classloader.parent-first-patterns")
 		.withDescription("A (semicolon-separated) list of patterns that specifies which classes should always be" +
 			" resolved through the parent ClassLoader first. A pattern is a simple prefix that is checked against" +
@@ -259,6 +259,22 @@ public class CoreOptions {
 				" directory and place a single result file into it. If the option is set to \"false\"," +
 				" the writer will directly create the file directly at the output path, without creating a containing" +
 				" directory.");
+
+	public static final ConfigOption<Boolean> FLINK_JVM_DEFAULT_GC_LOGGING =
+		key("jvm.gc-logging")
+			.defaultValue(false)
+			.withDescription("When enabled, jvm will be launched with default gc options which will log gc infos" +
+				" under log directory");
+
+	public static final ConfigOption<Boolean> FLINK_JVM_HEAPDUMP_ON_OOM =
+		key("jvm.heapdump-on-oom")
+			.defaultValue(true)
+			.withDescription("When enabled, jvm will save heapdump files when OOMs happen.");
+
+	public static final ConfigOption<String> FLINK_JVM_HEAPDUMP_DIRECTORY =
+		key("jvm.heapdump.directory")
+			.defaultValue(System.getProperty("java.io.tmpdir"))
+			.withDescription("The directory to save heap dump file when OOMs happen.");
 
 	/**
 	 * The total number of input plus output connections that a file system for the given scheme may open.

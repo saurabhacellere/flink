@@ -30,6 +30,7 @@ import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.ConfigUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.DeploymentOptions;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.configuration.JobManagerOptions;
@@ -144,6 +145,8 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 
 	private final Configuration flinkConfiguration;
 
+	private final boolean detached;
+
 	private final String customName;
 
 	private final String nodeLabel;
@@ -170,6 +173,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		getLocalFlinkDistPath(flinkConfiguration).ifPresent(this::setLocalJarPath);
 		decodeDirsToShipToCluster(flinkConfiguration).ifPresent(this::addShipFiles);
 
+		this.detached = !flinkConfiguration.getBoolean(DeploymentOptions.ATTACHED);
 		this.yarnQueue = flinkConfiguration.getString(YarnConfigOptions.APPLICATION_QUEUE);
 		this.dynamicPropertiesEncoded = flinkConfiguration.getString(YarnConfigOptionsInternal.DYNAMIC_PROPERTIES);
 		this.customName = flinkConfiguration.getString(YarnConfigOptions.APPLICATION_NAME);
@@ -332,6 +336,14 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * @deprecated The cluster descriptor should not know about this option.
+	 */
+	@Deprecated
+	public boolean isDetachedMode() {
+		return detached;
 	}
 
 	public String getZookeeperNamespace() {
@@ -559,14 +571,6 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 				yarnClient,
 				yarnApplication,
 				validClusterSpecification);
-
-		// print the application id for user to cancel themselves.
-		if (detached) {
-			LOG.info("The Flink YARN client has been started in detached mode. In order to stop " +
-				"Flink on YARN, use the following command or a YARN web interface to stop " +
-				"it:\nyarn application -kill " + report.getApplicationId() + "\nPlease also note that the " +
-				"temporary files of the YARN session in the home directory will not be removed.");
-		}
 
 		final String host = report.getHost();
 		final int port = report.getRpcPort();
@@ -980,6 +984,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		final boolean hasLog4j = logConfigFilePath != null && logConfigFilePath.endsWith(CONFIG_FILE_LOG4J_NAME);
 
 		final ContainerLaunchContext amContainer = setupApplicationMasterContainer(
+				appId.toString(),
 				yarnClusterEntrypoint,
 				hasLogback,
 				hasLog4j,
@@ -1010,6 +1015,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		appMasterEnv.put(YarnConfigKeys.ENV_CLIENT_HOME_DIR, homeDir.toString());
 		appMasterEnv.put(YarnConfigKeys.ENV_CLIENT_SHIP_FILES, envShipFileList.toString());
 		appMasterEnv.put(YarnConfigKeys.ENV_SLOTS, String.valueOf(clusterSpecification.getSlotsPerTaskManager()));
+		appMasterEnv.put(YarnConfigKeys.ENV_DETACHED, String.valueOf(detached));
 		appMasterEnv.put(YarnConfigKeys.ENV_ZOOKEEPER_NAMESPACE, getZookeeperNamespace());
 		appMasterEnv.put(YarnConfigKeys.FLINK_YARN_FILES, yarnFilesDir.toUri().toString());
 
@@ -1109,7 +1115,13 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 			lastAppState = appState;
 			Thread.sleep(250);
 		}
-
+		// print the application id for user to cancel themselves.
+		if (isDetachedMode()) {
+			LOG.info("The Flink YARN client has been started in detached mode. In order to stop " +
+					"Flink on YARN, use the following command or a YARN web interface to stop " +
+					"it:\nyarn application -kill " + appId + "\nPlease also note that the " +
+					"temporary files of the YARN session in the home directory will not be removed.");
+		}
 		// since deployment was successful, remove the hook
 		ShutdownHookUtil.removeShutdownHook(deploymentFailureHook, getClass().getSimpleName(), LOG);
 		return report;
@@ -1607,7 +1619,8 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		pluginsDir.ifPresent(effectiveShipFiles::add);
 	}
 
-	ContainerLaunchContext setupApplicationMasterContainer(
+	protected ContainerLaunchContext setupApplicationMasterContainer(
+			String appId,
 			String yarnClusterEntrypoint,
 			boolean hasLogback,
 			boolean hasLog4j,
@@ -1615,8 +1628,8 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 			int jobManagerMemoryMb) {
 		// ------------------ Prepare Application Master Container  ------------------------------
 
-		// respect custom JVM options in the YAML file
-		String javaOpts = flinkConfiguration.getString(CoreOptions.FLINK_JVM_OPTIONS);
+		String javaOpts = BootstrapTools.getJvmOpts(
+			appId, "jobmanager", ApplicationConstants.LOG_DIR_EXPANSION_VAR, flinkConfiguration);
 		if (flinkConfiguration.getString(CoreOptions.FLINK_JM_JVM_OPTIONS).length() > 0) {
 			javaOpts += " " + flinkConfiguration.getString(CoreOptions.FLINK_JM_JVM_OPTIONS);
 		}
