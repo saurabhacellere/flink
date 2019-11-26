@@ -42,27 +42,20 @@ public class ConfigurationParserUtils {
 	 * @return managed memory size (in megabytes)
 	 */
 	public static long getManagedMemorySize(Configuration configuration) {
-		long managedMemorySize;
-		String managedMemorySizeDefaultVal = TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE.defaultValue();
-		if (!configuration.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE).equals(managedMemorySizeDefaultVal)) {
+		long managedMemorySize = 0L;
+		if(configuration.contains(TaskManagerOptions.MANAGED_MEMORY_SIZE)){
 			try {
 				managedMemorySize = MemorySize.parse(
-					configuration.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE), MEGA_BYTES).getMebiBytes();
+					configuration.getString(TaskManagerOptions.MANAGED_MEMORY_SIZE), MEGA_BYTES).getMebiBytes();
 			} catch (IllegalArgumentException e) {
-				throw new IllegalConfigurationException("Could not read " + TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE
-
-					.key(), e);
+				throw new IllegalConfigurationException("Could not read " + TaskManagerOptions.MANAGED_MEMORY_SIZE.key(), e);
 			}
-		} else {
-			managedMemorySize = Long.valueOf(managedMemorySizeDefaultVal);
+
+			checkConfigParameter( managedMemorySize > 0,
+				managedMemorySize, TaskManagerOptions.MANAGED_MEMORY_SIZE.key(),
+				"MemoryManager needs at least one MB of memory. " +
+					"If you leave this config parameter empty, the system automatically pick a fraction of the available memory.");
 		}
-
-		checkConfigParameter(configuration.getString(
-			TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE).equals(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE.defaultValue()) || managedMemorySize > 0,
-			managedMemorySize, TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE.key(),
-			"MemoryManager needs at least one MB of memory. " +
-				"If you leave this config parameter empty, the system automatically pick a fraction of the available memory.");
-
 		return managedMemorySize;
 	}
 
@@ -73,10 +66,10 @@ public class ConfigurationParserUtils {
 	 * @return fraction of managed memory
 	 */
 	public static float getManagedMemoryFraction(Configuration configuration) {
-		float managedMemoryFraction = configuration.getFloat(TaskManagerOptions.LEGACY_MANAGED_MEMORY_FRACTION);
+		float managedMemoryFraction = configuration.getFloat(TaskManagerOptions.MANAGED_MEMORY_FRACTION);
 
 		checkConfigParameter(managedMemoryFraction > 0.0f && managedMemoryFraction < 1.0f, managedMemoryFraction,
-			TaskManagerOptions.LEGACY_MANAGED_MEMORY_FRACTION.key(),
+			TaskManagerOptions.MANAGED_MEMORY_FRACTION.key(),
 			"MemoryManager fraction of the free memory must be between 0.0 and 1.0");
 
 		return managedMemoryFraction;
