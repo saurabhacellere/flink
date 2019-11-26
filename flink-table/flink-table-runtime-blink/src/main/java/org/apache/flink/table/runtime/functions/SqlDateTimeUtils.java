@@ -77,7 +77,7 @@ public class SqlDateTimeUtils {
 	 * <p>This is the modulo 'mask' used when converting
 	 * TIMESTAMP values to DATE and TIME values.
 	 */
-	private static final long MILLIS_PER_DAY = 86400000L; // = 24 * 60 * 60 * 1000
+	private static final long MILLIS_PER_DAY = 86400000; // = 24 * 60 * 60 * 1000
 
 	/** The SimpleDateFormat string for ISO dates, "yyyy-MM-dd". */
 	private static final String DATE_FORMAT_STRING = "yyyy-MM-dd";
@@ -130,7 +130,7 @@ public class SqlDateTimeUtils {
 	// Date/Time/Timestamp --> internal int/int/long conversion
 	// --------------------------------------------------------------------------------------------
 
-	/** Converts the internal representation of a SQL DATE (int) to the Java
+	/** Converts the internal representation of an SQL DATE (int) to the Java
 	 * type used for UDF parameters ({@link java.sql.Date}). */
 	public static java.sql.Date internalToDate(int v) {
 		// note that, in this case, can't handle Daylight Saving Time
@@ -138,14 +138,14 @@ public class SqlDateTimeUtils {
 		return new java.sql.Date(t - LOCAL_TZ.getOffset(t));
 	}
 
-	/** Converts the internal representation of a SQL TIME (int) to the Java
+	/** Converts the internal representation of an SQL TIME (int) to the Java
 	 * type used for UDF parameters ({@link java.sql.Time}). */
 	public static java.sql.Time internalToTime(int v) {
 		// note that, in this case, can't handle Daylight Saving Time
 		return new java.sql.Time(v - LOCAL_TZ.getOffset(v));
 	}
 
-	/** Converts the internal representation of a SQL TIMESTAMP (long) to the Java
+	/** Converts the internal representation of an SQL TIMESTAMP (long) to the Java
 	 * type used for UDF parameters ({@link java.sql.Timestamp}). */
 	public static java.sql.Timestamp internalToTimestamp(long v) {
 		return new java.sql.Timestamp(v - LOCAL_TZ.getOffset(v));
@@ -1295,12 +1295,6 @@ public class SqlDateTimeUtils {
 			multiplier /= 10;
 		}
 		return r;
-	}
-
-	// TODO: remove if CALCITE-3199 fixed
-	//  https://issues.apache.org/jira/browse/CALCITE-3199
-	public static long unixDateCeil(TimeUnitRange range, long date) {
-		return julianDateFloor(range, (int) date + EPOCH_JULIAN, false);
 	}
 
 }

@@ -24,12 +24,12 @@ under the License.
 
 This is a complete list of Data Definition Language (DDL) and Data Manipulation Language (DML) constructs supported in Flink.
 * This will be replaced by the TOC
-{:toc}
+{:toc} 
 
 ## Query
 SQL queries are specified with the `sqlQuery()` method of the `TableEnvironment`. The method returns the result of the SQL query as a `Table`. A `Table` can be used in [subsequent SQL and Table API queries](common.html#mixing-table-api-and-sql), be [converted into a DataSet or DataStream](common.html#integration-with-datastream-and-dataset-api), or [written to a TableSink](common.html#emit-a-table)). SQL and Table API queries can be seamlessly mixed and are holistically optimized and translated into a single program.
 
-In order to access a table in a SQL query, it must be [registered in the TableEnvironment](common.html#register-tables-in-the-catalog). A table can be registered from a [TableSource](common.html#register-a-tablesource), [Table](common.html#register-a-table), [CREATE TABLE statement](#create-table), [DataStream, or DataSet](common.html#register-a-datastream-or-dataset-as-table). Alternatively, users can also [register external catalogs in a TableEnvironment](common.html#register-an-external-catalog) to specify the location of the data sources.
+In order to access a table in an SQL query, it must be [registered in the TableEnvironment](common.html#register-tables-in-the-catalog). A table can be registered from a [TableSource](common.html#register-a-tablesource), [Table](common.html#register-a-table), [CREATE TABLE statement](#create-table), [DataStream, or DataSet](common.html#register-a-datastream-or-dataset-as-table). Alternatively, users can also [register external catalogs in a TableEnvironment](common.html#register-an-external-catalog) to specify the location of the data sources.
 
 For convenience `Table.toString()` automatically registers the table under a unique name in its `TableEnvironment` and returns the name. Hence, `Table` objects can be directly inlined into SQL queries (by string concatenation) as shown in the examples below.
 
@@ -37,7 +37,7 @@ For convenience `Table.toString()` automatically registers the table under a uni
 
 ### Specifying a Query
 
-The following examples show how to specify a SQL queries on registered and inlined tables.
+The following examples show how to specify an SQL queries on registered and inlined tables.
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -54,24 +54,19 @@ Table result = tableEnv.sqlQuery(
   "SELECT SUM(amount) FROM " + table + " WHERE product LIKE '%Rubber%'");
 
 // SQL query with a registered table
-// register the DataStream as view "Orders"
-tableEnv.createTemporaryView("Orders", ds, "user, product, amount");
-// run a SQL query on the Table and retrieve the result as a new Table
+// register the DataStream as table "Orders"
+tableEnv.registerDataStream("Orders", ds, "user, product, amount");
+// run an SQL query on the Table and retrieve the result as a new Table
 Table result2 = tableEnv.sqlQuery(
   "SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'");
 
 // SQL update with a registered table
 // create and register a TableSink
-final Schema schema = new Schema()
-    .field("product", DataTypes.STRING())
-    .field("amount", DataTypes.INT());
-
-tableEnv.connect(new FileSystem("/path/to/file"))
-    .withFormat(...)
-    .withSchema(schema)
-    .createTemporaryTable("RubberOrders");
-
-// run a SQL update query on the Table and emit the result to the TableSink
+TableSink csvSink = new CsvTableSink("/path/to/file", ...);
+String[] fieldNames = {"product", "amount"};
+TypeInformation[] fieldTypes = {Types.STRING, Types.INT};
+tableEnv.registerTableSink("RubberOrders", fieldNames, fieldTypes, csvSink);
+// run an SQL update query on the Table and emit the result to the TableSink
 tableEnv.sqlUpdate(
   "INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'");
 {% endhighlight %}
@@ -92,23 +87,18 @@ val result = tableEnv.sqlQuery(
 
 // SQL query with a registered table
 // register the DataStream under the name "Orders"
-tableEnv.createTemporaryView("Orders", ds, 'user, 'product, 'amount)
-// run a SQL query on the Table and retrieve the result as a new Table
+tableEnv.registerDataStream("Orders", ds, 'user, 'product, 'amount)
+// run an SQL query on the Table and retrieve the result as a new Table
 val result2 = tableEnv.sqlQuery(
   "SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'")
 
 // SQL update with a registered table
 // create and register a TableSink
-val schema = new Schema()
-    .field("product", DataTypes.STRING())
-    .field("amount", DataTypes.INT())
-
-tableEnv.connect(new FileSystem("/path/to/file"))
-    .withFormat(...)
-    .withSchema(schema)
-    .createTemporaryTable("RubberOrders")
-
-// run a SQL update query on the Table and emit the result to the TableSink
+val csvSink: CsvTableSink = new CsvTableSink("/path/to/file", ...)
+val fieldNames: Array[String] = Array("product", "amount")
+val fieldTypes: Array[TypeInformation[_]] = Array(Types.STRING, Types.INT)
+tableEnv.registerTableSink("RubberOrders", fieldNames, fieldTypes, csvSink)
+// run an SQL update query on the Table and emit the result to the TableSink
 tableEnv.sqlUpdate(
   "INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'")
 {% endhighlight %}
@@ -127,16 +117,12 @@ result = table_env \
 
 # SQL update with a registered table
 # create and register a TableSink
-t_env.connect(FileSystem().path("/path/to/file")))
-    .with_format(Csv()
-                 .field_delimiter(',')
-                 .deriveSchema())
-    .with_schema(Schema()
-                 .field("product", DataTypes.STRING())
-                 .field("amount", DataTypes.BIGINT()))
-    .create_temporary_table("RubberOrders")
-
-# run a SQL update query on the Table and emit the result to the TableSink
+table_env.register_table("Orders", table)
+field_names = ["product", "amount"]
+field_types = [DataTypes.STRING(), DataTypes.BIGINT()]
+csv_sink = CsvTableSink(field_names, field_types, "/path/to/file", ...)
+table_env.register_table_sink("RubberOrders", csv_sink)
+# run an SQL update query on the Table and emit the result to the TableSink
 table_env \
     .sql_update("INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'")
 {% endhighlight %}
@@ -386,7 +372,7 @@ SELECT * FROM Orders WHERE a % 2 = 0
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-      <p>UDFs must be registered in the TableEnvironment. See the <a href="{{ site.baseurl }}/dev/table/functions/udfs.html">UDF documentation</a> for details on how to specify and register scalar UDFs.</p>
+      <p>UDFs must be registered in the TableEnvironment. See the <a href="udfs.html">UDF documentation</a> for details on how to specify and register scalar UDFs.</p>
 {% highlight sql %}
 SELECT PRETTY_PRINT(user) FROM Orders
 {% endhighlight %}
@@ -508,7 +494,7 @@ HAVING SUM(amount) > 50
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>UDAGGs must be registered in the TableEnvironment. See the <a href="{{ site.baseurl }}/dev/table/functions/udfs.html">UDF documentation</a> for details on how to specify and register UDAGGs.</p>
+        <p>UDAGGs must be registered in the TableEnvironment. See the <a href="udfs.html">UDF documentation</a> for details on how to specify and register UDAGGs.</p>
 {% highlight sql %}
 SELECT MyAggregate(amount)
 FROM Orders
@@ -612,12 +598,12 @@ FROM Orders CROSS JOIN UNNEST(tags) AS t (tag)
     </tr>
     <tr>
     	<td>
-        <strong>Join with Table Function (UDTF)</strong><br>
+        <strong>Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
     	<td>
         <p>Joins a table with the results of a table function. Each row of the left (outer) table is joined with all rows produced by the corresponding call of the table function.</p>
-        <p>User-defined table functions (UDTFs) must be registered before. See the <a href="{{ site.baseurl }}/dev/table/functions/udfs.html">UDF documentation</a> for details on how to specify and register UDTFs. </p>
+        <p>User-defined table functions (UDTFs) must be registered before. See the <a href="udfs.html">UDF documentation</a> for details on how to specify and register UDTFs. </p>
 
         <p><b>Inner Join</b></p>
         <p>A row of the left (outer) table is dropped, if its table function call returns an empty result.</p>
@@ -638,7 +624,7 @@ FROM Orders LEFT JOIN LATERAL TABLE(unnest_udtf(tags)) t AS tag ON TRUE
     </tr>
     <tr>
       <td>
-        <strong>Join with Temporal Table Function</strong><br>
+        <strong>Join with Temporal Table</strong><br>
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
@@ -659,29 +645,6 @@ WHERE
   r_currency = o_currency
 {% endhighlight %}
         <p>For more information please check the more detailed <a href="streaming/temporal_tables.html">temporal tables concept description</a>.</p>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong>Join with Temporal Table</strong><br>
-        <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
-      </td>
-      <td>
-        <p><a href="streaming/temporal_tables.html">Temporal Tables</a> are tables that track changes over time.
-        A <a href="streaming/temporal_tables.html#temporal-table">Temporal Table</a> provides access to the versions of a temporal table at a specific point in time.</p>
-
-        <p>Only inner and left joins with processing-time temporal tables are supported.</p>
-        <p>The following example assumes that <strong>LatestRates</strong> is a <a href="streaming/temporal_tables.html#temporal-table">Temporal Table</a> which is materialized with the latest rate.</p>
-{% highlight sql %}
-SELECT
-  o.amout, o.currency, r.rate, o.amount * r.rate
-FROM
-  Orders AS o
-  JOIN LatestRates FOR SYSTEM_TIME AS OF o.proctime AS r
-  ON r.currency = o.currency
-{% endhighlight %}
-        <p>For more information please check the more detailed <a href="streaming/temporal_tables.html">Temporal Tables</a> concept description.</p>
-        <p>Only supported in Blink planner.</p>
       </td>
     </tr>
 
@@ -849,227 +812,6 @@ LIMIT 3
 
 {% top %}
 
-#### Top-N
-
-<span class="label label-danger">Attention</span> Top-N is only supported in Blink planner.
-
-Top-N queries ask for the N smallest or largest values ordered by columns. Both smallest and largest values sets are considered Top-N queries. Top-N queries are useful in cases where the need is to display only the N bottom-most or the N top-
-most records from batch/streaming table on a condition. This result set can be used for further analysis.
-
-Flink uses the combination of a OVER window clause and a filter condition to express a Top-N query. With the power of OVER window `PARTITION BY` clause, Flink also supports per group Top-N. For example, the top five products per category that have the maximum sales in realtime. Top-N queries are supported for SQL on batch and streaming tables.
-
-The following shows the syntax of the TOP-N statement:
-
-{% highlight sql %}
-SELECT [column_list]
-FROM (
-   SELECT [column_list],
-     ROW_NUMBER() OVER ([PARTITION BY col1[, col2...]]
-       ORDER BY col1 [asc|desc][, col2 [asc|desc]...]) AS rownum
-   FROM table_name)
-WHERE rownum <= N [AND conditions]
-{% endhighlight %}
-
-**Parameter Specification:**
-
-- `ROW_NUMBER()`: Assigns an unique, sequential number to each row, starting with one, according to the ordering of rows within the partition. Currently, we only support `ROW_NUMBER` as the over window function. In the future, we will support `RANK()` and `DENSE_RANK()`.
-- `PARTITION BY col1[, col2...]`: Specifies the partition columns. Each partition will have a Top-N result.
-- `ORDER BY col1 [asc|desc][, col2 [asc|desc]...]`: Specifies the ordering columns. The ordering directions can be different on different columns.
-- `WHERE rownum <= N`: The `rownum <= N` is required for Flink to recognize this query is a Top-N query. The N represents the N smallest or largest records will be retained.
-- `[AND conditions]`: It is free to add other conditions in the where clause, but the other conditions can only be combined with `rownum <= N` using `AND` conjunction.
-
-<span class="label label-danger">Attention in Streaming Mode</span> The TopN query is <span class="label label-info">Result Updating</span>. Flink SQL will sort the input data stream according to the order key, so if the top N records have been changed, the changed ones will be sent as retraction/update records to downstream.
-It is recommended to use a storage which supports updating as the sink of Top-N query. In addition, if the top N records need to be stored in external storage, the result table should have the same unique key with the Top-N query.
-
-The unique keys of Top-N query is the combination of partition columns and rownum column. Top-N query can also derive the unique key of upstream. Take following job as an example, say `product_id` is the unique key of the `ShopSales`, then the unique keys of the Top-N query are [`category`, `rownum`] and [`product_id`].
-
-The following examples show how to specify SQL queries with Top-N on streaming tables. This is an example to get "the top five products per category that have the maximum sales in realtime" we mentioned above.
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
-
-// ingest a DataStream from an external source
-DataStream<Tuple3<String, String, String, Long>> ds = env.addSource(...);
-// register the DataStream as table "ShopSales"
-tableEnv.createTemporaryView("ShopSales", ds, "product_id, category, product_name, sales");
-
-// select top-5 products per category which have the maximum sales.
-Table result1 = tableEnv.sqlQuery(
-  "SELECT * " +
-  "FROM (" +
-  "   SELECT *," +
-  "       ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) as row_num" +
-  "   FROM ShopSales)" +
-  "WHERE row_num <= 5");
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-val env = StreamExecutionEnvironment.getExecutionEnvironment
-val tableEnv = TableEnvironment.getTableEnvironment(env)
-
-// read a DataStream from an external source
-val ds: DataStream[(String, String, String, Long)] = env.addSource(...)
-// register the DataStream under the name "ShopSales"
-tableEnv.createTemporaryView("ShopSales", ds, 'product_id, 'category, 'product_name, 'sales)
-
-
-// select top-5 products per category which have the maximum sales.
-val result1 = tableEnv.sqlQuery(
-    """
-      |SELECT *
-      |FROM (
-      |   SELECT *,
-      |       ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) as row_num
-      |   FROM ShopSales)
-      |WHERE row_num <= 5
-    """.stripMargin)
-{% endhighlight %}
-</div>
-</div>
-
-##### No Ranking Output Optimization
-
-As described above, the `rownum` field will be written into the result table as one field of the unique key, which may lead to a lot of records being written to the result table. For example, when the record (say `product-1001`) of ranking 9 is updated and its rank is upgraded to 1, all the records from ranking 1 ~ 9 will be output to the result table as update messages. If the result table receives too many data, it will become the bottleneck of the SQL job.
-
-The optimization way is omitting rownum field in the outer SELECT clause of the Top-N query. This is reasonable because the number of the top N records is usually not large, thus the consumers can sort the records themselves quickly. Without rownum field, in the example above, only the changed record (`product-1001`) needs to be sent to downstream, which can reduce much IO to the result table.
-
-The following example shows how to optimize the above Top-N example in this way:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
-
-// ingest a DataStream from an external source
-DataStream<Tuple3<String, String, String, Long>> ds = env.addSource(...);
-// register the DataStream as table "ShopSales"
-tableEnv.createTemporaryView("ShopSales", ds, "product_id, category, product_name, sales");
-
-// select top-5 products per category which have the maximum sales.
-Table result1 = tableEnv.sqlQuery(
-  "SELECT product_id, category, product_name, sales " + // omit row_num field in the output
-  "FROM (" +
-  "   SELECT *," +
-  "       ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) as row_num" +
-  "   FROM ShopSales)" +
-  "WHERE row_num <= 5");
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-val env = StreamExecutionEnvironment.getExecutionEnvironment
-val tableEnv = TableEnvironment.getTableEnvironment(env)
-
-// read a DataStream from an external source
-val ds: DataStream[(String, String, String, Long)] = env.addSource(...)
-// register the DataStream under the name "ShopSales"
-tableEnv.createTemporaryView("ShopSales", ds, 'product_id, 'category, 'product_name, 'sales)
-
-
-// select top-5 products per category which have the maximum sales.
-val result1 = tableEnv.sqlQuery(
-    """
-      |SELECT product_id, category, product_name, sales  -- omit row_num field in the output
-      |FROM (
-      |   SELECT *,
-      |       ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) as row_num
-      |   FROM ShopSales)
-      |WHERE row_num <= 5
-    """.stripMargin)
-{% endhighlight %}
-</div>
-</div>
-
-<span class="label label-danger">Attention in Streaming Mode</span> In order to output the above query to an external storage and have a correct result, the external storage must have the same unique key with the Top-N query. In the above example query, if the `product_id` is the unique key of the query, then the external table should also has `product_id` as the unique key.
-
-{% top %}
-
-#### Deduplication
-
-<span class="label label-danger">Attention</span> Deduplication is only supported in Blink planner.
-
-Deduplication is removing rows that duplicate over a set of columns, keeping only the first one or the last one. In some cases, the upstream ETL jobs are not end-to-end exactly-once, this may result in there are duplicate records in the sink in case of failover. However, the duplicate records will affect the correctness of downstream analytical jobs (e.g. `SUM`, `COUNT`). So a deduplication is needed before further analysis.
-
-Flink uses `ROW_NUMBER()` to remove duplicates just like the way of Top-N query. In theory, deduplication is a special case of Top-N which the N is one and order by the processing time or event time.
-
-The following shows the syntax of the Deduplication statement:
-
-{% highlight sql %}
-SELECT [column_list]
-FROM (
-   SELECT [column_list],
-     ROW_NUMBER() OVER ([PARTITION BY col1[, col2...]]
-       ORDER BY time_attr [asc|desc]) AS rownum
-   FROM table_name)
-WHERE rownum = 1
-{% endhighlight %}
-
-**Parameter Specification:**
-
-- `ROW_NUMBER()`: Assigns an unique, sequential number to each row, starting with one.
-- `PARTITION BY col1[, col2...]`: Specifies the partition columns, i.e. the deduplicate key.
-- `ORDER BY time_attr [asc|desc]`: Specifies the ordering column, it must be a [time attribute](streaming/time_attributes.html). Currently only support [proctime attribute](streaming/time_attributes.html#processing-time). [Rowtime atttribute](streaming/time_attributes.html#event-time) will be supported in the future. Ordering by ASC means keeping the first row, ordering by DESC means keeping the last row.
-- `WHERE rownum = 1`: The `rownum = 1` is required for Flink to recognize this query is deduplication.
-
-The following examples show how to specify SQL queries with Deduplication on streaming tables.
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
-
-// ingest a DataStream from an external source
-DataStream<Tuple3<String, String, String, Integer>> ds = env.addSource(...);
-// register the DataStream as table "Orders"
-tableEnv.createTemporaryView("Orders", ds, "order_id, user, product, number, proctime.proctime");
-
-// remove duplicate rows on order_id and keep the first occurrence row,
-// because there shouldn't be two orders with the same order_id.
-Table result1 = tableEnv.sqlQuery(
-  "SELECT order_id, user, product, number " +
-  "FROM (" +
-  "   SELECT *," +
-  "       ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY proctime ASC) as row_num" +
-  "   FROM Orders)" +
-  "WHERE row_num = 1");
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-val env = StreamExecutionEnvironment.getExecutionEnvironment
-val tableEnv = TableEnvironment.getTableEnvironment(env)
-
-// read a DataStream from an external source
-val ds: DataStream[(String, String, String, Int)] = env.addSource(...)
-// register the DataStream under the name "Orders"
-tableEnv.createTemporaryView("Orders", ds, 'order_id, 'user, 'product, 'number, 'proctime.proctime)
-
-// remove duplicate rows on order_id and keep the first occurrence row,
-// because there shouldn't be two orders with the same order_id.
-val result1 = tableEnv.sqlQuery(
-    """
-      |SELECT order_id, user, product, number
-      |FROM (
-      |   SELECT *,
-      |       ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY proctime DESC) as row_num
-      |   FROM Orders)
-      |WHERE row_num = 1
-    """.stripMargin)
-{% endhighlight %}
-</div>
-</div>
-
-{% top %}
-
 #### Insert
 
 <div markdown="1">
@@ -1105,7 +847,7 @@ FROM Orders
 
 #### Group Windows
 
-Group windows are defined in the `GROUP BY` clause of a SQL query. Just like queries with regular `GROUP BY` clauses, queries with a `GROUP BY` clause that includes a group window function compute a single result row per group. The following group windows functions are supported for SQL on batch and streaming tables.
+Group windows are defined in the `GROUP BY` clause of an SQL query. Just like queries with regular `GROUP BY` clauses, queries with a `GROUP BY` clause that includes a group window function compute a single result row per group. The following group windows functions are supported for SQL on batch and streaming tables.
 
 <table class="table table-bordered">
   <thead>
@@ -1200,7 +942,7 @@ StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 // ingest a DataStream from an external source
 DataStream<Tuple3<Long, String, Integer>> ds = env.addSource(...);
 // register the DataStream as table "Orders"
-tableEnv.createTemporaryView("Orders", ds, "user, product, amount, proctime.proctime, rowtime.rowtime");
+tableEnv.registerDataStream("Orders", ds, "user, product, amount, proctime.proctime, rowtime.rowtime");
 
 // compute SUM(amount) per day (in event-time)
 Table result1 = tableEnv.sqlQuery(
@@ -1237,7 +979,7 @@ val tableEnv = StreamTableEnvironment.create(env)
 // read a DataStream from an external source
 val ds: DataStream[(Long, String, Int)] = env.addSource(...)
 // register the DataStream under the name "Orders"
-tableEnv.createTemporaryView("Orders", ds, 'user, 'product, 'amount, 'proctime.proctime, 'rowtime.rowtime)
+tableEnv.registerDataStream("Orders", ds, 'user, 'product, 'amount, 'proctime.proctime, 'rowtime.rowtime)
 
 // compute SUM(amount) per day (in event-time)
 val result1 = tableEnv.sqlQuery(
@@ -1330,7 +1072,7 @@ DDLs are specified with the `sqlUpdate()` method of the `TableEnvironment`. The 
 
 ### Specifying a DDL
 
-The following examples show how to specify a SQL DDL.
+The following examples show how to specify an SQL DDL.
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -1341,14 +1083,14 @@ StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 // SQL query with a registered table
 // register a table named "Orders"
 tableEnv.sqlUpdate("CREATE TABLE Orders (`user` BIGINT, product VARCHAR, amount INT) WITH (...)");
-// run a SQL query on the Table and retrieve the result as a new Table
+// run an SQL query on the Table and retrieve the result as a new Table
 Table result = tableEnv.sqlQuery(
   "SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'");
 
 // SQL update with a registered table
 // register a TableSink
 tableEnv.sqlUpdate("CREATE TABLE RubberOrders(product VARCHAR, amount INT) WITH (...)");
-// run a SQL update query on the Table and emit the result to the TableSink
+// run an SQL update query on the Table and emit the result to the TableSink
 tableEnv.sqlUpdate(
   "INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'");
 {% endhighlight %}
@@ -1362,14 +1104,14 @@ val tableEnv = StreamTableEnvironment.create(env)
 // SQL query with a registered table
 // register a table named "Orders"
 tableEnv.sqlUpdate("CREATE TABLE Orders (`user` BIGINT, product VARCHAR, amount INT) WITH (...)");
-// run a SQL query on the Table and retrieve the result as a new Table
+// run an SQL query on the Table and retrieve the result as a new Table
 val result = tableEnv.sqlQuery(
   "SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'");
 
 // SQL update with a registered table
 // register a TableSink
 tableEnv.sqlUpdate("CREATE TABLE RubberOrders(product VARCHAR, amount INT) WITH ('connector.path'='/path/to/file' ...)");
-// run a SQL update query on the Table and emit the result to the TableSink
+// run an SQL update query on the Table and emit the result to the TableSink
 tableEnv.sqlUpdate(
   "INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'")
 {% endhighlight %}
@@ -1383,7 +1125,7 @@ table_env = StreamTableEnvironment.create(env)
 # SQL update with a registered table
 # register a TableSink
 table_env.sql_update("CREATE TABLE RubberOrders(product VARCHAR, amount INT) with (...)")
-# run a SQL update query on the Table and emit the result to the TableSink
+# run an SQL update query on the Table and emit the result to the TableSink
 table_env \
     .sql_update("INSERT INTO RubberOrders SELECT product, amount FROM Orders WHERE product LIKE '%Rubber%'")
 {% endhighlight %}
@@ -1440,9 +1182,9 @@ Please see the dedicated page about [data types](types.html).
 
 Generic types and (nested) composite types (e.g., POJOs, tuples, rows, Scala case classes) can be fields of a row as well.
 
-Fields of composite types with arbitrary nesting can be accessed with [value access functions]({{ site.baseurl }}/dev/table/functions/systemFunctions.html#value-access-functions).
+Fields of composite types with arbitrary nesting can be accessed with [value access functions](functions.html#value-access-functions).
 
-Generic types are treated as a black box and can be passed on or processed by [user-defined functions]({{ site.baseurl }}/dev/table/functions/udfs.html).
+Generic types are treated as a black box and can be passed on or processed by [user-defined functions](udfs.html).
 
 For DDLs, we support full data types defined in page [Data Types]({{ site.baseurl }}/dev/table/types.html).
 
