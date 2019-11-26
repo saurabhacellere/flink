@@ -107,13 +107,11 @@ public class CliFrontendParser {
 			"Namespace to create the Zookeeper sub-paths for high availability mode");
 
 	static final Option CANCEL_WITH_SAVEPOINT_OPTION = new Option(
-			"s", "withSavepoint", true, "**DEPRECATION WARNING**: " +
-			"Cancelling a job with savepoint is deprecated. Use \"stop\" instead. \n Trigger" +
-			" savepoint and cancel job. The target directory is optional. If no directory is " +
-			"specified, the configured default directory (" +
-			CheckpointingOptions.SAVEPOINT_DIRECTORY.key() + ") is used.");
+			"s", "withSavepoint", true, "Trigger savepoint and cancel job. The target " +
+			"directory is optional. If no directory is specified, the configured default " +
+			"directory (" + CheckpointingOptions.SAVEPOINT_DIRECTORY.key() + ") is used.");
 
-	public static final Option STOP_WITH_SAVEPOINT_PATH = new Option("p", "savepointPath", true,
+	public static final Option STOP_WITH_SAVEPOINT = new Option("s", "withSavepoint", true,
 			"Path to the savepoint (for example hdfs:///flink/savepoint-1537). " +
 					"If no directory is specified, the configured default will be used (\"" + CheckpointingOptions.SAVEPOINT_DIRECTORY.key() + "\").");
 
@@ -133,6 +131,9 @@ public class CliFrontendParser {
 	static final Option PYMODULE_OPTION = new Option("pym", "pyModule", true,
 		"Python module with the program entry point. " +
 			"This option must be used in conjunction with `--pyFiles`.");
+
+	public static final Option STOP_WITH_CHECKPOINT = new Option("k", "withCheckpoint", false,
+		"Stop the job with checkpoint, The checkpoint will be stored in (\"" + CheckpointingOptions.CHECKPOINTS_DIRECTORY.key() + "\").");
 
 	static {
 		HELP_OPTION.setRequired(false);
@@ -176,9 +177,9 @@ public class CliFrontendParser {
 		CANCEL_WITH_SAVEPOINT_OPTION.setArgName("targetDirectory");
 		CANCEL_WITH_SAVEPOINT_OPTION.setOptionalArg(true);
 
-		STOP_WITH_SAVEPOINT_PATH.setRequired(false);
-		STOP_WITH_SAVEPOINT_PATH.setArgName("savepointPath");
-		STOP_WITH_SAVEPOINT_PATH.setOptionalArg(true);
+		STOP_WITH_SAVEPOINT.setRequired(false);
+		STOP_WITH_SAVEPOINT.setArgName("withSavepoint");
+		STOP_WITH_SAVEPOINT.setOptionalArg(true);
 
 		STOP_AND_DRAIN.setRequired(false);
 
@@ -190,9 +191,11 @@ public class CliFrontendParser {
 
 		PYMODULE_OPTION.setRequired(false);
 		PYMODULE_OPTION.setArgName("pyModule");
+
+		STOP_WITH_CHECKPOINT.setRequired(false);
 	}
 
-	static final Options RUN_OPTIONS = getRunCommandOptions();
+	private static final Options RUN_OPTIONS = getRunCommandOptions();
 
 	private static Options buildGeneralOptions(Options options) {
 		options.addOption(HELP_OPTION);
@@ -256,7 +259,8 @@ public class CliFrontendParser {
 
 	static Options getStopCommandOptions() {
 		return buildGeneralOptions(new Options())
-				.addOption(STOP_WITH_SAVEPOINT_PATH)
+				.addOption(STOP_WITH_SAVEPOINT)
+				.addOption(STOP_WITH_CHECKPOINT)
 				.addOption(STOP_AND_DRAIN);
 	}
 
@@ -284,9 +288,7 @@ public class CliFrontendParser {
 
 	private static Options getListOptionsWithoutDeprecatedOptions(Options options) {
 		options.addOption(RUNNING_OPTION);
-		options.addOption(ALL_OPTION);
-		options.addOption(SCHEDULED_OPTION);
-		return options;
+		return options.addOption(SCHEDULED_OPTION);
 	}
 
 	private static Options getCancelOptionsWithoutDeprecatedOptions(Options options) {
@@ -295,7 +297,7 @@ public class CliFrontendParser {
 
 	private static Options getStopOptionsWithoutDeprecatedOptions(Options options) {
 		return options
-				.addOption(STOP_WITH_SAVEPOINT_PATH)
+				.addOption(STOP_WITH_SAVEPOINT)
 				.addOption(STOP_AND_DRAIN);
 	}
 
@@ -308,7 +310,7 @@ public class CliFrontendParser {
 	/**
 	 * Prints the help for the client.
 	 */
-	public static void printHelp(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelp(Collection<CustomCommandLine<?>> customCommandLines) {
 		System.out.println("./flink <ACTION> [OPTIONS] [ARGUMENTS]");
 		System.out.println();
 		System.out.println("The following actions are available:");
@@ -323,7 +325,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForRun(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForRun(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -351,7 +353,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForList(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForList(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -366,7 +368,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForStop(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForStop(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -381,7 +383,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForCancel(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForCancel(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -396,7 +398,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForSavepoint(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForSavepoint(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -417,7 +419,7 @@ public class CliFrontendParser {
 	 * @param runOptions True if the run options should be printed, False to print only general options
 	 */
 	private static void printCustomCliOptions(
-			Collection<CustomCommandLine> customCommandLines,
+			Collection<CustomCommandLine<?>> customCommandLines,
 			HelpFormatter formatter,
 			boolean runOptions) {
 		// prints options from all available command-line classes
@@ -446,6 +448,17 @@ public class CliFrontendParser {
 	// --------------------------------------------------------------------------------------------
 	//  Line Parsing
 	// --------------------------------------------------------------------------------------------
+
+	public static RunOptions parseRunCommand(String[] args) throws CliArgsException {
+		try {
+			DefaultParser parser = new DefaultParser();
+			CommandLine line = parser.parse(RUN_OPTIONS, args, true);
+			return new RunOptions(line);
+		}
+		catch (ParseException e) {
+			throw new CliArgsException(e.getMessage());
+		}
+	}
 
 	public static CommandLine parse(Options options, String[] args, boolean stopAtNonOptions) throws CliArgsException {
 		final DefaultParser parser = new DefaultParser();

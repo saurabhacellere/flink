@@ -77,8 +77,6 @@ public interface SchedulerNG {
 
 	CompletableFuture<Void> getTerminationFuture();
 
-	void handleGlobalFailure(Throwable cause);
-
 	boolean updateTaskExecutionState(TaskExecutionState taskExecutionState);
 
 	SerializedInputSplit requestNextInputSplit(JobVertexID vertexID, ExecutionAttemptID executionAttempt) throws IOException;
@@ -119,5 +117,11 @@ public interface SchedulerNG {
 
 	void declineCheckpoint(DeclineCheckpoint decline);
 
-	CompletableFuture<String> stopWithSavepoint(String targetDirectory, boolean advanceToEndOfEventTime);
+	/**
+	 * Stop with synchronous checkpoint and return the future.
+	 * @param isCheckpoint True for a checkpoint, false for savepoint.
+	 * @param targetDirectory Used to store the savepoint data, maybe null.
+	 * @param advanceToEndOfEventTime Whether to emit {@link org.apache.flink.streaming.api.watermark.Watermark#MAX_WATERMARK MAX_WATERMARK}
+	 */
+	CompletableFuture<String> stopWithCheckpoint(boolean isCheckpoint, @Nullable String targetDirectory, boolean advanceToEndOfEventTime);
 }
