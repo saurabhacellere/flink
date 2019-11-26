@@ -62,6 +62,7 @@ import static org.apache.flink.shaded.guava18.com.google.common.base.Strings.emp
  * @see org.apache.flink.runtime.webmonitor.handlers.JarRunHandler
  * @see org.apache.flink.runtime.webmonitor.handlers.JarPlanHandler
  */
+@Deprecated
 public class JarHandlerUtils {
 
 	/** Standard jar handler parameters parsed from request. */
@@ -119,12 +120,10 @@ public class JarHandlerUtils {
 			}
 
 			try {
-				final PackagedProgram packagedProgram = PackagedProgram.newBuilder()
-					.setJarFile(jarFile.toFile())
-					.setEntryPointClassName(entryClass)
-					.setConfiguration(configuration)
-					.setArguments(programArgs.toArray(new String[0]))
-					.build();
+				final PackagedProgram packagedProgram = new PackagedProgram(
+					jarFile.toFile(),
+					entryClass,
+					programArgs.toArray(new String[0]));
 				return PackagedProgramUtils.createJobGraph(packagedProgram, configuration, parallelism, jobId);
 			} catch (final ProgramInvocationException e) {
 				throw new CompletionException(e);
