@@ -193,6 +193,7 @@ under the License.
 							<artifactSet combine.children="append">
 								<includes>
 									<include>com.amazonaws:*</include>
+									<include>com.fasterxml:*</include>
 									<include>com.google.protobuf:*</include>
 									<include>org.apache.httpcomponents:*</include>
 									<!-- Java 11 specific inclusion; should be a no-op for other versions -->
@@ -200,18 +201,22 @@ under the License.
 								</includes>
 							</artifactSet>
 							<relocations combine.children="override">
+								<relocation>
+									<pattern>com.amazonaws</pattern>
+									<shadedPattern>org.apache.flink.streaming.kinesis.shaded.com.amazonaws</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>com.fasterxml</pattern>
+									<shadedPattern>org.apache.flink.streaming.kinesis.shaded.com.fasterxml</shadedPattern>
+								</relocation>
 								<!-- DO NOT RELOCATE GUAVA IN THIS PACKAGE -->
 								<relocation>
 									<pattern>com.google.protobuf</pattern>
-									<shadedPattern>org.apache.flink.kinesis.shaded.com.google.protobuf</shadedPattern>
-								</relocation>
-								<relocation>
-									<pattern>com.amazonaws</pattern>
-									<shadedPattern>org.apache.flink.kinesis.shaded.com.amazonaws</shadedPattern>
+									<shadedPattern>org.apache.flink.streaming.kinesis.shaded.com.google.protobuf</shadedPattern>
 								</relocation>
 								<relocation>
 									<pattern>org.apache.http</pattern>
-									<shadedPattern>org.apache.flink.kinesis.shaded.org.apache.http</shadedPattern>
+									<shadedPattern>org.apache.flink.streaming.kinesis.shaded.org.apache.http</shadedPattern>
 								</relocation>
 							</relocations>
 						</configuration>
