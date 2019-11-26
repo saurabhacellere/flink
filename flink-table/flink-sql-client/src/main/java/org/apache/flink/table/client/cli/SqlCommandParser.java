@@ -83,33 +83,17 @@ public final class SqlCommandParser {
 			"HELP",
 			NO_OPERANDS),
 
-		SHOW_CATALOGS(
-			"SHOW\\s+CATALOGS",
-			NO_OPERANDS),
-
-		SHOW_DATABASES(
-			"SHOW\\s+DATABASES",
-			NO_OPERANDS),
-
 		SHOW_TABLES(
 			"SHOW\\s+TABLES",
+			NO_OPERANDS),
+
+		SHOW_VIEWS(
+			"SHOW\\s+VIEWS",
 			NO_OPERANDS),
 
 		SHOW_FUNCTIONS(
 			"SHOW\\s+FUNCTIONS",
 			NO_OPERANDS),
-
-		SHOW_MODULES(
-			"SHOW\\s+MODULES",
-			NO_OPERANDS),
-
-		USE_CATALOG(
-			"USE\\s+CATALOG\\s+(.*)",
-			SINGLE_OPERAND),
-
-		USE(
-			"USE\\s+(?!CATALOG)(.*)",
-			SINGLE_OPERAND),
 
 		DESCRIBE(
 			"DESCRIBE\\s+(.*)",

@@ -40,6 +40,8 @@ public class SqlCommandParserTest {
 		testValidSqlCommand("CLEAR", new SqlCommandCall(SqlCommand.CLEAR));
 		testValidSqlCommand("SHOW TABLES", new SqlCommandCall(SqlCommand.SHOW_TABLES));
 		testValidSqlCommand("  SHOW   TABLES   ", new SqlCommandCall(SqlCommand.SHOW_TABLES));
+		testValidSqlCommand("SHOW VIEWS", new SqlCommandCall(SqlCommand.SHOW_VIEWS));
+		testValidSqlCommand("	SHOW   VIEWS", new SqlCommandCall(SqlCommand.SHOW_VIEWS));
 		testValidSqlCommand("SHOW FUNCTIONS", new SqlCommandCall(SqlCommand.SHOW_FUNCTIONS));
 		testValidSqlCommand("  SHOW    FUNCTIONS   ", new SqlCommandCall(SqlCommand.SHOW_FUNCTIONS));
 		testValidSqlCommand("DESCRIBE MyTable", new SqlCommandCall(SqlCommand.DESCRIBE, new String[]{"MyTable"}));
@@ -74,9 +76,6 @@ public class SqlCommandParserTest {
 		testValidSqlCommand("reset;", new SqlCommandCall(SqlCommand.RESET));
 		testValidSqlCommand("source /my/file", new SqlCommandCall(SqlCommand.SOURCE, new String[] {"/my/file"}));
 		testInvalidSqlCommand("source"); // missing path
-		testValidSqlCommand("USE CATALOG default", new SqlCommandCall(SqlCommand.USE_CATALOG, new String[]{"default"}));
-		testValidSqlCommand("use default", new SqlCommandCall(SqlCommand.USE, new String[] {"default"}));
-		testInvalidSqlCommand("use catalog");
 	}
 
 	private void testInvalidSqlCommand(String stmt) {
