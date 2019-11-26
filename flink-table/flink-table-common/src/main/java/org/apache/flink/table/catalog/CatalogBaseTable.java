@@ -30,34 +30,25 @@ import java.util.Optional;
 public interface CatalogBaseTable {
 	/**
 	 * Get the properties of the table.
-	 *
-	 * @return property map of the table/view
+	 * @return table property map
 	 */
 	Map<String, String> getProperties();
 
 	/**
 	 * Get the schema of the table.
-	 *
-	 * @return schema of the table/view.
+	 * @return schema of the table
 	 */
 	TableSchema getSchema();
 
 	/**
-	 * Get comment of the table or view.
-	 *
-	 * @return comment of the table/view.
-	 */
-	String getComment();
-
-	/**
 	 * Get a deep copy of the CatalogBaseTable instance.
-	 *
 	 * @return a copy of the CatalogBaseTable instance
 	 */
 	CatalogBaseTable copy();
 
 	/**
 	 * Get a brief description of the table or view.
+	 * It is shown to users when they run "DESCRIBE" in SQL.
 	 *
 	 * @return an optional short description of the table/view
 	 */
@@ -65,6 +56,7 @@ public interface CatalogBaseTable {
 
 	/**
 	 * Get a detailed description of the table or view.
+	 * It is shown to users when they run "DESCRIBE EXTENDED" in SQL.
 	 *
 	 * @return an optional long description of the table/view
 	 */
