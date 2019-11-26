@@ -257,7 +257,6 @@ object FlinkBatchRuleSets {
 
     // join rules
     FlinkJoinPushExpressionsRule.INSTANCE,
-    SimplifyJoinConditionRule.INSTANCE,
 
     // remove union with only a single child
     UnionEliminatorRule.INSTANCE,
@@ -359,6 +358,9 @@ object FlinkBatchRuleSets {
     CalcSnapshotTransposeRule.INSTANCE,
     // Rule that splits python ScalarFunctions from join conditions
     SplitPythonConditionFromJoinRule.INSTANCE,
+    // Rule that splits python ScalarFunctions from
+    // java/scala ScalarFunctions in correlate conditions
+    SplitPythonConditionFromCorrelateRule.INSTANCE,
     // merge calc after calc transpose
     FlinkCalcMergeRule.INSTANCE,
     // Rule that splits python ScalarFunctions from java/scala ScalarFunctions
@@ -414,13 +416,5 @@ object FlinkBatchRuleSets {
     BatchExecCorrelateRule.INSTANCE,
     // sink
     BatchExecSinkRule.INSTANCE
-  )
-
-  /**
-    * RuleSet to optimize plans after batch exec execution.
-    */
-  val PHYSICAL_REWRITE: RuleSet = RuleSets.ofList(
-    EnforceLocalHashAggRule.INSTANCE,
-    EnforceLocalSortAggRule.INSTANCE
   )
 }
