@@ -30,8 +30,6 @@ import org.apache.flink.runtime.messages.webmonitor.JobDetails;
 import org.apache.flink.runtime.messages.webmonitor.MultipleJobsDetails;
 import org.apache.flink.runtime.rest.messages.JobsOverviewHeaders;
 import org.apache.flink.runtime.util.ExecutorThreadFactory;
-import org.apache.flink.runtime.util.FatalExitExceptionHandler;
-import org.apache.flink.runtime.util.Runnables;
 import org.apache.flink.util.FileUtils;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonFactory;
@@ -55,10 +53,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TimerTask;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -71,37 +69,6 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 class HistoryServerArchiveFetcher {
 
-	/**
-	 * Possible job archive operations in history-server.
-	 */
-	public enum ArchiveEventType {
-		/** Job archive was found in one refresh location and created in history server. */
-		CREATED,
-		/** Job archive was deleted from one of refresh locations and deleted from history server.*/
-		DELETED
-	}
-
-	/**
-	 * Representation of job archive event.
-	 */
-	public static class ArchiveEvent {
-		private final String jobID;
-		private final ArchiveEventType operation;
-
-		ArchiveEvent(String jobID, ArchiveEventType operation) {
-			this.jobID = jobID;
-			this.operation = operation;
-		}
-
-		public String getJobID() {
-			return jobID;
-		}
-
-		public ArchiveEventType getType() {
-			return operation;
-		}
-	}
-
 	private static final Logger LOG = LoggerFactory.getLogger(HistoryServerArchiveFetcher.class);
 
 	private static final JsonFactory jacksonFactory = new JsonFactory();
@@ -112,15 +79,10 @@ class HistoryServerArchiveFetcher {
 	private final JobArchiveFetcherTask fetcherTask;
 	private final long refreshIntervalMillis;
 
-	HistoryServerArchiveFetcher(
-		long refreshIntervalMillis,
-		List<HistoryServer.RefreshLocation> refreshDirs,
-		File webDir,
-		Consumer<ArchiveEvent> jobArchiveEventListener,
-		boolean cleanupExpiredArchives
-	) {
+	HistoryServerArchiveFetcher(long refreshIntervalMillis, long retainedApplicationsMillis,
+								List<HistoryServer.RefreshLocation> refreshDirs, File webDir, CountDownLatch numFinishedPolls) {
 		this.refreshIntervalMillis = refreshIntervalMillis;
-		this.fetcherTask = new JobArchiveFetcherTask(refreshDirs, webDir, jobArchiveEventListener, cleanupExpiredArchives);
+		this.fetcherTask = new JobArchiveFetcherTask(retainedApplicationsMillis, refreshDirs, webDir, numFinishedPolls);
 		if (LOG.isInfoEnabled()) {
 			for (HistoryServer.RefreshLocation refreshDir : refreshDirs) {
 				LOG.info("Monitoring directory {} for archived jobs.", refreshDir.getPath());
@@ -129,10 +91,7 @@ class HistoryServerArchiveFetcher {
 	}
 
 	void start() {
-		final Runnable guardedTask = Runnables.withUncaughtExceptionHandler(
-			fetcherTask, FatalExitExceptionHandler.INSTANCE);
-		executor.scheduleWithFixedDelay(
-			guardedTask, 0, refreshIntervalMillis, TimeUnit.MILLISECONDS);
+		executor.scheduleWithFixedDelay(fetcherTask, 0, refreshIntervalMillis, TimeUnit.MILLISECONDS);
 	}
 
 	void stop() {
@@ -153,9 +112,10 @@ class HistoryServerArchiveFetcher {
 	 */
 	static class JobArchiveFetcherTask extends TimerTask {
 
+		private final long retainedApplicationsMillis;
+		private final boolean isCleanupEnabled;
 		private final List<HistoryServer.RefreshLocation> refreshDirs;
-		private final Consumer<ArchiveEvent> jobArchiveEventListener;
-		private final boolean processArchiveDeletion;
+		private final CountDownLatch numFinishedPolls;
 
 		/** Cache of all available jobs identified by their id. */
 		private final Set<String> cachedArchives;
@@ -166,15 +126,18 @@ class HistoryServerArchiveFetcher {
 
 		private static final String JSON_FILE_ENDING = ".json";
 
-		JobArchiveFetcherTask(
-			List<HistoryServer.RefreshLocation> refreshDirs,
-			File webDir,
-			Consumer<ArchiveEvent> jobArchiveEventListener,
-			boolean processArchiveDeletion
-		) {
+		JobArchiveFetcherTask(long retainedApplicationsMillis, List<HistoryServer.RefreshLocation> refreshDirs, File webDir,
+							CountDownLatch numFinishedPolls) {
+			this.retainedApplicationsMillis = retainedApplicationsMillis;
+			if (retainedApplicationsMillis > -1L) {
+				isCleanupEnabled = true;
+			} else {
+				isCleanupEnabled = false;
+				LOG.info("A negative value {} of the historyserver.archive.fs.retained-application-millis " +
+					"configuration is considered to disable the cleanup mechanism.", retainedApplicationsMillis);
+			}
 			this.refreshDirs = checkNotNull(refreshDirs);
-			this.jobArchiveEventListener = jobArchiveEventListener;
-			this.processArchiveDeletion = processArchiveDeletion;
+			this.numFinishedPolls = numFinishedPolls;
 			this.cachedArchives = new HashSet<>();
 			this.webDir = checkNotNull(webDir);
 			this.webJobDir = new File(webDir, "jobs");
@@ -186,8 +149,6 @@ class HistoryServerArchiveFetcher {
 		@Override
 		public void run() {
 			try {
-				List<ArchiveEvent> events = new ArrayList<>();
-				Set<String> jobsToRemove = new HashSet<>(cachedArchives);
 				for (HistoryServer.RefreshLocation refreshLocation : refreshDirs) {
 					Path refreshDir = refreshLocation.getPath();
 					FileSystem refreshFS = refreshLocation.getFs();
@@ -203,9 +164,20 @@ class HistoryServerArchiveFetcher {
 					if (jobArchives == null) {
 						continue;
 					}
+					boolean updateOverview = false;
+					long now = System.currentTimeMillis();
 					for (FileStatus jobArchive : jobArchives) {
 						Path jobArchivePath = jobArchive.getPath();
 						String jobID = jobArchivePath.getName();
+						if (isCleanupEnabled && now - jobArchive.getModificationTime() > retainedApplicationsMillis) {
+							if (LOG.isDebugEnabled()) {
+								LOG.debug("delete the old archived job for path {}." + jobArchivePath.toString());
+							}
+							jobArchivePath.getFileSystem().delete(jobArchivePath, false);
+							cleanUpLocalJob(jobID);
+							updateOverview = true;
+							continue;
+						}
 						try {
 							JobID.fromHexString(jobID);
 						} catch (IllegalArgumentException iae) {
@@ -213,8 +185,7 @@ class HistoryServerArchiveFetcher {
 								refreshDir, jobID, iae);
 							continue;
 						}
-						jobsToRemove.remove(jobID);
-						if (!cachedArchives.contains(jobID)) {
+						if (cachedArchives.add(jobID)) {
 							try {
 								for (ArchivedJson archive : FsJobArchivist.getArchivedJsons(jobArchive.getPath())) {
 									String path = archive.getPath();
@@ -227,7 +198,6 @@ class HistoryServerArchiveFetcher {
 										json = convertLegacyJobOverview(json);
 										target = new File(webOverviewDir, jobID + JSON_FILE_ENDING);
 									} else {
-										// this implicitly writes into webJobDir
 										target = new File(webDir, path + JSON_FILE_ENDING);
 									}
 
@@ -251,60 +221,42 @@ class HistoryServerArchiveFetcher {
 										fw.flush();
 									}
 								}
-								events.add(new ArchiveEvent(jobID, ArchiveEventType.CREATED));
-								cachedArchives.add(jobID);
+								updateOverview = true;
 							} catch (IOException e) {
 								LOG.error("Failure while fetching/processing job archive for job {}.", jobID, e);
-								// Make sure we do not include this job in the overview
-								try {
-									Files.delete(new File(webOverviewDir, jobID + JSON_FILE_ENDING).toPath());
-								} catch (IOException ioe) {
-									LOG.debug("Could not delete file from overview directory.", ioe);
-								}
-
-								// Clean up job files we may have created
-								File jobDirectory = new File(webJobDir, jobID);
-								try {
-									FileUtils.deleteDirectory(jobDirectory);
-								} catch (IOException ioe) {
-									LOG.debug("Could not clean up job directory.", ioe);
-								}
+								// Make sure we attempt to fetch the archive again
+								cleanUpLocalJob(jobID);
 							}
 						}
 					}
+					if (updateOverview) {
+						updateJobOverview(webOverviewDir, webDir);
+					}
 				}
-
-				if (!jobsToRemove.isEmpty() && processArchiveDeletion) {
-					events.addAll(cleanupExpiredJobs(jobsToRemove));
-				}
-				if (!events.isEmpty()) {
-					updateJobOverview(webOverviewDir, webDir);
-				}
-				events.forEach(jobArchiveEventListener::accept);
 			} catch (Exception e) {
 				LOG.error("Critical failure while fetching/processing job archives.", e);
 			}
+			numFinishedPolls.countDown();
 		}
 
-		private List<ArchiveEvent> cleanupExpiredJobs(Set<String> jobsToRemove) {
+		private void cleanUpLocalJob(String jobID){
+			cachedArchives.remove(jobID);
+			// Make sure we do not include this job in the overview
+			try {
+				Files.delete(new File(webOverviewDir, jobID + JSON_FILE_ENDING).toPath());
+			} catch (IOException ioe) {
+				LOG.debug("Could not delete file from overview directory.", ioe);
+			}
 
-			List<ArchiveEvent> deleteLog = new ArrayList<>();
-			LOG.info("Archive directories for jobs {} were deleted.", jobsToRemove);
-
-			cachedArchives.removeAll(jobsToRemove);
-			jobsToRemove.forEach(removedJobID -> {
-				try {
-					Files.deleteIfExists(new File(webOverviewDir, removedJobID + JSON_FILE_ENDING).toPath());
-					FileUtils.deleteDirectory(new File(webJobDir, removedJobID));
-				} catch (IOException e) {
-					LOG.error("Failure while removing job overview for job {}.", removedJobID, e);
-				}
-				deleteLog.add(new ArchiveEvent(removedJobID, ArchiveEventType.DELETED));
-			});
-
-			return deleteLog;
+			// Clean up job files we may have created
+			File jobDirectory = new File(webJobDir, jobID);
+			try {
+				FileUtils.deleteDirectory(jobDirectory);
+				Files.deleteIfExists(new File(webJobDir, jobID + JSON_FILE_ENDING).toPath());
+			} catch (IOException ioe) {
+				LOG.debug("Could not clean up job directory.", ioe);
+			}
 		}
-
 	}
 
 	private static String convertLegacyJobOverview(String legacyOverview) throws IOException {
@@ -323,23 +275,7 @@ class HistoryServerArchiveFetcher {
 
 		JsonNode tasks = job.get("tasks");
 		int numTasks = tasks.get("total").asInt();
-		JsonNode pendingNode = tasks.get("pending");
-		// for flink version < 1.4 we have pending field,
-		// when version >= 1.4 pending has been split into scheduled, deploying, and created.
-		boolean versionLessThan14 = pendingNode != null;
-		int created = 0;
-		int scheduled;
-		int deploying = 0;
-
-		if (versionLessThan14) {
-			// pending is a mix of CREATED/SCHEDULED/DEPLOYING
-			// to maintain the correct number of task states we pick SCHEDULED
-			scheduled = pendingNode.asInt();
-		} else {
-			created = tasks.get("created").asInt();
-			scheduled = tasks.get("scheduled").asInt();
-			deploying = tasks.get("deploying").asInt();
-		}
+		int pending = tasks.get("pending").asInt();
 		int running = tasks.get("running").asInt();
 		int finished = tasks.get("finished").asInt();
 		int canceling = tasks.get("canceling").asInt();
@@ -347,9 +283,9 @@ class HistoryServerArchiveFetcher {
 		int failed = tasks.get("failed").asInt();
 
 		int[] tasksPerState = new int[ExecutionState.values().length];
-		tasksPerState[ExecutionState.CREATED.ordinal()] = created;
-		tasksPerState[ExecutionState.SCHEDULED.ordinal()] = scheduled;
-		tasksPerState[ExecutionState.DEPLOYING.ordinal()] = deploying;
+		// pending is a mix of CREATED/SCHEDULED/DEPLOYING
+		// to maintain the correct number of task states we have to pick one of them
+		tasksPerState[ExecutionState.SCHEDULED.ordinal()] = pending;
 		tasksPerState[ExecutionState.RUNNING.ordinal()] = running;
 		tasksPerState[ExecutionState.FINISHED.ordinal()] = finished;
 		tasksPerState[ExecutionState.CANCELING.ordinal()] = canceling;

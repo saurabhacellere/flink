@@ -37,6 +37,14 @@ public class HistoryServerOptions {
 			.withDescription("Interval in milliseconds for refreshing the archived job directories.");
 
 	/**
+	 * How long you want to retain archived job in milliseconds. The default value of 0 means no cleanup.
+	 */
+	public static final ConfigOption<Long> HISTORY_SERVER_ARCHIVE_RETAIN_APPLICATION_MILLIS =
+		key("historyserver.archive.fs.retained-application-millis")
+			.defaultValue(-1L)
+			.withDescription("How long you want to retain archived job in milliseconds. The default value of -1 means no cleanup.");
+
+	/**
 	 * Comma-separated list of directories which the HistoryServer polls for new archives.
 	 */
 	public static final ConfigOption<String> HISTORY_SERVER_ARCHIVE_DIRS =
@@ -45,16 +53,6 @@ public class HistoryServerOptions {
 			.withDescription("Comma separated list of directories to fetch archived jobs from. The history server will" +
 				" monitor these directories for archived jobs. You can configure the JobManager to archive jobs to a" +
 				" directory via `jobmanager.archive.fs.dir`.");
-
-	/**
-	 * If this option is enabled then deleted job archives are also deleted from HistoryServer.
-	 */
-	public static final ConfigOption<Boolean> HISTORY_SERVER_CLEANUP_EXPIRED_JOBS =
-		key("historyserver.archive.clean-expired-jobs")
-			.defaultValue(false)
-			.withDescription(
-				String.format("Whether HistoryServer should cleanup jobs" +
-					" that are no longer present `%s`.", HISTORY_SERVER_ARCHIVE_DIRS.key()));
 
 	/**
 	 * The local directory used by the HistoryServer web-frontend.
