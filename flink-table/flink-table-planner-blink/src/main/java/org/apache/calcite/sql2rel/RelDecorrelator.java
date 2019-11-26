@@ -16,7 +16,7 @@
  */
 package org.apache.calcite.sql2rel;
 
-import org.apache.flink.table.plan.rules.logical.FlinkFilterJoinRule;
+import org.apache.flink.table.planner.plan.rules.logical.FlinkFilterJoinRule;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -63,7 +63,6 @@ import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.metadata.RelMdUtil;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.rules.FilterCorrelateRule;
-import org.apache.calcite.rel.rules.FilterJoinRule;
 import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -119,7 +118,7 @@ import java.util.TreeMap;
 /**
  * This class is copied from Apache Calcite except that it supports SEMI/ANTI join.
  * NOTES: This file should be deleted when CALCITE-3169 and CALCITE-3170 are fixed,
- * and please make sure to synchronize with RelDecorrelator in blink planner when changing this class.
+ * and please make sure to synchronize with RelDecorrelator in flink planner when changing this class.
  * Modification:
  * 1. lines changed (249-251)
  * 2. lines changed (271-278)
@@ -199,7 +198,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
    * @param relBuilder        Builder for relational expressions
    *
    * @return Equivalent query with all
-   * {@link LogicalCorrelate} instances removed
+   * {@link org.apache.calcite.rel.logical.LogicalCorrelate} instances removed
    */
   public static RelNode decorrelateQuery(RelNode rootRel,
       RelBuilder relBuilder) {
@@ -975,7 +974,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
   }
 
   /** Finds a {@link RexInputRef} that is equivalent to a {@link CorRef},
-   * and if found, throws a {@link Util.FoundOne}. */
+   * and if found, throws a {@link org.apache.calcite.util.Util.FoundOne}. */
   private void findCorrelationEquivalent(CorRef correlation, RexNode e)
       throws Util.FoundOne {
     switch (e.getKind()) {
@@ -2650,7 +2649,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
   }
 
   /** A map of the locations of
-   * {@link LogicalCorrelate}
+   * {@link org.apache.calcite.rel.logical.LogicalCorrelate}
    * in a tree of {@link RelNode}s.
    *
    * <p>It is used to drive the decorrelation process.
@@ -2724,7 +2723,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
     }
   }
 
-  /** Builds a {@link CorelMap}. */
+  /** Builds a {@link org.apache.calcite.sql2rel.RelDecorrelator.CorelMap}. */
   private static class CorelMapBuilder extends RelShuttleImpl {
     final SortedMap<CorrelationId, RelNode> mapCorToCorRel =
         new TreeMap<>();

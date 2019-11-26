@@ -32,6 +32,10 @@ from py4j.java_gateway import JavaClass, JavaObject, get_java_class
 from pyflink.util.utils import to_jarray
 from pyflink.java_gateway import get_gateway
 
+if sys.version >= '3':
+    long = int
+    basestring = unicode = str
+
 __all__ = ['DataTypes', 'UserDefinedType', 'Row']
 
 
@@ -1020,11 +1024,11 @@ class RowField(object):
         """
         assert isinstance(data_type, DataType), \
             "data_type %s should be an instance of %s" % (data_type, DataType)
-        assert isinstance(name, str), "field name %s should be string" % name
+        assert isinstance(name, basestring), "field name %s should be string" % name
         if not isinstance(name, str):
             name = name.encode('utf-8')
         if description is not None:
-            assert isinstance(description, str), \
+            assert isinstance(description, basestring), \
                 "description %s should be string" % description
             if not isinstance(description, str):
                 description = description.encode('utf-8')
@@ -1285,13 +1289,13 @@ class UserDefinedType(DataType):
 
     def serialize(self, obj):
         """
-        Converts the a user-type object into a SQL datum.
+        Converts the a user-type object into an SQL datum.
         """
         raise NotImplementedError("UDT must implement serialize().")
 
     def deserialize(self, datum):
         """
-        Converts a SQL datum into a user-type object.
+        Converts an SQL datum into a user-type object.
         """
         raise NotImplementedError("UDT must implement deserialize().")
 
@@ -1308,6 +1312,12 @@ _type_mappings = {
     datetime.datetime: LocalZonedTimestampType(),
     datetime.time: TimeType(),
 }
+
+if sys.version < "3":
+    _type_mappings.update({
+        unicode: VarCharType(0x7fffffff),
+        long: BigIntType(),
+    })
 
 # Mapping Python array types to Flink SQL types
 # We should be careful here. The size of these types in python depends on C
@@ -1383,6 +1393,10 @@ for _typecode in _array_unsigned_int_typecode_ctype_mappings.keys():
 if sys.version_info[0] < 4:
     # it can be 16 bits or 32 bits depending on the platform
     _array_type_mappings['u'] = CharType(ctypes.sizeof(ctypes.c_wchar))
+
+# Type code 'c' are only available at python 2
+if sys.version_info[0] < 3:
+    _array_type_mappings['c'] = CharType(ctypes.sizeof(ctypes.c_char))
 
 
 def _infer_type(obj):
@@ -1682,7 +1696,7 @@ def _to_java_type(data_type):
 
 def _is_instance_of(java_data_type, java_class):
     gateway = get_gateway()
-    if isinstance(java_class, str):
+    if isinstance(java_class, basestring):
         param = java_class
     elif isinstance(java_class, JavaClass):
         param = get_java_class(java_class)
@@ -1991,20 +2005,20 @@ class Row(tuple):
             return "Row(%s)" % ", ".join("%s=%r" % (k, v)
                                          for k, v in zip(self._fields, tuple(self)))
         else:
-            return "<Row(%s)>" % ", ".join("%r" % field for field in self)
+            return "<Row(%s)>" % ", ".join(self)
 
 
 _acceptable_types = {
     BooleanType: (bool,),
-    TinyIntType: (int,),
-    SmallIntType: (int,),
-    IntType: (int,),
-    BigIntType: (int,),
+    TinyIntType: (int, long),
+    SmallIntType: (int, long),
+    IntType: (int, long),
+    BigIntType: (int, long),
     FloatType: (float,),
     DoubleType: (float,),
     DecimalType: (decimal.Decimal,),
-    CharType: (str,),
-    VarCharType: (str,),
+    CharType: (str, unicode),
+    VarCharType: (str, unicode),
     BinaryType: (bytearray,),
     VarBinaryType: (bytearray,),
     DateType: (datetime.date, datetime.datetime),

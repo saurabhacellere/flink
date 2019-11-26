@@ -55,7 +55,7 @@ BatchTableEnvironment tEnv = BatchTableEnvironment.create(env);
 // ...
 
 // specify table program
-Table orders = tEnv.from("Orders"); // schema (a, b, c, rowtime)
+Table orders = tEnv.scan("Orders"); // schema (a, b, c, rowtime)
 
 Table counts = orders
         .groupBy("a")
@@ -87,7 +87,7 @@ val tEnv = BatchTableEnvironment.create(env)
 // ...
 
 // specify table program
-val orders = tEnv.from("Orders") // schema (a, b, c, rowtime)
+val orders = tEnv.scan("Orders") // schema (a, b, c, rowtime)
 
 val result = orders
                .groupBy('a)
@@ -115,7 +115,7 @@ t_env = TableEnvironment.create(env, TableConfig())
 # ...
 
 # specify table program
-orders = t_env.from_path("Orders")  # schema (a, b, c, rowtime)
+orders = t_env.scan("Orders")  # schema (a, b, c, rowtime)
 
 orders.group_by("a").select("a, b.count as cnt").insert_into("result")
 
@@ -136,7 +136,7 @@ The next example shows a more complex Table API program. The program scans again
 // ...
 
 // specify table program
-Table orders = tEnv.from("Orders"); // schema (a, b, c, rowtime)
+Table orders = tEnv.scan("Orders"); // schema (a, b, c, rowtime)
 
 Table result = orders
         .filter("a.isNotNull && b.isNotNull && c.isNotNull")
@@ -155,7 +155,7 @@ Table result = orders
 // ...
 
 // specify table program
-val orders: Table = tEnv.from("Orders") // schema (a, b, c, rowtime)
+val orders: Table = tEnv.scan("Orders") // schema (a, b, c, rowtime)
 
 val result: Table = orders
         .filter('a.isNotNull && 'b.isNotNull && 'c.isNotNull)
@@ -174,7 +174,7 @@ val result: Table = orders
 # ...
 
 # specify table program
-orders = t_env.from_path("Orders")  # schema (a, b, c, rowtime)
+orders = t_env.scan("Orders")  # schema (a, b, c, rowtime)
 
 result = orders.filter("a.isNotNull && b.isNotNull && c.isNotNull") \
                .select("a.lowerCase() as a, b, rowtime") \
@@ -210,13 +210,13 @@ The Table API supports the following operations. Please note that not all operat
   <tbody>
   	<tr>
   		<td>
-        <strong>From</strong><br>
+        <strong>Scan</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
   		<td>
-        <p>Similar to the FROM clause in a SQL query. Performs a scan of a registered table.</p>
+        <p>Similar to the FROM clause in an SQL query. Performs a scan of a registered table.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 {% endhighlight %}
       </td>
   	</tr>
@@ -226,9 +226,9 @@ Table orders = tableEnv.from("Orders");
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL SELECT statement. Performs a select operation.</p>
+        <p>Similar to an SQL SELECT statement. Performs a select operation.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.select("a, c as d");
 {% endhighlight %}
         <p>You can use star (<code>*</code>) to act as a wild card, selecting all of the columns in the table.</p>
@@ -245,7 +245,7 @@ Table result = orders.select("*");
       <td>
         <p>Renames fields.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.as("x, y, z, t");
 {% endhighlight %}
       </td>
@@ -257,14 +257,14 @@ Table result = orders.as("x, y, z, t");
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
+        <p>Similar to an SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.where("b === 'red'");
 {% endhighlight %}
 or
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.filter("a % 2 === 0");
 {% endhighlight %}
       </td>
@@ -285,13 +285,13 @@ Table result = orders.filter("a % 2 === 0");
   <tbody>
   	<tr>
   		<td>
-        <strong>From</strong><br>
+        <strong>Scan</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
   		<td>
-        <p>Similar to the FROM clause in a SQL query. Performs a scan of a registered table.</p>
+        <p>Similar to the FROM clause in an SQL query. Performs a scan of a registered table.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 {% endhighlight %}
       </td>
   	</tr>
@@ -301,14 +301,14 @@ val orders: Table = tableEnv.from("Orders")
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL SELECT statement. Performs a select operation.</p>
+        <p>Similar to an SQL SELECT statement. Performs a select operation.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.select('a, 'c as 'd)
 {% endhighlight %}
         <p>You can use star (<code>*</code>) to act as a wild card, selecting all of the columns in the table.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.select('*)
 {% endhighlight %}
       </td>
@@ -321,7 +321,7 @@ val result = orders.select('*)
       <td>
         <p>Renames fields.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders").as('x, 'y, 'z, 't)
+val orders: Table = tableEnv.scan("Orders").as('x, 'y, 'z, 't)
 {% endhighlight %}
       </td>
     </tr>
@@ -332,14 +332,14 @@ val orders: Table = tableEnv.from("Orders").as('x, 'y, 'z, 't)
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
+        <p>Similar to an SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.filter('a % 2 === 0)
 {% endhighlight %}
 or
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.where('b === "red")
 {% endhighlight %}
       </td>
@@ -363,9 +363,9 @@ val result = orders.where('b === "red")
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
   		<td>
-        <p>Similar to the FROM clause in a SQL query. Performs a scan of a registered table.</p>
+        <p>Similar to the FROM clause in an SQL query. Performs a scan of a registered table.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 {% endhighlight %}
       </td>
   	</tr>
@@ -375,9 +375,9 @@ orders = table_env.from_path("Orders")
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL SELECT statement. Performs a select operation.</p>
+        <p>Similar to an SQL SELECT statement. Performs a select operation.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.select("a, c as d")
 {% endhighlight %}
         <p>You can use star (<code>*</code>) to act as a wild card, selecting all of the columns in the table.</p>
@@ -394,7 +394,7 @@ result = orders.select("*")
       <td>
         <p>Renames fields.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.alias("x, y, z, t")
 {% endhighlight %}
       </td>
@@ -406,14 +406,14 @@ result = orders.alias("x, y, z, t")
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
+        <p>Similar to an SQL WHERE clause. Filters out rows that do not pass the filter predicate.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.where("b === 'red'")
 {% endhighlight %}
 or
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.filter("a % 2 === 0")
 {% endhighlight %}
       </td>
@@ -446,7 +446,7 @@ result = orders.filter("a % 2 === 0")
           <td>
           <p>Performs a field add operation. It will throw an exception if the added fields already exist.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.addColumns("concat(c, 'sunny')");
 {% endhighlight %}
 </td>
@@ -460,7 +460,7 @@ Table result = orders.addColumns("concat(c, 'sunny')");
                   <td>
                   <p>Performs a field add operation. Existing fields will be replaced if add columns name is the same as the existing column name.  Moreover, if the added fields have duplicate field name, then the last one is used. </p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.addOrReplaceColumns("concat(c, 'sunny') as desc");
 {% endhighlight %}
                   </td>
@@ -473,7 +473,7 @@ Table result = orders.addOrReplaceColumns("concat(c, 'sunny') as desc");
                   <td>
                   <p>Performs a field drop operation. The field expressions should be field reference expressions, and only existing fields can be dropped.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.dropColumns("b, c");
 {% endhighlight %}
                   </td>
@@ -486,7 +486,7 @@ Table result = orders.dropColumns("b, c");
                   <td>
                   <p>Performs a field rename operation. The field expressions should be alias expressions, and only the existing fields can be renamed.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.renameColumns("b as b2, c as c2");
 {% endhighlight %}
                   </td>
@@ -513,7 +513,7 @@ Table result = orders.renameColumns("b as b2, c as c2");
           <td>
             <p>Performs a field add operation. It will throw an exception if the added fields already exist.</p>
 {% highlight scala %}
-val orders = tableEnv.from("Orders");
+val orders = tableEnv.scan("Orders");
 val result = orders.addColumns(concat('c, "Sunny"))
 {% endhighlight %}
           </td>
@@ -526,7 +526,7 @@ val result = orders.addColumns(concat('c, "Sunny"))
                   <td>
                      <p>Performs a field add operation. Existing fields will be replaced if add columns name is the same as the existing column name.  Moreover, if the added fields have duplicate field name, then the last one is used. </p>
 {% highlight scala %}
-val orders = tableEnv.from("Orders");
+val orders = tableEnv.scan("Orders");
 val result = orders.addOrReplaceColumns(concat('c, "Sunny") as 'desc)
 {% endhighlight %}
                   </td>
@@ -539,7 +539,7 @@ val result = orders.addOrReplaceColumns(concat('c, "Sunny") as 'desc)
                   <td>
                     <p>Performs a field drop operation. The field expressions should be field reference expressions, and only existing fields can be dropped.</p>
 {% highlight scala %}
-val orders = tableEnv.from("Orders");
+val orders = tableEnv.scan("Orders");
 val result = orders.dropColumns('b, 'c)
 {% endhighlight %}
                   </td>
@@ -552,7 +552,7 @@ val result = orders.dropColumns('b, 'c)
                   <td>
                     <p>Performs a field rename operation. The field expressions should be alias expressions, and only the existing fields can be renamed.</p>
 {% highlight scala %}
-val orders = tableEnv.from("Orders");
+val orders = tableEnv.scan("Orders");
 val result = orders.renameColumns('b as 'b2, 'c as 'c2)
 {% endhighlight %}
                   </td>
@@ -578,7 +578,7 @@ val result = orders.renameColumns('b as 'b2, 'c as 'c2)
           <td>
           <p>Performs a field add operation. It will throw an exception if the added fields already exist.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.add_columns("concat(c, 'sunny')")
 {% endhighlight %}
 </td>
@@ -592,7 +592,7 @@ result = orders.add_columns("concat(c, 'sunny')")
                   <td>
                   <p>Performs a field add operation. Existing fields will be replaced if add columns name is the same as the existing column name.  Moreover, if the added fields have duplicate field name, then the last one is used. </p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.add_or_replace_columns("concat(c, 'sunny') as desc")
 {% endhighlight %}
                   </td>
@@ -605,7 +605,7 @@ result = orders.add_or_replace_columns("concat(c, 'sunny') as desc")
                   <td>
                   <p>Performs a field drop operation. The field expressions should be field reference expressions, and only existing fields can be dropped.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.drop_columns("b, c")
 {% endhighlight %}
                   </td>
@@ -618,7 +618,7 @@ result = orders.drop_columns("b, c")
                   <td>
                   <p>Performs a field rename operation. The field expressions should be alias expressions, and only the existing fields can be renamed.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.rename_columns("b as b2, c as c2")
 {% endhighlight %}
                   </td>
@@ -651,9 +651,9 @@ result = orders.rename_columns("b as b2, c as c2")
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
+        <p>Similar to an SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.groupBy("a").select("a, b.sum as d");
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the type of aggregation and the number of distinct grouping keys. Please provide a query configuration with valid retention interval to prevent excessive state size. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -667,7 +667,7 @@ Table result = orders.groupBy("a").select("a, b.sum as d");
     	<td>
         <p>Groups and aggregates a table on a <a href="#group-windows">group window</a> and possibly one or more grouping keys.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .window(Tumble.over("5.minutes").on("rowtime").as("w")) // define window
     .groupBy("a, w") // group by key and window
@@ -681,9 +681,9 @@ Table result = orders
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
-       <p>Similar to a SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
+       <p>Similar to an SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     // define window
     .window(Over  
@@ -704,9 +704,9 @@ Table result = orders
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT aggregation clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
+        <p>Similar to an SQL DISTINCT aggregation clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 // Distinct aggregation on group by
 Table groupByDistinctResult = orders
     .groupBy("a")
@@ -726,7 +726,7 @@ Table result = orders
 {% endhighlight %}
         <p>User-defined aggregation function can also be used with DISTINCT modifiers. To calculate the aggregate results only for distinct values, simply add the distinct modifier towards the aggregation function. </p>
 {% highlight java %}
-Table orders = tEnv.from("Orders");
+Table orders = tEnv.scan("Orders");
 
 // Use distinct aggregation for user-defined aggregate functions
 tEnv.registerFunction("myUdagg", new MyUdagg());
@@ -742,9 +742,9 @@ orders.groupBy("users").select("users, myUdagg.distinct(points) as myDistinctRes
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT clause. Returns records with distinct value combinations.</p>
+        <p>Similar to an SQL DISTINCT clause. Returns records with distinct value combinations.</p>
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders.distinct();
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the number of distinct fields. Please provide a query configuration with valid retention interval to prevent excessive state size. If state cleaning is enabled, distinct have to emit messages to prevent too early state eviction of downstream operators which makes distinct contains result updating. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -772,9 +772,9 @@ Table result = orders.distinct();
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
+        <p>Similar to an SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.groupBy('a).select('a, 'b.sum as 'd)
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the type of aggregation and the number of distinct grouping keys. Please provide a query configuration with valid retention interval to prevent excessive state size. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -788,7 +788,7 @@ val result = orders.groupBy('a).select('a, 'b.sum as 'd)
     	<td>
         <p>Groups and aggregates a table on a <a href="#group-windows">group window</a> and possibly one or more grouping keys.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result: Table = orders
     .window(Tumble over 5.minutes on 'rowtime as 'w) // define window
     .groupBy('a, 'w) // group by key and window
@@ -802,9 +802,9 @@ val result: Table = orders
         <span class="label label-primary">Streaming</span>
       </td>
     	<td>
-       <p>Similar to a SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
+       <p>Similar to an SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
        {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result: Table = orders
     // define window
     .window(Over  
@@ -825,9 +825,9 @@ val result: Table = orders
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT AGGREGATION clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
+        <p>Similar to an SQL DISTINCT AGGREGATION clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders");
+val orders: Table = tableEnv.scan("Orders");
 // Distinct aggregation on group by
 val groupByDistinctResult = orders
     .groupBy('a)
@@ -847,7 +847,7 @@ val result = orders
 {% endhighlight %}
         <p>User-defined aggregation function can also be used with DISTINCT modifiers. To calculate the aggregate results only for distinct values, simply add the distinct modifier towards the aggregation function. </p>
 {% highlight scala %}
-val orders: Table = tEnv.from("Orders");
+val orders: Table = tEnv.scan("Orders");
 
 // Use distinct aggregation for user-defined aggregate functions
 val myUdagg = new MyUdagg();
@@ -863,9 +863,9 @@ orders.groupBy('users).select('users, myUdagg.distinct('points) as 'myDistinctRe
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT clause. Returns records with distinct value combinations.</p>
+        <p>Similar to an SQL DISTINCT clause. Returns records with distinct value combinations.</p>
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders.distinct()
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the number of distinct fields. Please provide a query configuration with valid retention interval to prevent excessive state size. If state cleaning is enabled, distinct have to emit messages to prevent too early state eviction of downstream operators which makes distinct contains result updating. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -891,9 +891,9 @@ val result = orders.distinct()
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
+        <p>Similar to an SQL GROUP BY clause. Groups the rows on the grouping keys with a following running aggregation operator to aggregate rows group-wise.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.group_by("a").select("a, b.sum as d")
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the type of aggregation and the number of distinct grouping keys. Please provide a query configuration with valid retention interval to prevent excessive state size. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -907,7 +907,7 @@ result = orders.group_by("a").select("a, b.sum as d")
     	<td>
         <p>Groups and aggregates a table on a <a href="#group-windows">group window</a> and possibly one or more grouping keys.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.window(Tumble.over("5.minutes").on("rowtime").alias("w")) \ 
                .group_by("a, w") \
                .select("a, w.start, w.end, w.rowtime, b.sum as d")
@@ -920,9 +920,9 @@ result = orders.window(Tumble.over("5.minutes").on("rowtime").alias("w")) \
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
-       <p>Similar to a SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
+       <p>Similar to an SQL OVER clause. Over window aggregates are computed for each row, based on a window (range) of preceding and succeeding rows. See the <a href="#over-windows">over windows section</a> for more details.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.over_window(Over.partition_by("a").order_by("rowtime")
                             .preceding("UNBOUNDED_RANGE").following("CURRENT_RANGE")
                             .alias("w")) \
@@ -938,9 +938,9 @@ result = orders.over_window(Over.partition_by("a").order_by("rowtime")
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT aggregation clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
+        <p>Similar to an SQL DISTINCT aggregation clause such as COUNT(DISTINCT a). Distinct aggregation declares that an aggregation function (built-in or user-defined) is only applied on distinct input values. Distinct can be applied to <b>GroupBy Aggregation</b>, <b>GroupBy Window Aggregation</b> and <b>Over Window Aggregation</b>.</p>
 {% highlight python %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 # Distinct aggregation on group by
 group_by_distinct_result = orders.group_by("a") \
                                  .select("a, b.sum.distinct as d")
@@ -967,9 +967,9 @@ result = orders.over_window(Over
         <span class="label label-info">Result Updating</span>
       </td>
       <td>
-        <p>Similar to a SQL DISTINCT clause. Returns records with distinct value combinations.</p>
+        <p>Similar to an SQL DISTINCT clause. Returns records with distinct value combinations.</p>
 {% highlight java %}
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.distinct()
 {% endhighlight %}
         <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the number of distinct fields. Please provide a query configuration with valid retention interval to prevent excessive state size. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -1003,7 +1003,7 @@ result = orders.distinct()
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
+        <p>Similar to an SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "d, e, f");
@@ -1061,7 +1061,7 @@ Table result = left.join(right)
     </tr>
     <tr>
     	<td>
-        <strong>Inner Join with Table Function (UDTF)</strong><br>
+        <strong>Inner Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
     	<td>
@@ -1073,7 +1073,7 @@ TableFunction<String> split = new MySplitUDTF();
 tableEnv.registerFunction("split", split);
 
 // join
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .joinLateral("split(c).as(s, t, v)")
     .select("a, b, s, t, v");
@@ -1082,7 +1082,7 @@ Table result = orders
     </tr>
     <tr>
     	<td>
-        <strong>Left Outer Join with Table Function (UDTF)</strong><br>
+        <strong>Left Outer Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
@@ -1094,7 +1094,7 @@ TableFunction<String> split = new MySplitUDTF();
 tableEnv.registerFunction("split", split);
 
 // join
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .leftOuterJoinLateral("split(c).as(s, t, v)")
     .select("a, b, s, t, v");
@@ -1113,7 +1113,7 @@ Table result = orders
 
         <p>Currently only inner joins with temporal tables are supported.</p>
 {% highlight java %}
-Table ratesHistory = tableEnv.from("RatesHistory");
+Table ratesHistory = tableEnv.scan("RatesHistory");
 
 // register temporal table function with a time attribute and primary key
 TemporalTableFunction rates = ratesHistory.createTemporalTableFunction(
@@ -1122,7 +1122,7 @@ TemporalTableFunction rates = ratesHistory.createTemporalTableFunction(
 tableEnv.registerFunction("rates", rates);
 
 // join with "Orders" based on the time attribute and key
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .joinLateral("rates(o_proctime)", "o_currency = r_currency")
 {% endhighlight %}
@@ -1152,7 +1152,7 @@ Table result = orders
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
+        <p>Similar to an SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'd, 'e, 'f)
@@ -1209,7 +1209,7 @@ val result = left.join(right)
     </tr>
     <tr>
     	<td>
-        <strong>Inner Join with Table Function (UDTF)</strong><br>
+        <strong>Inner Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
     	<td>
@@ -1228,7 +1228,7 @@ val result: Table = table
     </tr>
     <tr>
     	<td>
-        <strong>Left Outer Join with Table Function (UDTF)</strong><br>
+        <strong>Left Outer Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span></td>
     	<td>
         <p>Joins a table with the results of a table function. Each row of the left (outer) table is joined with all rows produced by the corresponding call of the table function. If a table function call returns an empty result, the corresponding outer row is preserved and the result padded with null values.</p>
@@ -1257,13 +1257,13 @@ val result: Table = table
 
         <p>Currently only inner joins with temporal tables are supported.</p>
 {% highlight scala %}
-val ratesHistory = tableEnv.from("RatesHistory")
+val ratesHistory = tableEnv.scan("RatesHistory")
 
 // register temporal table function with a time attribute and primary key
 val rates = ratesHistory.createTemporalTableFunction('r_proctime, 'r_currency)
 
 // join with "Orders" based on the time attribute and key
-val orders = tableEnv.from("Orders")
+val orders = tableEnv.scan("Orders")
 val result = orders
     .joinLateral(rates('o_rowtime), 'r_currency === 'o_currency)
 {% endhighlight %}
@@ -1291,10 +1291,10 @@ val result = orders
         <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
+        <p>Similar to an SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("d, e, f")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("d, e, f")
 result = left.join(right).where("a = d").select("a, b, e")
 {% endhighlight %}
 <p><b>Note:</b> For streaming queries the required state to compute the query result might grow infinitely depending on the number of distinct input rows. Please provide a query configuration with valid retention interval to prevent excessive state size. See <a href="streaming/query_configuration.html">Query Configuration</a> for details.</p>
@@ -1311,8 +1311,8 @@ result = left.join(right).where("a = d").select("a, b, e")
       <td>
         <p>Similar to SQL LEFT/RIGHT/FULL OUTER JOIN clauses. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("d, e, f")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("d, e, f")
 
 left_outer_result = left.left_outer_join(right, "a = d").select("a, b, e")
 right_outer_result = left.right_outer_join(right, "a = d").select("a, b, e")
@@ -1332,7 +1332,7 @@ full_outer_result = left.full_outer_join(right, "a = d").select("a, b, e")
     </tr>
     <tr>
     	<td>
-        <strong>Inner Join with Table Function (UDTF)</strong><br>
+        <strong>Inner Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
     	<td>
@@ -1343,14 +1343,14 @@ full_outer_result = left.full_outer_join(right, "a = d").select("a, b, e")
 table_env.register_java_function("split", "com.my.udf.MySplitUDTF")
 
 # join
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.join_lateral("split(c).as(s, t, v)").select("a, b, s, t, v")
 {% endhighlight %}
       </td>
     </tr>
     <tr>
     	<td>
-        <strong>Left Outer Join with Table Function (UDTF)</strong><br>
+        <strong>Left Outer Join with Table Function</strong><br>
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
@@ -1361,7 +1361,7 @@ result = orders.join_lateral("split(c).as(s, t, v)").select("a, b, s, t, v")
 table_env.register_java_function("split", "com.my.udf.MySplitUDTF")
 
 # join
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 result = orders.left_outer_join_lateral("split(c).as(s, t, v)").select("a, b, s, t, v")
 {% endhighlight %}
       </td>
@@ -1403,7 +1403,7 @@ result = orders.left_outer_join_lateral("split(c).as(s, t, v)").select("a, b, s,
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL UNION clause. Unions two tables with duplicate records removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION clause. Unions two tables with duplicate records removed. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "a, b, c");
@@ -1418,7 +1418,7 @@ Table result = left.union(right);
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL UNION ALL clause. Unions two tables. Both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION ALL clause. Unions two tables. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "a, b, c");
@@ -1433,7 +1433,7 @@ Table result = left.unionAll(right);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "d, e, f");
@@ -1448,7 +1448,7 @@ Table result = left.intersect(right);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "d, e, f");
@@ -1463,7 +1463,7 @@ Table result = left.intersectAll(right);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "a, b, c");
@@ -1478,7 +1478,7 @@ Table result = left.minus(right);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "a, b, c");
@@ -1493,7 +1493,7 @@ Table result = left.minusAll(right);
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
+        <p>Similar to an SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
 {% highlight java %}
 Table left = ds1.toTable(tableEnv, "a, b, c");
 Table right = ds2.toTable(tableEnv, "a");
@@ -1502,7 +1502,7 @@ Table right = ds2.toTable(tableEnv, "a");
 Table result = left.select("a, b, c").where("a.in(" + right + ")");
 
 // using explicit registration
-tableEnv.createTemporaryView("RightTable", right);
+tableEnv.registerTable("RightTable", right);
 Table result = left.select("a, b, c").where("a.in(RightTable)");
 {% endhighlight %}
 
@@ -1529,7 +1529,7 @@ Table result = left.select("a, b, c").where("a.in(RightTable)");
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL UNION clause. Unions two tables with duplicate records removed, both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION clause. Unions two tables with duplicate records removed, both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'a, 'b, 'c)
@@ -1545,7 +1545,7 @@ val result = left.union(right)
 
       </td>
       <td>
-        <p>Similar to a SQL UNION ALL clause. Unions two tables, both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION ALL clause. Unions two tables, both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'a, 'b, 'c)
@@ -1560,7 +1560,7 @@ val result = left.unionAll(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present in one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present in one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'e, 'f, 'g)
@@ -1575,7 +1575,7 @@ val result = left.intersect(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'e, 'f, 'g)
@@ -1590,7 +1590,7 @@ val result = left.intersectAll(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'a, 'b, 'c)
@@ -1605,7 +1605,7 @@ val result = left.minus(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'a, 'b, 'c)
@@ -1620,7 +1620,7 @@ val result = left.minusAll(right)
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
+        <p>Similar to an SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c)
 val right = ds2.toTable(tableEnv, 'a)
@@ -1649,10 +1649,10 @@ val result = left.select('a, 'b, 'c).where('a.in(right))
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL UNION clause. Unions two tables with duplicate records removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION clause. Unions two tables with duplicate records removed. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.union(right)
 {% endhighlight %}
       </td>
@@ -1664,10 +1664,10 @@ result = left.union(right)
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL UNION ALL clause. Unions two tables. Both tables must have identical field types.</p>
+        <p>Similar to an SQL UNION ALL clause. Unions two tables. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.union_all(right)
 {% endhighlight %}
       </td>
@@ -1679,10 +1679,10 @@ result = left.union_all(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.intersect(right)
 {% endhighlight %}
       </td>
@@ -1694,10 +1694,10 @@ result = left.intersect(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
+        <p>Similar to an SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.intersect_all(right)
 {% endhighlight %}
       </td>
@@ -1709,10 +1709,10 @@ result = left.intersect_all(right)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.minus(right);
 {% endhighlight %}
       </td>
@@ -1724,10 +1724,10 @@ result = left.minus(right);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
+        <p>Similar to an SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a, b, c")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a, b, c")
 result = left.minus_all(right)
 {% endhighlight %}
       </td>
@@ -1739,10 +1739,10 @@ result = left.minus_all(right)
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to a SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
+        <p>Similar to an SQL IN clause. In returns true if an expression exists in a given table sub-query. The sub-query table must consist of one column. This column must have the same data type as the expression.</p>
 {% highlight python %}
-left = table_env.from_path("Source1").select("a, b, c")
-right = table_env.from_path("Source2").select("a")
+left = table_env.scan("Source1").select("a, b, c")
+right = table_env.scan("Source2").select("a")
 
 # using implicit registration
 result = left.select("a, b, c").where("a.in(%s)" % right)
@@ -1781,7 +1781,7 @@ result = left.select("a, b, c").where("a.in(RightTable)")
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
+        <p>Similar to an SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
 {% highlight java %}
 Table in = tableEnv.fromDataSet(ds, "a, b, c");
 Table result = in.orderBy("a.asc");
@@ -1830,7 +1830,7 @@ Table result3 = in.orderBy("a.asc").offset(10).fetch(5);
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
+        <p>Similar to an SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
 {% highlight scala %}
 val in = ds.toTable(tableEnv, 'a, 'b, 'c)
 val result = in.orderBy('a.asc)
@@ -1878,9 +1878,9 @@ val result3: Table = in.orderBy('a.asc).offset(10).fetch(5)
         <span class="label label-primary">Batch</span>
       </td>
       <td>
-        <p>Similar to a SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
+        <p>Similar to an SQL ORDER BY clause. Returns records globally sorted across all parallel partitions.</p>
 {% highlight python %}
-in = table_env.from_path("Source1").select("a, b, c")
+in = table_env.scan("Source1").select("a, b, c")
 result = in.order_by("a.asc")
 {% endhighlight %}
       </td>
@@ -1894,7 +1894,7 @@ result = in.order_by("a.asc")
       <td>
         <p>Similar to the SQL OFFSET and FETCH clauses. Offset and Fetch limit the number of records returned from a sorted result. Offset and Fetch are technically part of the Order By operator and thus must be preceded by it.</p>
 {% highlight python %}
-in = table_env.from_path("Source1").select("a, b, c")
+in = table_env.scan("Source1").select("a, b, c")
 
 # returns the first 5 records from the sorted result
 result1 = in.order_by("a.asc").fetch(5)
@@ -1932,12 +1932,12 @@ result3 = in.order_by("a.asc").offset(10).fetch(5)
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to the INSERT INTO clause in a SQL query. Performs a insertion into a registered output table.</p>
+        <p>Similar to the INSERT INTO clause in an SQL query. Performs a insertion into a registered output table.</p>
 
-        <p>Output tables must be registered in the TableEnvironment (see <a href="common.html#connector-tables">Connector tables</a>). Moreover, the schema of the registered table must match the schema of the query.</p>
+        <p>Output tables must be registered in the TableEnvironment (see <a href="common.html#register-a-tablesink">Register a TableSink</a>). Moreover, the schema of the registered table must match the schema of the query.</p>
 
 {% highlight java %}
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 orders.insertInto("OutOrders");
 {% endhighlight %}
       </td>
@@ -1962,12 +1962,12 @@ orders.insertInto("OutOrders");
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to the INSERT INTO clause in a SQL query. Performs a insertion into a registered output table.</p>
+        <p>Similar to the INSERT INTO clause in an SQL query. Performs a insertion into a registered output table.</p>
 
-        <p>Output tables must be registered in the TableEnvironment (see <a href="common.html#connector-tables">Connector tables</a>). Moreover, the schema of the registered table must match the schema of the query.</p>
+        <p>Output tables must be registered in the TableEnvironment (see <a href="common.html#register-a-tablesink">Register a TableSink</a>). Moreover, the schema of the registered table must match the schema of the query.</p>
 
 {% highlight scala %}
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 orders.insertInto("OutOrders")
 {% endhighlight %}
       </td>
@@ -1992,12 +1992,12 @@ orders.insertInto("OutOrders")
         <span class="label label-primary">Batch</span> <span class="label label-primary">Streaming</span>
       </td>
       <td>
-        <p>Similar to the INSERT INTO clause in a SQL query. Performs a insertion into a registered output table.</p>
+        <p>Similar to the INSERT INTO clause in an SQL query. Performs a insertion into a registered output table.</p>
 
         <p>Output tables must be registered in the TableEnvironment (see <a href="common.html#register-a-tablesink">Register a TableSink</a>). Moreover, the schema of the registered table must match the schema of the query.</p>
 
 {% highlight python %}
-orders = table_env.from_path("Orders");
+orders = table_env.scan("Orders");
 orders.insert_into("OutOrders");
 {% endhighlight %}
       </td>
@@ -2687,7 +2687,7 @@ Table table = input
       </td>
       <td>
         <p>Similar to a <b>GroupBy Aggregation</b>. Groups the rows on the grouping keys with the following running table aggregation operator to aggregate rows group-wise. The difference from an AggregateFunction is that TableAggregateFunction may return 0 or more records for a group. You have to close the "flatAggregate" with a select statement. And the select statement does not support aggregate functions.</p>
-        <p>Instead of using <code>emitValue</code> to output results, you can also use the <code>emitUpdateWithRetract</code> method. Different from <code>emitValue</code>, <code>emitUpdateWithRetract</code> is used to emit values that have been updated. This method outputs data incrementally in retract mode, i.e., once there is an update, we have to retract old records before sending new updated ones. The <code>emitUpdateWithRetract</code> method will be used in preference to the <code>emitValue</code> method if both methods are defined in the table aggregate function, because the method is treated to be more efficient than <code>emitValue</code> as it can output values incrementally. See <a href="{{ site.baseurl }}/dev/table/functions/udfs.html#table-aggregation-functions">Table Aggregation Functions</a> for details.</p>
+        <p>Instead of using <code>emitValue</code> to output results, you can also use the <code>emitUpdateWithRetract</code> method. Different from <code>emitValue</code>, <code>emitUpdateWithRetract</code> is used to emit values that have been updated. This method outputs data incrementally in retract mode, i.e., once there is an update, we have to retract old records before sending new updated ones. The <code>emitUpdateWithRetract</code> method will be used in preference to the <code>emitValue</code> method if both methods are defined in the table aggregate function, because the method is treated to be more efficient than <code>emitValue</code> as it can output values incrementally. See <a href="udfs.html#table-aggregation-functions">Table Aggregation Functions</a> for details.</p>
 {% highlight java %}
 /**
  * Accumulator for Top2.
@@ -2739,7 +2739,7 @@ public class Top2 extends TableAggregateFunction<Tuple2<Integer, Integer>, Top2A
 }
     
 tEnv.registerFunction("top2", new Top2());
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .groupBy("key")
     .flatAggregate("top2(a) as (v, rank)")
@@ -2759,7 +2759,7 @@ Table result = orders
         <p>Groups and aggregates a table on a <a href="#group-windows">group window</a> and possibly one or more grouping keys. You have to close the "flatAggregate" with a select statement. And the select statement does not support aggregate functions.</p>
 {% highlight java %}
 tableEnv.registerFunction("top2", new Top2());
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 Table result = orders
     .window(Tumble.over("5.minutes").on("rowtime").as("w")) // define window
     .groupBy("a, w") // group by key and window
@@ -2911,7 +2911,7 @@ val table = input
       </td>
       <td>
         <p>Similar to a <b>GroupBy Aggregation</b>. Groups the rows on the grouping keys with the following running table aggregation operator to aggregate rows group-wise. The difference from an AggregateFunction is that TableAggregateFunction may return 0 or more records for a group. You have to close the "flatAggregate" with a select statement. And the select statement does not support aggregate functions.</p>
-        <p>Instead of using <code>emitValue</code> to output results, you can also use the <code>emitUpdateWithRetract</code> method. Different from <code>emitValue</code>, <code>emitUpdateWithRetract</code> is used to emit values that have been updated. This method outputs data incrementally in retract mode, i.e., once there is an update, we have to retract old records before sending new updated ones. The <code>emitUpdateWithRetract</code> method will be used in preference to the <code>emitValue</code> method if both methods are defined in the table aggregate function, because the method is treated to be more efficient than <code>emitValue</code> as it can output values incrementally. See <a href="{{ site.baseurl }}/dev/table/functions/udfs.html#table-aggregation-functions">Table Aggregation Functions</a> for details.</p>
+        <p>Instead of using <code>emitValue</code> to output results, you can also use the <code>emitUpdateWithRetract</code> method. Different from <code>emitValue</code>, <code>emitUpdateWithRetract</code> is used to emit values that have been updated. This method outputs data incrementally in retract mode, i.e., once there is an update, we have to retract old records before sending new updated ones. The <code>emitUpdateWithRetract</code> method will be used in preference to the <code>emitValue</code> method if both methods are defined in the table aggregate function, because the method is treated to be more efficient than <code>emitValue</code> as it can output values incrementally. See <a href="udfs.html#table-aggregation-functions">Table Aggregation Functions</a> for details.</p>
 {% highlight scala %}
 import java.lang.{Integer => JInteger}
 import org.apache.flink.table.api.Types
@@ -2967,7 +2967,7 @@ class Top2 extends TableAggregateFunction[JTuple2[JInteger, JInteger], Top2Accum
 }
 
 val top2 = new Top2
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders
     .groupBy('key)
     .flatAggregate(top2('a) as ('v, 'rank))
@@ -2986,7 +2986,7 @@ val result = orders
         <p>Groups and aggregates a table on a <a href="#group-windows">group window</a> and possibly one or more grouping keys. You have to close the "flatAggregate" with a select statement. And the select statement does not support aggregate functions.</p>
 {% highlight scala %}
 val top2 = new Top2
-val orders: Table = tableEnv.from("Orders")
+val orders: Table = tableEnv.scan("Orders")
 val result = orders
     .window(Tumble over 5.minutes on 'rowtime as 'w) // define window
     .groupBy('a, 'w) // group by key and window
@@ -3010,9 +3010,9 @@ Please see the dedicated page about [data types](types.html).
 
 Generic types and (nested) composite types (e.g., POJOs, tuples, rows, Scala case classes) can be fields of a row as well.
 
-Fields of composite types with arbitrary nesting can be accessed with [value access functions]({{ site.baseurl }}/dev/table/functions/systemFunctions.html#value-access-functions).
+Fields of composite types with arbitrary nesting can be accessed with [value access functions](functions.html#value-access-functions).
 
-Generic types are treated as a black box and can be passed on or processed by [user-defined functions]({{ site.baseurl }}/dev/table/functions/udfs.html).
+Generic types are treated as a black box and can be passed on or processed by [user-defined functions](udfs.html).
 
 {% top %}
 

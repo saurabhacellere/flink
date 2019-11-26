@@ -1,5 +1,5 @@
 ---
-title: "Concepts & Common API"
+title: "概念与通用 API"
 nav-parent_id: tableapi
 nav-pos: 0
 ---
@@ -30,8 +30,8 @@ The Table API and SQL are integrated in a joint API. The central concept of this
 Main Differences Between the Two Planners
 -----------------------------------------
 
-1. Blink treats batch jobs as a special case of streaming. As such, the conversion between Table and DataSet is also not supported, and batch jobs will not be translated into `DateSet` programs but translated into `DataStream` programs, the same as the streaming jobs.
-2. The Blink planner does not support `BatchTableSource`, use bounded `StreamTableSource` instead of it.
+1. Blink treats batch jobs as a special case of streaming. As such, the conversion between Table and DataSet is not supported, and batch jobs will not be translated into `DateSet` programs but translated into `DataStream` programs, the same as the streaming jobs.
+2. The Blink planner does not support `BatchTableSource`, uses bounded `StreamTableSource` instead of it.
 3. The Blink planner only support the brand new `Catalog` and does not support `ExternalCatalog` which is deprecated.
 4. The implementations of `FilterableTableSource` for the old planner and the Blink planner are incompatible. The old planner will push down `PlannerExpression`s into `FilterableTableSource`, while the Blink planner will push down `Expression`s.
 5. String based key-value config options (Please see the documentation about [Configuration]({{ site.baseurl }}/dev/table/config.html) for details) are only used for the Blink planner.
@@ -52,15 +52,16 @@ All Table API and SQL programs for batch and streaming follow the same pattern. 
 // create a TableEnvironment for specific planner batch or streaming
 TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
 
-// create a Table
-tableEnv.connect(...).createTemporaryTable("table1");
+// register a Table
+tableEnv.registerTable("table1", ...)            // or
+tableEnv.registerTableSource("table2", ...);
 // register an output Table
-tableEnv.connect(...).createTemporaryTable("outputTable");
+tableEnv.registerTableSink("outputTable", ...);
 
-// create a Table object from a Table API query
-Table tapiResult = tableEnv.from("table1").select(...);
-// create a Table object from a SQL query
-Table sqlResult  = tableEnv.sqlQuery("SELECT ... FROM table1 ... ");
+// create a Table from a Table API query
+Table tapiResult = tableEnv.scan("table1").select(...);
+// create a Table from an SQL query
+Table sqlResult  = tableEnv.sqlQuery("SELECT ... FROM table2 ... ");
 
 // emit a Table API result Table to a TableSink, same for SQL result
 tapiResult.insertInto("outputTable");
@@ -77,15 +78,16 @@ tableEnv.execute("java_job");
 // create a TableEnvironment for specific planner batch or streaming
 val tableEnv = ... // see "Create a TableEnvironment" section
 
-// create a Table
-tableEnv.connect(...).createTemporaryTable("table1")
+// register a Table
+tableEnv.registerTable("table1", ...)           // or
+tableEnv.registerTableSource("table2", ...)
 // register an output Table
-tableEnv.connect(...).createTemporaryTable("outputTable")
+tableEnv.registerTableSink("outputTable", ...);
 
 // create a Table from a Table API query
-val tapiResult = tableEnv.from("table1").select(...)
-// create a Table from a SQL query
-val sqlResult  = tableEnv.sqlQuery("SELECT ... FROM table1 ...")
+val tapiResult = tableEnv.scan("table1").select(...)
+// create a Table from an SQL query
+val sqlResult  = tableEnv.sqlQuery("SELECT ... FROM table2 ...")
 
 // emit a Table API result Table to a TableSink, same for SQL result
 tapiResult.insertInto("outputTable")
@@ -103,15 +105,16 @@ tableEnv.execute("scala_job")
 table_env = ... # see "Create a TableEnvironment" section
 
 # register a Table
-table_env.connect(...).create_temporary_table("table1")
+table_env.register_table("table1", ...)           # or
+table_env.register_table_source("table2", ...)
 
 # register an output Table
-table_env.connect(...).create_temporary_table("outputTable")
+table_env.register_table_sink("outputTable", ...);
 
 # create a Table from a Table API query
-tapi_result = table_env.from_path("table1").select(...)
-# create a Table from a SQL query
-sql_result  = table_env.sql_query("SELECT ... FROM table1 ...")
+tapi_result = table_env.scan("table1").select(...)
+# create a Table from an SQL query
+sql_result  = table_env.sql_query("SELECT ... FROM table2 ...")
 
 # emit a Table API result Table to a TableSink, same for SQL result
 tapi_result.insert_into("outputTable")
@@ -289,51 +292,25 @@ b_b_t_env = BatchTableEnvironment.create(environment_settings=b_b_settings)
 
 **Note:** If there is only one planner jar in `/lib` directory, you can use `useAnyPlanner` (`use_any_planner` for python) to create specific `EnvironmentSettings`.
 
+
 {% top %}
 
-Create Tables in the Catalog
+Register Tables in the Catalog
 -------------------------------
 
-A `TableEnvironment` maintains a map of catalogs of tables which are created with an identifier. Each
-identifier consists of 3 parts: catalog name, database name and object name. If a catalog or database is not
-specified, the current default value will be used (see examples in the [Table identifier expanding](#table-identifier-expanding) section).
+A `TableEnvironment` maintains a catalog of tables which are registered by name. There are two types of tables, *input tables* and *output tables*. Input tables can be referenced in Table API and SQL queries and provide input data. Output tables can be used to emit the result of a Table API or SQL query to an external system.
 
-Tables can be either virtual (`VIEWS`) or regular (`TABLES`). `VIEWS` can be created from an
-existing `Table` object, usually the result of a Table API or SQL query. `TABLES` describe
-external data, such as a file, database table, or message queue.
+An input table can be registered from various sources:
 
-### Temporary vs Permanent tables.
+* an existing `Table` object, usually the result of a Table API or SQL query.
+* a `TableSource`, which accesses external data, such as a file, database, or messaging system. 
+* a `DataStream` or `DataSet` from a DataStream (only for stream job) or DataSet (only for batch job translated from old planner) program. Registering a `DataStream` or `DataSet` is discussed in the [Integration with DataStream and DataSet API](#integration-with-datastream-and-dataset-api) section.
 
-Tables may either be temporary, and tied to the lifecycle of a single Flink session, or permanent,
-and visible across multiple Flink sessions and clusters.
+An output table can be registered using a `TableSink`.
 
-Permanent tables require a [catalog]({{ site.baseurl }}/dev/table/catalogs.html) (such as Hive Metastore)
-to maintain metadata about the table. Once a permanent table is created, it is visible to any Flink
-session that is connected to the catalog and will continue to exist until the table is explicitly
-dropped.
+### Register a Table
 
-On the other hand, temporary tables are always stored in memory and only exist for the duration of
-the Flink session they are created within. These tables are not visible to other sessions. They are
-not bound to any catalog or database but can be created in the namespace of one. Temporary tables
-are not dropped if their corresponding database is removed.
-
-#### Shadowing
-
-It is possible to register a temporary table with the same identifier as an existing permanent
-table. The temporary table shadows the permanent one and makes the permanent table inaccessible as
-long as the temporary one exists. All queries with that identifier will be executed against the
-temporary table.
-
-This might be useful for experimentation. It allows running exactly the same query first against a
-temporary table that e.g. has just a subset of data, or the data is obfuscated. Once verified that
-the query is correct it can be run against the real production table.
-
-### Create a Table
-
-#### Virtual Tables
-
-A `Table` API object corresponds to a `VIEW` (virtual table) in a SQL terms. It encapsulates a logical
-query plan. It can be created in a catalog as follows:
+A `Table` is registered in a `TableEnvironment` as follows:
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -341,11 +318,11 @@ query plan. It can be created in a catalog as follows:
 // get a TableEnvironment
 TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
 
-// table is the result of a simple projection query 
-Table projTable = tableEnv.from("X").select(...);
+// table is the result of a simple projection query
+Table projTable = tableEnv.scan("X").select(...);
 
 // register the Table projTable as table "projectedTable"
-tableEnv.createTemporaryView("projectedTable", projTable);
+tableEnv.registerTable("projectedTable", projTable);
 {% endhighlight %}
 </div>
 
@@ -354,11 +331,11 @@ tableEnv.createTemporaryView("projectedTable", projTable);
 // get a TableEnvironment
 val tableEnv = ... // see "Create a TableEnvironment" section
 
-// table is the result of a simple projection query 
-val projTable: Table = tableEnv.from("X").select(...)
+// table is the result of a simple projection query
+val projTable: Table = tableEnv.scan("X").select(...)
 
 // register the Table projTable as table "projectedTable"
-tableEnv.createTemporaryView("projectedTable", projTable)
+tableEnv.registerTable("projectedTable", projTable)
 {% endhighlight %}
 </div>
 
@@ -367,8 +344,8 @@ tableEnv.createTemporaryView("projectedTable", projTable)
 # get a TableEnvironment
 table_env = ... # see "Create a TableEnvironment" section
 
-# table is the result of a simple projection query 
-proj_table = table_env.from_path("X").select(...)
+# table is the result of a simple projection query
+proj_table = table_env.scan("X").select(...)
 
 # register the Table projTable as table "projectedTable"
 table_env.register_table("projectedTable", proj_table)
@@ -376,133 +353,127 @@ table_env.register_table("projectedTable", proj_table)
 </div>
 </div>
 
-**Note:** `Table` objects are similar to `VIEW`'s from relational database
-systems, i.e., the query that defines the `Table` is not optimized but will be inlined when another
-query references the registered `Table`. If multiple queries reference the same registered `Table`,
-it will be inlined for each referencing query and executed multiple times, i.e., the result of the
-registered `Table` will *not* be shared.
+**Note:** A registered `Table` is treated similarly to a `VIEW` as known from relational database systems, i.e., the query that defines the `Table` is not optimized but will be inlined when another query references the registered `Table`. If multiple queries reference the same registered `Table`, it will be inlined for each referencing query and executed multiple times, i.e., the result of the registered `Table` will *not* be shared.
 
 {% top %}
 
-#### Connector Tables
+### Register a TableSource
 
-It is also possible to create a `TABLE` as known from relational databases from a [connector]({{ site.baseurl }}/dev/table/connect.html) declaration.
-The connector describes the external system that stores the data of a table. Storage systems such as Apacha Kafka or a regular file system can be declared here.
+A `TableSource` provides access to external data which is stored in a storage system such as a database (MySQL, HBase, ...), a file with a specific encoding (CSV, Apache \[Parquet, Avro, ORC\], ...), or a messaging system (Apache Kafka, RabbitMQ, ...). 
 
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-tableEnvironment
-  .connect(...)
-  .withFormat(...)
-  .withSchema(...)
-  .inAppendMode()
-  .createTemporaryTable("MyTable")
-{% endhighlight %}
-</div>
+Flink aims to provide TableSources for common data formats and storage systems. Please have a look at the [Table Sources and Sinks]({{ site.baseurl }}/dev/table/sourceSinks.html) page for a list of supported TableSources and instructions for how to build a custom `TableSource`.
 
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-tableEnvironment
-  .connect(...)
-  .withFormat(...)
-  .withSchema(...)
-  .inAppendMode()
-  .createTemporaryTable("MyTable")
-{% endhighlight %}
-</div>
-
-<div data-lang="python" markdown="1">
-{% highlight python %}
-table_environment \
-    .connect(...) \
-    .with_format(...) \
-    .with_schema(...) \
-    .in_append_mode() \
-    .create_temporary_table("MyTable")
-{% endhighlight %}
-</div>
-
-<div data-lang="DDL" markdown="1">
-{% highlight sql %}
-tableEnvironment.sqlUpdate("CREATE [TEMPORARY] TABLE MyTable (...) WITH (...)")
-{% endhighlight %}
-</div>
-</div>
-
-### Expanding Table identifiers
-
-Tables are always registered with a 3 part identifier consisting of catalog, database, and
-table name. The first two parts are optional and if they are not provided the set default values will
-be used. Identifiers follow SQL requirements which means that they can be escaped with a backtick character (`` ` ``).
-Additionally all SQL reserved keywords must be escaped.
+A `TableSource` is registered in a `TableEnvironment` as follows:
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
 {% highlight java %}
-TableEnvironment tEnv = ...;
-tEnv.useCatalog("custom_catalog");
-tEnv.useDatabase("custom_database");
+// get a TableEnvironment
+TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
 
-Table table = ...;
+// create a TableSource
+TableSource csvSource = new CsvTableSource("/path/to/file", ...);
 
-// register the view named 'exampleView' in the catalog named 'custom_catalog'
-// in the database named 'custom_database' 
-tableEnv.createTemporaryView("exampleView", table);
-
-// register the view named 'exampleView' in the catalog named 'custom_catalog'
-// in the database named 'other_database' 
-tableEnv.createTemporaryView("other_database.exampleView", table);
-
-// register the view named 'View' in the catalog named 'custom_catalog' in the
-// database named 'custom_database'. 'View' is a reserved keyword and must be escaped.  
-tableEnv.createTemporaryView("`View`", table);
-
-// register the view named 'example.View' in the catalog named 'custom_catalog'
-// in the database named 'custom_database' 
-tableEnv.createTemporaryView("`example.View`", table);
-
-// register the view named 'exampleView' in the catalog named 'other_catalog'
-// in the database named 'other_database' 
-tableEnv.createTemporaryView("other_catalog.other_database.exampleView", table);
-
+// register the TableSource as table "CsvTable"
+tableEnv.registerTableSource("CsvTable", csvSource);
 {% endhighlight %}
 </div>
 
 <div data-lang="scala" markdown="1">
 {% highlight scala %}
 // get a TableEnvironment
-val tEnv: TableEnvironment = ...;
-tEnv.useCatalog("custom_catalog")
-tEnv.useDatabase("custom_database")
+val tableEnv = ... // see "Create a TableEnvironment" section
 
-val table: Table = ...;
+// create a TableSource
+val csvSource: TableSource = new CsvTableSource("/path/to/file", ...)
 
-// register the view named 'exampleView' in the catalog named 'custom_catalog'
-// in the database named 'custom_database' 
-tableEnv.createTemporaryView("exampleView", table)
-
-// register the view named 'exampleView' in the catalog named 'custom_catalog'
-// in the database named 'other_database' 
-tableEnv.createTemporaryView("other_database.exampleView", table)
-
-// register the view named 'View' in the catalog named 'custom_catalog' in the
-// database named 'custom_database'. 'View' is a reserved keyword and must be escaped.  
-tableEnv.createTemporaryView("`View`", table)
-
-// register the view named 'example.View' in the catalog named 'custom_catalog'
-// in the database named 'custom_database' 
-tableEnv.createTemporaryView("`example.View`", table)
-
-// register the view named 'exampleView' in the catalog named 'other_catalog'
-// in the database named 'other_database' 
-tableEnv.createTemporaryView("other_catalog.other_database.exampleView", table)
+// register the TableSource as table "CsvTable"
+tableEnv.registerTableSource("CsvTable", csvSource)
 {% endhighlight %}
 </div>
 
+<div data-lang="python" markdown="1">
+{% highlight python %}
+# get a TableEnvironment
+table_env = ... # see "Create a TableEnvironment" section
+
+# create a TableSource
+csv_source = CsvTableSource("/path/to/file", ...)
+
+# register the TableSource as table "csvTable"
+table_env.register_table_source("csvTable", csv_source)
+{% endhighlight %}
+</div>
 </div>
 
-Query a Table
+**Note:** A `TableEnvironment` used for Blink planner only accepts `StreamTableSource`, `LookupableTableSource` and `InputFormatTableSource`, and a `StreamTableSource` used for Blink planner on batch must be bounded.
+
+{% top %}
+
+### Register a TableSink
+
+A registered `TableSink` can be used to [emit the result of a Table API or SQL query](common.html#emit-a-table) to an external storage system, such as a database, key-value store, message queue, or file system (in different encodings, e.g., CSV, Apache \[Parquet, Avro, ORC\], ...).
+
+Flink aims to provide TableSinks for common data formats and storage systems. Please see the documentation about [Table Sources and Sinks]({{ site.baseurl }}/dev/table/sourceSinks.html) page for details about available sinks and instructions for how to implement a custom `TableSink`.
+
+A `TableSink` is registered in a `TableEnvironment` as follows:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+{% highlight java %}
+// get a TableEnvironment
+TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
+
+// create a TableSink
+TableSink csvSink = new CsvTableSink("/path/to/file", ...);
+
+// define the field names and types
+String[] fieldNames = {"a", "b", "c"};
+TypeInformation[] fieldTypes = {Types.INT, Types.STRING, Types.LONG};
+
+// register the TableSink as table "CsvSinkTable"
+tableEnv.registerTableSink("CsvSinkTable", fieldNames, fieldTypes, csvSink);
+{% endhighlight %}
+</div>
+
+<div data-lang="scala" markdown="1">
+{% highlight scala %}
+// get a TableEnvironment
+val tableEnv = ... // see "Create a TableEnvironment" section
+
+// create a TableSink
+val csvSink: TableSink = new CsvTableSink("/path/to/file", ...)
+
+// define the field names and types
+val fieldNames: Array[String] = Array("a", "b", "c")
+val fieldTypes: Array[TypeInformation[_]] = Array(Types.INT, Types.STRING, Types.LONG)
+
+// register the TableSink as table "CsvSinkTable"
+tableEnv.registerTableSink("CsvSinkTable", fieldNames, fieldTypes, csvSink)
+{% endhighlight %}
+</div>
+
+<div data-lang="python" markdown="1">
+{% highlight python %}
+# get a TableEnvironment
+table_env = ... # see "Create a TableEnvironment" section
+
+# define the field names and types
+field_names = ["a", "b", "c"]
+field_types = [DataTypes.INT(), DataTypes.STRING(), DataTypes.BIGINT()]
+
+# create a TableSink
+csv_sink = CsvTableSink(field_names, field_types, "/path/to/file", ...)
+
+# register the TableSink as table "CsvSinkTable"
+table_env.register_table_sink("CsvSinkTable", csv_sink)
+{% endhighlight %}
+</div>
+</div>
+
+{% top %}
+
+Query a Table 
 -------------
 
 ### Table API
@@ -524,7 +495,7 @@ TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
 // register Orders table
 
 // scan registered Orders table
-Table orders = tableEnv.from("Orders");
+Table orders = tableEnv.scan("Orders");
 // compute revenue for all customers from France
 Table revenue = orders
   .filter("cCountry === 'FRANCE'")
@@ -544,7 +515,7 @@ val tableEnv = ... // see "Create a TableEnvironment" section
 // register Orders table
 
 // scan registered Orders table
-val orders = tableEnv.from("Orders")
+val orders = tableEnv.scan("Orders")
 // compute revenue for all customers from France
 val revenue = orders
   .filter('cCountry === "FRANCE")
@@ -566,7 +537,7 @@ table_env = # see "Create a TableEnvironment" section
 # register Orders table
 
 # scan registered Orders table
-orders = table_env.from_path("Orders")
+orders = table_env.scan("Orders")
 # compute revenue for all customers from France
 revenue = orders \
     .filter("cCountry === 'FRANCE'") \
@@ -726,8 +697,8 @@ table_env.sql_update(
 
 Table API and SQL queries can be easily mixed because both return `Table` objects:
 
-* A Table API query can be defined on the `Table` object returned by a SQL query.
-* A SQL query can be defined on the result of a Table API query by [registering the resulting Table](#register-a-table) in the `TableEnvironment` and referencing it in the `FROM` clause of the SQL query.
+* A Table API query can be defined on the `Table` object returned by an SQL query.
+* An SQL query can be defined on the result of a Table API query by [registering the resulting Table](#register-a-table) in the `TableEnvironment` and referencing it in the `FROM` clause of the SQL query.
 
 {% top %}
 
@@ -750,16 +721,13 @@ The following examples shows how to emit a `Table`:
 // get a TableEnvironment
 TableEnvironment tableEnv = ...; // see "Create a TableEnvironment" section
 
-// create an output Table
-final Schema schema = new Schema()
-    .field("a", DataTypes.INT())
-    .field("b", DataTypes.STRING())
-    .field("c", DataTypes.LONG());
+// create a TableSink
+TableSink sink = new CsvTableSink("/path/to/file", fieldDelim = "|");
 
-tableEnv.connect(new FileSystem("/path/to/file"))
-    .withFormat(new Csv().fieldDelimiter('|').deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("CsvSinkTable");
+// register the TableSink with a specific schema
+String[] fieldNames = {"a", "b", "c"};
+TypeInformation[] fieldTypes = {Types.INT, Types.STRING, Types.LONG};
+tableEnv.registerTableSink("CsvSinkTable", fieldNames, fieldTypes, sink);
 
 // compute a result Table using Table API operators and/or SQL queries
 Table result = ...
@@ -775,16 +743,13 @@ result.insertInto("CsvSinkTable");
 // get a TableEnvironment
 val tableEnv = ... // see "Create a TableEnvironment" section
 
-// create an output Table
-val schema = new Schema()
-    .field("a", DataTypes.INT())
-    .field("b", DataTypes.STRING())
-    .field("c", DataTypes.LONG())
+// create a TableSink
+val sink: TableSink = new CsvTableSink("/path/to/file", fieldDelim = "|")
 
-tableEnv.connect(new FileSystem("/path/to/file"))
-    .withFormat(new Csv().fieldDelimiter('|').deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("CsvSinkTable")
+// register the TableSink with a specific schema
+val fieldNames: Array[String] = Array("a", "b", "c")
+val fieldTypes: Array[TypeInformation] = Array(Types.INT, Types.STRING, Types.LONG)
+tableEnv.registerTableSink("CsvSinkTable", fieldNames, fieldTypes, sink)
 
 // compute a result Table using Table API operators and/or SQL queries
 val result: Table = ...
@@ -801,16 +766,13 @@ result.insertInto("CsvSinkTable")
 # get a TableEnvironment
 table_env = ... # see "Create a TableEnvironment" section
 
+field_names = ["a", "b", "c"]
+field_types = [DataTypes.INT(), DataTypes.STRING(), DataTypes.BIGINT()]
+
 # create a TableSink
-t_env.connect(FileSystem().path("/path/to/file")))
-    .with_format(Csv()
-                 .field_delimiter(',')
-                 .deriveSchema())
-    .with_schema(Schema()
-                 .field("a", DataTypes.INT())
-                 .field("b", DataTypes.STRING())
-                 .field("c", DataTypes.BIGINT()))
-    .create_temporary_table("CsvSinkTable")
+sink = CsvTableSink(field_names, field_types, "/path/to/file", "|")
+
+table_env.register_table_sink("CsvSinkTable", sink)
 
 # compute a result Table using Table API operators and/or SQL queries
 result = ...
@@ -841,7 +803,7 @@ Table API and SQL queries are translated into [DataStream]({{ site.baseurl }}/de
 A Table API or SQL query is translated when:
 
 * a `Table` is emitted to a `TableSink`, i.e., when `Table.insertInto()` is called.
-* a SQL update query is specified, i.e., when `TableEnvironment.sqlUpdate()` is called.
+* an SQL update query is specified, i.e., when `TableEnvironment.sqlUpdate()` is called.
 * a `Table` is converted into a `DataStream` or `DataSet` (see [Integration with DataStream and DataSet API](#integration-with-datastream-and-dataset-api)).
 
 Once translated, a Table API or SQL query is handled like a regular DataStream or DataSet program and is executed when `StreamExecutionEnvironment.execute()` or `ExecutionEnvironment.execute()` is called.
@@ -861,7 +823,7 @@ For `TableEnvironment`, A Table API or SQL query is translated when `TableEnviro
 while for `StreamTableEnvironment`, A Table API or SQL query is translated when:
 
 * a `Table` is emitted to a `TableSink`, i.e., when `Table.insertInto()` is called.
-* a SQL update query is specified, i.e., when `TableEnvironment.sqlUpdate()` is called.
+* an SQL update query is specified, i.e., when `TableEnvironment.sqlUpdate()` is called.
 * a `Table` is converted into a `DataStream`.
 
 Once translated, a Table API or SQL query is handled like a regular DataStream program and is executed when `TableEnvironment.execute()` or `StreamExecutionEnvironment.execute()` is called.
@@ -885,11 +847,9 @@ This interaction can be achieved by converting a `DataStream` or `DataSet` into 
 
 The Scala Table API features implicit conversions for the `DataSet`, `DataStream`, and `Table` classes. These conversions are enabled by importing the package `org.apache.flink.table.api.scala._` in addition to `org.apache.flink.api.scala._` for the Scala DataStream API.
 
-### Create a View from a DataStream or DataSet
+### Register a DataStream or DataSet as Table
 
-A `DataStream` or `DataSet` can be registered in a `TableEnvironment` as a View. The schema of the resulting view depends on the data type of the registered `DataStream` or `DataSet`. Please check the section about [mapping of data types to table schema](#mapping-of-data-types-to-table-schema) for details.
-
-**Note:** Views created from a `DataStream` or `DataSet` can be registered as temporary views only.
+A `DataStream` or `DataSet` can be registered in a `TableEnvironment` as a Table. The schema of the resulting table depends on the data type of the registered `DataStream` or `DataSet`. Please check the section about [mapping of data types to table schema](#mapping-of-data-types-to-table-schema) for details.
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -900,11 +860,11 @@ StreamTableEnvironment tableEnv = ...; // see "Create a TableEnvironment" sectio
 
 DataStream<Tuple2<Long, String>> stream = ...
 
-// register the DataStream as View "myTable" with fields "f0", "f1"
-tableEnv.createTemporaryView("myTable", stream);
+// register the DataStream as Table "myTable" with fields "f0", "f1"
+tableEnv.registerDataStream("myTable", stream);
 
-// register the DataStream as View "myTable2" with fields "myLong", "myString"
-tableEnv.createTemporaryView("myTable2", stream, "myLong, myString");
+// register the DataStream as table "myTable2" with fields "myLong", "myString"
+tableEnv.registerDataStream("myTable2", stream, "myLong, myString");
 {% endhighlight %}
 </div>
 
@@ -916,14 +876,16 @@ val tableEnv: StreamTableEnvironment = ... // see "Create a TableEnvironment" se
 
 val stream: DataStream[(Long, String)] = ...
 
-// register the DataStream as View "myTable" with fields "f0", "f1"
-tableEnv.createTemporaryView("myTable", stream)
+// register the DataStream as Table "myTable" with fields "f0", "f1"
+tableEnv.registerDataStream("myTable", stream)
 
-// register the DataStream as View "myTable2" with fields "myLong", "myString"
-tableEnv.createTemporaryView("myTable2", stream, 'myLong, 'myString)
+// register the DataStream as table "myTable2" with fields "myLong", "myString"
+tableEnv.registerDataStream("myTable2", stream, 'myLong, 'myString)
 {% endhighlight %}
 </div>
 </div>
+
+**Note:** The name of a `DataStream` `Table` must not match the `^_DataStreamTable_[0-9]+` pattern and the name of a `DataSet` `Table` must not match the `^_DataSetTable_[0-9]+` pattern. These patterns are reserved for internal use only.
 
 {% top %}
 
@@ -1639,31 +1601,17 @@ The following code shows an example and the corresponding output for multiple-si
 EnvironmentSettings settings = EnvironmentSettings.newInstance().useBlinkPlanner().inStreamingMode().build();
 TableEnvironment tEnv = TableEnvironment.create(settings);
 
-final Schema schema = new Schema()
-    .field("count", DataTypes.INT())
-    .field("word", DataTypes.STRING());
+String[] fieldNames = { "count", "word" };
+TypeInformation[] fieldTypes = { Types.INT, Types.STRING };
+tEnv.registerTableSource("MySource1", new CsvTableSource("/source/path1", fieldNames, fieldTypes));
+tEnv.registerTableSource("MySource2", new CsvTableSource("/source/path2", fieldNames, fieldTypes));
+tEnv.registerTableSink("MySink1", new CsvTableSink("/sink/path1").configure(fieldNames, fieldTypes));
+tEnv.registerTableSink("MySink2", new CsvTableSink("/sink/path2").configure(fieldNames, fieldTypes));
 
-tEnv.connect(new FileSystem("/source/path1"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySource1");
-tEnv.connect(new FileSystem("/source/path2"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySource2");
-tEnv.connect(new FileSystem("/sink/path1"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySink1");
-tEnv.connect(new FileSystem("/sink/path2"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySink2");
-
-Table table1 = tEnv.from("MySource1").where("LIKE(word, 'F%')");
+Table table1 = tEnv.scan("MySource1").where("LIKE(word, 'F%')");
 table1.insertInto("MySink1");
 
-Table table2 = table1.unionAll(tEnv.from("MySource2"));
+Table table2 = table1.unionAll(tEnv.scan("MySource2"));
 table2.insertInto("MySink2");
 
 String explanation = tEnv.explain(false);
@@ -1677,31 +1625,17 @@ System.out.println(explanation);
 val settings = EnvironmentSettings.newInstance.useBlinkPlanner.inStreamingMode.build
 val tEnv = TableEnvironment.create(settings)
 
-val schema = new Schema()
-    .field("count", DataTypes.INT())
-    .field("word", DataTypes.STRING())
+val fieldNames = Array("count", "word")
+val fieldTypes = Array[TypeInformation[_]](Types.INT, Types.STRING)
+tEnv.registerTableSource("MySource1", new CsvTableSource("/source/path1", fieldNames, fieldTypes))
+tEnv.registerTableSource("MySource2", new CsvTableSource("/source/path2",fieldNames, fieldTypes))
+tEnv.registerTableSink("MySink1", new CsvTableSink("/sink/path1").configure(fieldNames, fieldTypes))
+tEnv.registerTableSink("MySink2", new CsvTableSink("/sink/path2").configure(fieldNames, fieldTypes))
 
-tEnv.connect(new FileSystem("/source/path1"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySource1")
-tEnv.connect(new FileSystem("/source/path2"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySource2")
-tEnv.connect(new FileSystem("/sink/path1"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySink1")
-tEnv.connect(new FileSystem("/sink/path2"))
-    .withFormat(new Csv().deriveSchema())
-    .withSchema(schema)
-    .createTemporaryTable("MySink2")
-
-val table1 = tEnv.from("MySource1").where("LIKE(word, 'F%')")
+val table1 = tEnv.scan("MySource1").where("LIKE(word, 'F%')")
 table1.insertInto("MySink1")
 
-val table2 = table1.unionAll(tEnv.from("MySource2"))
+val table2 = table1.unionAll(tEnv.scan("MySource2"))
 table2.insertInto("MySink2")
 
 val explanation = tEnv.explain(false)
@@ -1715,31 +1649,17 @@ println(explanation)
 settings = EnvironmentSettings.new_instance().use_blink_planner().in_streaming_mode().build()
 t_env = TableEnvironment.create(environment_settings=settings)
 
-schema = Schema()
-    .field("count", DataTypes.INT())
-    .field("word", DataTypes.STRING())
+field_names = ["count", "word"]
+field_types = [DataTypes.INT(), DataTypes.STRING()]
+t_env.register_table_source("MySource1", CsvTableSource("/source/path1", field_names, field_types))
+t_env.register_table_source("MySource2", CsvTableSource("/source/path2", field_names, field_types))
+t_env.register_table_sink("MySink1", CsvTableSink("/sink/path1", field_names, field_types))
+t_env.register_table_sink("MySink2", CsvTableSink("/sink/path2", field_names, field_types))
 
-t_env.connect(FileSystem().path("/source/path1")))
-    .with_format(Csv().deriveSchema())
-    .with_schema(schema)
-    .create_temporary_table("MySource1")
-t_env.connect(FileSystem().path("/source/path2")))
-    .with_format(Csv().deriveSchema())
-    .with_schema(schema)
-    .create_temporary_table("MySource2")
-t_env.connect(FileSystem().path("/sink/path1")))
-    .with_format(Csv().deriveSchema())
-    .with_schema(schema)
-    .create_temporary_table("MySink1")
-t_env.connect(FileSystem().path("/sink/path2")))
-    .with_format(Csv().deriveSchema())
-    .with_schema(schema)
-    .create_temporary_table("MySink2")
-
-table1 = t_env.from_path("MySource1").where("LIKE(word, 'F%')")
+table1 = t_env.scan("MySource1").where("LIKE(word, 'F%')")
 table1.insert_into("MySink1")
 
-table2 = table1.union_all(t_env.from_path("MySource2"))
+table2 = table1.union_all(t_env.scan("MySource2"))
 table2.insert_into("MySink2")
 
 explanation = t_env.explain()

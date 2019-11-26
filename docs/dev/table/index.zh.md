@@ -27,7 +27,7 @@ under the License.
 
 Apache Flink features two relational APIs - the Table API and SQL - for unified stream and batch processing. The Table API is a language-integrated query API for Scala and Java that allows the composition of queries from relational operators such as selection, filter, and join in a very intuitive way. Flink's SQL support is based on [Apache Calcite](https://calcite.apache.org) which implements the SQL standard. Queries specified in either interface have the same semantics and specify the same result regardless whether the input is a batch input (DataSet) or a stream input (DataStream).
 
-The Table API and the SQL interfaces are tightly integrated with each other as well as Flink's DataStream and DataSet APIs. You can easily switch between all APIs and libraries which build upon the APIs. For instance, you can extract patterns from a DataStream using the [CEP library]({{ site.baseurl }}/dev/libs/cep.html) and later use the Table API to analyze the patterns, or you might scan, filter, and aggregate a batch table using a SQL query before running a [Gelly graph algorithm]({{ site.baseurl }}/dev/libs/gelly) on the preprocessed data.
+The Table API and the SQL interfaces are tightly integrated with each other as well as Flink's DataStream and DataSet APIs. You can easily switch between all APIs and libraries which build upon the APIs. For instance, you can extract patterns from a DataStream using the [CEP library]({{ site.baseurl }}/dev/libs/cep.html) and later use the Table API to analyze the patterns, or you might scan, filter, and aggregate a batch table using an SQL query before running a [Gelly graph algorithm]({{ site.baseurl }}/dev/libs/gelly) on the preprocessed data.
 
 **Please note that the Table API and SQL are not yet feature complete and are being actively developed. Not all operations are supported by every combination of \[Table API, SQL\] and \[stream, batch\] input.**
 
@@ -111,7 +111,7 @@ Internally, parts of the table ecosystem are implemented in Scala. Therefore, pl
 
 ### Extension Dependencies
 
-If you want to implement a [custom format]({{ site.baseurl }}/dev/table/sourceSinks.html#define-a-tablefactory) for interacting with Kafka or a set of [user-defined functions]({{ site.baseurl }}/dev/table/functions/systemFunctions.html), the following dependency is sufficient and can be used for JAR files for the SQL Client:
+If you want to implement a [custom format]({{ site.baseurl }}/dev/table/sourceSinks.html#define-a-tablefactory) for interacting with Kafka or a set of [user-defined functions]({{ site.baseurl }}/dev/table/functions.html), the following dependency is sufficient and can be used for JAR files for the SQL Client:
 
 {% highlight xml %}
 <dependency>
@@ -137,10 +137,10 @@ Where to go next?
 * [Concepts & Common API]({{ site.baseurl }}/dev/table/common.html): Shared concepts and APIs of the Table API and SQL.
 * [Data Types]({{ site.baseurl }}/dev/table/types.html): Lists pre-defined data types and their properties.
 * [Streaming Concepts]({{ site.baseurl }}/dev/table/streaming): Streaming-specific documentation for the Table API or SQL such as configuration of time attributes and handling of updating results.
-* [Connect to External Systems]({{ site.baseurl }}/dev/table/functions/systemFunctions.html): Available connectors and formats for reading and writing data to external systems.
+* [Connect to External Systems]({{ site.baseurl }}/dev/table/functions.html): Available connectors and formats for reading and writing data to external systems.
 * [Table API]({{ site.baseurl }}/dev/table/tableApi.html): Supported operations and API for the Table API.
 * [SQL]({{ site.baseurl }}/dev/table/sql.html): Supported operations and syntax for SQL.
-* [Built-in Functions]({{ site.baseurl }}/dev/table/functions/systemFunctions.html): Supported functions in Table API and SQL.
+* [Built-in Functions]({{ site.baseurl }}/dev/table/functions.html): Supported functions in Table API and SQL.
 * [SQL Client]({{ site.baseurl }}/dev/table/sqlClient.html): Play around with Flink SQL and submit a table program to a cluster without programming knowledge.
 
 {% top %}

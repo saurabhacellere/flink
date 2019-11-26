@@ -90,8 +90,6 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.util.SqlBasicVisitor;
 import org.apache.calcite.sql.util.SqlShuttle;
 import org.apache.calcite.sql.util.SqlVisitor;
-import org.apache.calcite.sql.validate.implicit.TypeCoercion;
-import org.apache.calcite.sql.validate.implicit.TypeCoercions;
 import org.apache.calcite.sql2rel.InitializerContext;
 import org.apache.calcite.util.BitString;
 import org.apache.calcite.util.Bug;
@@ -292,12 +290,6 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 	private final SqlValidatorImpl.ValidationErrorFunction validationErrorFunction =
 		new SqlValidatorImpl.ValidationErrorFunction();
 
-	// TypeCoercion instance used for implicit type coercion.
-	private TypeCoercion typeCoercion;
-
-	// Flag saying if we enable the implicit type coercion.
-	private boolean enableTypeCoercion;
-
 	//~ Constructors -----------------------------------------------------------
 
 	/**
@@ -329,9 +321,6 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 		overFinder = new AggFinder(opTab, true, false, false, aggOrOverFinder, nameMatcher);
 		groupFinder = new AggFinder(opTab, false, false, true, null, nameMatcher);
 		aggOrOverOrGroupFinder = new AggFinder(opTab, true, true, true, null, nameMatcher);
-		this.enableTypeCoercion = catalogReader.getConfig() == null
-			|| catalogReader.getConfig().typeCoercion();
-		this.typeCoercion = TypeCoercions.getTypeCoercion(this, conformance);
 	}
 
 	//~ Methods ----------------------------------------------------------------
@@ -1620,7 +1609,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 	 * <p>Unlike the base class method, this method is not deprecated.
 	 * It is available from within Calcite, but is not part of the public API.
 	 *
-	 * @param node A SQL parse tree node, never null
+	 * @param node An SQL parse tree node, never null
 	 * @param type Its type; must not be null
 	 */
 	@SuppressWarnings("deprecation")
@@ -3829,29 +3818,6 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 		return scopes.get(withItem);
 	}
 
-	@Override
-	public SqlValidator setEnableTypeCoercion(boolean enabled) {
-		this.enableTypeCoercion = enabled;
-		return this;
-	}
-
-	@Override
-	public boolean isTypeCoercionEnabled() {
-		return this.enableTypeCoercion;
-	}
-
-	@Override
-	public void setTypeCoercion(TypeCoercion typeCoercion) {
-		Objects.requireNonNull(typeCoercion);
-		this.typeCoercion = typeCoercion;
-	}
-
-	@Override
-	public TypeCoercion getTypeCoercion() {
-		assert isTypeCoercionEnabled();
-		return this.typeCoercion;
-	}
-
 	/**
 	 * Validates the ORDER BY clause of a SELECT statement.
 	 *
@@ -5602,7 +5568,7 @@ public class SqlValidatorImpl implements SqlValidatorWithHints {
 
 		public RelDataType visit(SqlNodeList nodeList) {
 			// Operand is of a type that we can't derive a type for. If the
-			// operand is of a peculiar type, such as a SqlNodeList, then you
+			// operand is of a peculiar type, such as an SqlNodeList, then you
 			// should override the operator's validateCall() method so that it
 			// doesn't try to validate that operand as an expression.
 			throw Util.needToImplement(nodeList);

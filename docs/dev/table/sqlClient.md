@@ -157,7 +157,7 @@ Mode "embedded" submits Flink jobs from the local machine.
 
 ### Environment Files
 
-A SQL query needs a configuration environment in which it is executed. The so-called *environment files* define available catalogs, table sources and sinks, user-defined functions, and other properties required for execution and deployment.
+An SQL query needs a configuration environment in which it is executed. The so-called *environment files* define available catalogs, table sources and sinks, user-defined functions, and other properties required for execution and deployment.
 
 Every environment file is a regular [YAML file](http://yaml.org/). An example of such a file is presented below.
 
@@ -251,7 +251,7 @@ deployment:
 This configuration:
 
 - defines an environment with a table source `MyTableSource` that reads from a CSV file,
-- defines a view `MyCustomView` that declares a virtual table using a SQL query,
+- defines a view `MyCustomView` that declares a virtual table using an SQL query,
 - defines a user-defined function `myUDF` that can be instantiated using the class name and two constructor parameters,
 - connects to two Hive catalogs and uses `catalog_1` as the current catalog with `mydb1` as the current database of the catalog,
 - uses the old planner in streaming mode for running statements with event-time characteristic and a parallelism of 1,
@@ -359,7 +359,7 @@ Both `connector` and `format` allow to define a property version (which is curre
 
 The SQL Client allows users to create custom, user-defined functions to be used in SQL queries. Currently, these functions are restricted to be defined programmatically in Java/Scala classes.
 
-In order to provide a user-defined function, you need to first implement and compile a function class that extends `ScalarFunction`, `AggregateFunction` or `TableFunction` (see [User-defined Functions]({{ site.baseurl }}/dev/table/functions/udfs.html)). One or more functions can then be packaged into a dependency JAR for the SQL Client.
+In order to provide a user-defined function, you need to first implement and compile a function class that extends `ScalarFunction`, `AggregateFunction` or `TableFunction` (see [User-defined Functions]({{ site.baseurl }}/dev/table/udfs.html)). One or more functions can then be packaged into a dependency JAR for the SQL Client.
 
 All functions must be declared in an environment file before being called. For each item in the list of `functions`, one must specify
 
@@ -372,12 +372,12 @@ functions:
   - name: ...               # required: name of the function
     from: class             # required: source of the function (can only be "class" for now)
     class: ...              # required: fully qualified class name of the function
-    constructor:            # optional: constructor parameters of the function class
-      - ...                 # optional: a literal parameter with implicit type
-      - class: ...          # optional: full class name of the parameter
-        constructor:        # optional: constructor parameters of the parameter's class
-          - type: ...       # optional: type of the literal parameter
-            value: ...      # optional: value of the literal parameter
+    constructor:            # optimal: constructor parameters of the function class
+      - ...                 # optimal: a literal parameter with implicit type
+      - class: ...          # optimal: full class name of the parameter
+        constructor:        # optimal: constructor parameters of the parameter's class
+          - type: ...       # optimal: type of the literal parameter
+            value: ...      # optimal: value of the literal parameter
 {% endhighlight %}
 
 Make sure that the order and types of the specified parameters strictly match one of the constructors of your function class.

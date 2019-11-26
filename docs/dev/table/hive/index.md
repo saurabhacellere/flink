@@ -26,7 +26,7 @@ under the License.
 -->
 
 [Apache Hive](https://hive.apache.org/) has established itself as a focal point of the data warehousing ecosystem.
-It serves as not only a SQL engine for big data analytics and ETL, but also a data management platform, where data is discovered, defined, and evolved.
+It serves as not only an SQL engine for big data analytics and ETL, but also a data management platform, where data is discovered, defined, and evolved.
 
 Flink offers a two-fold integration with Hive.
 The first is to leverage Hive's Metastore as a persistent catalog for storing Flink specific metadata across sessions.
@@ -38,42 +38,20 @@ You do not need to modify your existing Hive Metastore or change the data placem
 * This will be replaced by the TOC
 {:toc}
 
-## Supported Hive Versions
+## Supported Hive Version's
 
-Flink supports the following Hive versions.
+Flink supports Hive `2.3.4` and `1.2.1` and relies on Hive's compatibility guarantee's for other minor versions.
 
-- 1.0
-    - 1.0.0
-    - 1.0.1
-- 1.1
-    - 1.1.0
-    - 1.1.1
-- 1.2
-    - 1.2.0
-    - 1.2.1
-    - 1.2.2
-- 2.0
-    - 2.0.0
-    - 2.0.1
-- 2.1
-    - 2.1.0
-    - 2.1.1
-- 2.2
-    - 2.2.0
-- 2.3
-    - 2.3.0
-    - 2.3.1
-    - 2.3.2
-    - 2.3.3
-    - 2.3.4
-    - 2.3.5
-    - 2.3.6
-- 3.1
-    - 3.1.0
-    - 3.1.1
-    - 3.1.2
+If you use a different minor Hive version such as `1.2.2` or `2.3.1`, it should also be ok to 
+choose the closest version `1.2.1` (for `1.2.2`) or `2.3.4` (for `2.3.1`) to workaround. For 
+example, you want to use Flink to integrate `2.3.1` hive version in sql client, just set the 
+hive-version to `2.3.4` in YAML config. Similarly pass the version string when creating 
+HiveCatalog instance via Table API.
 
-### Dependencies
+Users are welcome to try out different versions with this workaround. Since only `2.3.4` and `1.2
+.1` have been tested, there might be unexpected issues. We will test and support more versions in future releases.
+
+### Depedencies 
 
 To integrate with Hive, users need the following dependencies in their project.
 
@@ -91,7 +69,7 @@ To integrate with Hive, users need the following dependencies in their project.
 
 <dependency>
   <groupId>org.apache.flink</groupId>
-  <artifactId>flink-hadoop-compatibility{{ site.scala_version_suffix }}</artifactId>
+  <artifactId>flink-hadoop-compatibility_{{site.version}}</artifactId>
   <version>{{site.version}}</version>
   <scope>provided</scope>
 </dependency>
@@ -101,7 +79,7 @@ To integrate with Hive, users need the following dependencies in their project.
 <dependency>
   <groupId>org.apache.flink</groupId>
   <artifactId>flink-shaded-hadoop-2-uber</artifactId>
-  <version>2.7.5-{{ site.shaded_version }}</version>
+  <version>2.7.5-{{site.version}}</version>
   <scope>provided</scope>
 </dependency>
 
@@ -127,7 +105,7 @@ To integrate with Hive, users need the following dependencies in their project.
 
 <dependency>
   <groupId>org.apache.flink</groupId>
-  <artifactId>flink-hadoop-compatibility{{ site.scala_version_suffix }}</artifactId>
+  <artifactId>flink-hadoop-compatibility_{{site.version}}</artifactId>
   <version>{{site.version}}</version>
   <scope>provided</scope>
 </dependency>
@@ -137,7 +115,7 @@ To integrate with Hive, users need the following dependencies in their project.
 <dependency>
   <groupId>org.apache.flink</groupId>
   <artifactId>flink-shaded-hadoop-2-uber</artifactId>
-  <version>2.6.5-{{ site.shaded_version }}</version>
+  <version>2.6.5-{{site.version}}</version>
   <scope>provided</scope>
 </dependency>
 

@@ -117,7 +117,7 @@ public interface RuntimeContext {
 	ExecutionConfig getExecutionConfig();
 
 	/**
-	 * Gets the ClassLoader to load classes that are not in system's classpath, but are part of the
+	 * Gets the ClassLoader to load classes that were are not in system's classpath, but are part of the
 	 * jar file of a user job.
 	 *
 	 * @return The ClassLoader for user code classes.
@@ -128,7 +128,7 @@ public interface RuntimeContext {
 
 	/**
 	 * Add this accumulator. Throws an exception if the accumulator already exists in the same Task.
-	 * Note that the Accumulator name must have an unique name across the Flink job. Otherwise you will
+	 * Note that the Accumulator name must have a unique name across the Flink job. Otherwise you will
 	 * get an error when incompatible accumulators from different Tasks are combined at the JobManager
 	 * upon job completion.
 	 */
