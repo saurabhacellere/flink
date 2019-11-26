@@ -53,12 +53,7 @@ of the Elasticsearch installation:
     <tr>
         <td>flink-connector-elasticsearch6{{ site.scala_version_suffix }}</td>
         <td>1.6.0</td>
-        <td>6.x</td>
-    </tr>
-    <tr>
-        <td>flink-connector-elasticsearch7{{ site.scala_version_suffix }}</td>
-        <td>1.10.0</td>
-        <td>7 and later versions</td>
+        <td>6 and later versions</td>
     </tr>
   </tbody>
 </table>
@@ -128,7 +123,7 @@ input.addSink(new ElasticsearchSink<>(config, transportAddresses, new Elasticsea
     }
 }));{% endhighlight %}
 </div>
-<div data-lang="java, Elasticsearch 6.x and above" markdown="1">
+<div data-lang="java, Elasticsearch 6.x" markdown="1">
 {% highlight java %}
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -231,7 +226,7 @@ input.addSink(new ElasticsearchSink(config, transportAddresses, new Elasticsearc
 }))
 {% endhighlight %}
 </div>
-<div data-lang="scala, Elasticsearch 6.x and above" markdown="1">
+<div data-lang="scala, Elasticsearch 6.x" markdown="1">
 {% highlight scala %}
 import org.apache.flink.api.common.functions.RuntimeContext
 import org.apache.flink.streaming.api.datastream.DataStream
@@ -252,20 +247,18 @@ val httpHosts = new java.util.ArrayList[HttpHost]
 httpHosts.add(new HttpHost("127.0.0.1", 9200, "http"))
 httpHosts.add(new HttpHost("10.2.3.1", 9200, "http"))
 
-val esSinkBuilder = new ElasticsearchSink.Builder[String](
+val esSinkBuilder = new ElasticsearchSink.Builer[String](
   httpHosts,
   new ElasticsearchSinkFunction[String] {
-     def process(element: String, ctx: RuntimeContext, indexer: RequestIndexer) {
-          val json = new java.util.HashMap[String, String]
-          json.put("data", element)
-
-          val rqst: IndexRequest = Requests.indexRequest
-            .index("my-index")
-            .`type`("my-type")
-            .source(json)
-
-          indexer.add(rqst)
-     } 
+    def createIndexRequest(element: String): IndexRequest = {
+      val json = new java.util.HashMap[String, String]
+      json.put("data", element)
+      
+      return Requests.indexRequest()
+              .index("my-index")
+              .type("my-type")
+              .source(json)
+    }
   }
 )
 
@@ -373,10 +366,10 @@ input.addSink(new ElasticsearchSink<>(
                 int restStatusCode,
                 RequestIndexer indexer) throw Throwable {
 
-            if (ExceptionUtils.findThrowable(failure, EsRejectedExecutionException.class).isPresent()) {
+            if (ExceptionUtils.containsThrowable(failure, EsRejectedExecutionException.class)) {
                 // full queue; re-add document for indexing
                 indexer.add(action);
-            } else if (ExceptionUtils.findThrowable(failure, ElasticsearchParseException.class).isPresent()) {
+            } else if (ExceptionUtils.containsThrowable(failure, ElasticsearchParseException.class)) {
                 // malformed document; simply drop request without failing sink
             } else {
                 // for all other failures, fail the sink
@@ -401,10 +394,10 @@ input.addSink(new ElasticsearchSink(
                 int restStatusCode,
                 RequestIndexer indexer) {
 
-            if (ExceptionUtils.findThrowable(failure, EsRejectedExecutionException.class).isPresent()) {
+            if (ExceptionUtils.containsThrowable(failure, EsRejectedExecutionException.class)) {
                 // full queue; re-add document for indexing
                 indexer.add(action)
-            } else if (ExceptionUtils.findThrowable(failure, ElasticsearchParseException.class).isPresent()) {
+            } else if (ExceptionUtils.containsThrowable(failure, ElasticsearchParseException.class)) {
                 // malformed document; simply drop request without failing sink
             } else {
                 // for all other failures, fail the sink
@@ -452,7 +445,14 @@ the provided `Map<String, String>`:
  * **bulk.flush.max.actions**: Maximum amount of actions to buffer before flushing.
  * **bulk.flush.max.size.mb**: Maximum size of data (in megabytes) to buffer before flushing.
  * **bulk.flush.interval.ms**: Interval at which to flush regardless of the amount or size of buffered actions.
- 
+ * **bulk.flush.concurrent.requests**: Number of bulk concurrent requests.
+
+<p style="border-radius: 5px; padding: 5px" class="bg-danger">
+<b>NOTE</b>: If the number of <b>bulk.flush.concurrent.requests</b> is larger than 0,
+this makes bulk flush asynchronous. Be aware that this essentially means the sink will not provide
+any strong delivery guarantees anymore, even with checkpoint for the topology enabled.
+</p>
+
 For versions 2.x and above, configuring how temporary request errors are
 retried is also supported:
  
