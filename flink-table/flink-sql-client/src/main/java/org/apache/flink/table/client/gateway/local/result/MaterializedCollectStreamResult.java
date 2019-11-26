@@ -97,8 +97,9 @@ public class MaterializedCollectStreamResult<C> extends CollectStreamResult<C> i
 			InetAddress gatewayAddress,
 			int gatewayPort,
 			int maxRowCount,
-			int overcommitThreshold) {
-		super(outputType, tableSchema, config, gatewayAddress, gatewayPort);
+			int overcommitThreshold,
+			ClassLoader classLoader) {
+		super(outputType, tableSchema, config, gatewayAddress, gatewayPort, classLoader);
 
 		if (maxRowCount <= 0) {
 			this.maxRowCount = Integer.MAX_VALUE;
@@ -124,7 +125,8 @@ public class MaterializedCollectStreamResult<C> extends CollectStreamResult<C> i
 			ExecutionConfig config,
 			InetAddress gatewayAddress,
 			int gatewayPort,
-			int maxRowCount) {
+			int maxRowCount,
+			ClassLoader classLoader) {
 
 		this(
 			outputType,
@@ -133,7 +135,8 @@ public class MaterializedCollectStreamResult<C> extends CollectStreamResult<C> i
 			gatewayAddress,
 			gatewayPort,
 			maxRowCount,
-			computeMaterializedTableOvercommit(maxRowCount));
+			computeMaterializedTableOvercommit(maxRowCount),
+			classLoader);
 	}
 
 	@Override

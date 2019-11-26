@@ -19,6 +19,7 @@
 package org.apache.flink.table.client.gateway.local;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.dag.Pipeline;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.cli.CliFrontend;
@@ -30,10 +31,10 @@ import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.GlobalConfiguration;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.plugin.PluginUtils;
-import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.table.api.QueryConfig;
 import org.apache.flink.table.api.StreamQueryConfig;
 import org.apache.flink.table.api.Table;
@@ -49,7 +50,6 @@ import org.apache.flink.table.client.gateway.ResultDescriptor;
 import org.apache.flink.table.client.gateway.SessionContext;
 import org.apache.flink.table.client.gateway.SqlExecutionException;
 import org.apache.flink.table.client.gateway.TypedResult;
-import org.apache.flink.table.client.gateway.local.result.BasicResult;
 import org.apache.flink.table.client.gateway.local.result.ChangelogResult;
 import org.apache.flink.table.client.gateway.local.result.DynamicResult;
 import org.apache.flink.table.client.gateway.local.result.MaterializedResult;
@@ -73,6 +73,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -467,26 +468,27 @@ public class LocalExecutor implements Executor {
 
 		// create job graph with dependencies
 		final String jobName = context.getSessionContext().getName() + ": " + statement;
-		final JobGraph jobGraph;
+		final Pipeline pipeline;
 		try {
-			jobGraph = envInst.createJobGraph(jobName);
+			pipeline = envInst.createPipeline(jobName, context.getFlinkConfig());
 		} catch (Throwable t) {
 			// catch everything such that the statement does not crash the executor
 			throw new SqlExecutionException("Invalid SQL statement.", t);
 		}
 
 		// create execution
-		final BasicResult<C> result = new BasicResult<>();
 		final ProgramDeployer<C> deployer = new ProgramDeployer<>(
-			context, jobName, jobGraph, result, false);
+			context, jobName, pipeline, false);
 
 		// blocking deployment
-		deployer.run();
+		JobClient jobClient;
+		try {
+			jobClient = deployer.run().get();
+		} catch (InterruptedException | ExecutionException e) {
+			throw new RuntimeException("Error running SQL job.", e);
+		}
 
-		return ProgramTargetDescriptor.of(
-			result.getClusterId(),
-			jobGraph.getJobID(),
-			result.getWebInterfaceUrl());
+		return ProgramTargetDescriptor.of(jobClient.getJobID());
 	}
 
 	private <C> ResultDescriptor executeQueryInternal(ExecutionContext<C> context, String query) {
@@ -497,13 +499,13 @@ public class LocalExecutor implements Executor {
 
 		// initialize result
 		final DynamicResult<C> result = resultStore.createResult(
-			context.getMergedEnvironment(),
-			removeTimeAttributes(table.getSchema()),
-			envInst.getExecutionConfig());
+				context.getMergedEnvironment(),
+				removeTimeAttributes(table.getSchema()),
+				envInst.getExecutionConfig(),
+				executionContext.getClassLoader());
 
-		// create job graph with dependencies
 		final String jobName = context.getSessionContext().getName() + ": " + query;
-		final JobGraph jobGraph;
+		final Pipeline pipeline;
 		try {
 			// writing to a sink requires an optimization step that might reference UDFs during code compilation
 			context.wrapClassLoader(() -> {
@@ -513,7 +515,7 @@ public class LocalExecutor implements Executor {
 					jobName);
 				return null;
 			});
-			jobGraph = envInst.createJobGraph(jobName);
+			pipeline = envInst.createPipeline(jobName, context.getFlinkConfig());
 		} catch (Throwable t) {
 			// the result needs to be closed as long as
 			// it not stored in the result store
@@ -523,12 +525,12 @@ public class LocalExecutor implements Executor {
 		}
 
 		// store the result with a unique id (the job id for now)
-		final String resultId = jobGraph.getJobID().toString();
+		final String resultId = new JobID().toString();
 		resultStore.storeResult(resultId, result);
 
 		// create execution
 		final ProgramDeployer<C> deployer = new ProgramDeployer<>(
-			context, jobName, jobGraph, result, true);
+			context, jobName, pipeline, true);
 
 		// start result retrieval
 		result.startRetrieval(deployer);
