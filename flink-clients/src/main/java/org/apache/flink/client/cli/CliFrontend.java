@@ -714,14 +714,17 @@ public class CliFrontend {
 			jarFile = getJarFile(jarFilePath);
 		}
 
-		return PackagedProgram.newBuilder()
+		PackagedProgram program = PackagedProgram.newBuilder()
 			.setJarFile(jarFile)
 			.setUserClassPaths(classpaths)
 			.setEntryPointClassName(entryPointClass)
 			.setConfiguration(configuration)
-			.setSavepointRestoreSettings(runOptions.getSavepointRestoreSettings())
 			.setArguments(programArgs)
 			.build();
+
+		program.setSavepointRestoreSettings(runOptions.getSavepointRestoreSettings());
+
+		return program;
 	}
 
 	/**
@@ -1072,6 +1075,18 @@ public class CliFrontend {
 					"yarn"));
 		} catch (NoClassDefFoundError | Exception e) {
 			LOG.warn("Could not load CLI class {}.", flinkYarnSessionCLI, e);
+		}
+
+		//	Command line interface of the kubernetes session.
+		final String kubeSessionCLI = "org.apache.flink.kubernetes.cli.FlinkKubernetesCustomCli";
+		try {
+			customCommandLines.add(
+				loadCustomCommandLine(kubeSessionCLI,
+					configuration,
+					"k",
+					"kubernetes"));
+		} catch (NoClassDefFoundError | Exception e) {
+			LOG.warn("Could not load CLI class {}.", kubeSessionCLI, e);
 		}
 
 		customCommandLines.add(new DefaultCLI(configuration));
