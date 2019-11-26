@@ -23,13 +23,15 @@ import org.apache.flink.api.common.functions._
 import org.apache.flink.api.common.state.{FoldingStateDescriptor, ReducingStateDescriptor, ValueStateDescriptor}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.api.java.operators.join.JoinType
 import org.apache.flink.streaming.api.datastream.{QueryableStateStream, DataStream => JavaStream, KeyedStream => KeyedJavaStream, WindowedStream => WindowedJavaStream}
 import org.apache.flink.streaming.api.functions.aggregation.AggregationFunction.AggregationType
+import org.apache.flink.streaming.api.functions.aggregation.{ComparableAggregator, SumAggregator}
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction
-import org.apache.flink.streaming.api.functions.aggregation.{AggregationFunction, ComparableAggregator, SumAggregator}
 import org.apache.flink.streaming.api.functions.query.{QueryableAppendingStateOperator, QueryableValueStateOperator}
 import org.apache.flink.streaming.api.functions.{KeyedProcessFunction, ProcessFunction}
 import org.apache.flink.streaming.api.operators.StreamGroupedReduce
+import org.apache.flink.streaming.api.operators.co.IntervalJoinOperator.TimestampStrategy
 import org.apache.flink.streaming.api.scala.function.StatefulFunction
 import org.apache.flink.streaming.api.windowing.assigners._
 import org.apache.flink.streaming.api.windowing.time.Time
@@ -174,6 +176,9 @@ class KeyedStream[T, K](javaStream: KeyedJavaStream[T, K]) extends DataStream[T]
     private var lowerBoundInclusive = true
     private var upperBoundInclusive = true
 
+    private var timestampStrategy = TimestampStrategy.MAX
+    private var joinType = JoinType.INNER
+
     /**
       * Set the lower bound to be exclusive
       */
@@ -192,6 +197,48 @@ class KeyedStream[T, K](javaStream: KeyedJavaStream[T, K]) extends DataStream[T]
       this
     }
 
+    @Public
+    def assignMaxTimestamp(): IntervalJoined[IN1, IN2, KEY] = {
+      this.timestampStrategy = TimestampStrategy.MAX
+      this
+    }
+
+    @Public
+    def assignMinTimestamp(): IntervalJoined[IN1, IN2, KEY] = {
+      this.timestampStrategy = TimestampStrategy.MIN
+      this
+    }
+
+    @Public
+    def assignLeftTimestamp(): IntervalJoined[IN1, IN2, KEY] = {
+      this.timestampStrategy = TimestampStrategy.LEFT
+      this
+    }
+
+    @Public
+    def assignRightTimestamp(): IntervalJoined[IN1, IN2, KEY] = {
+      this.timestampStrategy = TimestampStrategy.RIGHT
+      this
+    }
+
+    @Public
+    def leftOuter(): IntervalJoined[IN1, IN2, KEY] = {
+      this.joinType = JoinType.LEFT_OUTER
+      this
+    }
+
+    @Public
+    def rightOuter(): IntervalJoined[IN1, IN2, KEY] = {
+      this.joinType = JoinType.RIGHT_OUTER
+      this
+    }
+
+    @Public
+    def fullOuter(): IntervalJoined[IN1, IN2, KEY] = {
+      this.joinType = JoinType.FULL_OUTER
+      this
+    }
+
     /**
       * Completes the join operation with the user function that is executed for each joined pair
       * of elements.
@@ -201,20 +248,17 @@ class KeyedStream[T, K](javaStream: KeyedJavaStream[T, K]) extends DataStream[T]
       * @return Returns a DataStream
       */
     @PublicEvolving
-    def process[OUT: TypeInformation](
-        processJoinFunction: ProcessJoinFunction[IN1, IN2, OUT])
-      : DataStream[OUT] = {
-
-      val outType: TypeInformation[OUT] = implicitly[TypeInformation[OUT]]
-
+    def process[OUT](processJoinFunction: ProcessJoinFunction[IN1, IN2, OUT]): DataStream[OUT] = {
       val javaJoined = new KeyedJavaStream.IntervalJoined[IN1, IN2, KEY](
         firstStream.javaStream.asInstanceOf[KeyedJavaStream[IN1, KEY]],
         secondStream.javaStream.asInstanceOf[KeyedJavaStream[IN2, KEY]],
         lowerBound,
         upperBound,
         lowerBoundInclusive,
-        upperBoundInclusive)
-      asScalaStream(javaJoined.process(processJoinFunction, outType))
+        upperBoundInclusive,
+        joinType,
+        timestampStrategy)
+      asScalaStream(javaJoined.process(processJoinFunction))
     }
   }
 
@@ -488,19 +532,13 @@ class KeyedStream[T, K](javaStream: KeyedJavaStream[T, K]) extends DataStream[T]
     aggregate(AggregationType.MAXBY, field)
     
   private def aggregate(aggregationType: AggregationType, field: String): DataStream[T] = {
-    val aggregationFunc = aggregationType match {
-      case AggregationType.SUM =>
-        new SumAggregator(field, javaStream.getType, javaStream.getExecutionConfig)
-      case _ =>
-        new ComparableAggregator(field, javaStream.getType, aggregationType, true,
-          javaStream.getExecutionConfig)
-    }
-
-    aggregate(aggregationFunc)
+    val position = fieldNames2Indices(javaStream.getType(), Array(field))(0)
+    aggregate(aggregationType, position)
   }
 
   private def aggregate(aggregationType: AggregationType, position: Int): DataStream[T] = {
-    val aggregationFunc = aggregationType match {
+
+    val reducer = aggregationType match {
       case AggregationType.SUM =>
         new SumAggregator(position, javaStream.getType, javaStream.getExecutionConfig)
       case _ =>
@@ -508,14 +546,10 @@ class KeyedStream[T, K](javaStream: KeyedJavaStream[T, K]) extends DataStream[T]
           javaStream.getExecutionConfig)
     }
 
-    aggregate(aggregationFunc)
-  }
-
-  private def aggregate(aggregationFunc: AggregationFunction[T]): DataStream[T] = {
-    val invokable =
-      new StreamGroupedReduce[T](aggregationFunc, dataType.createSerializer(executionConfig))
-
-    new DataStream[T](javaStream.transform("aggregation", javaStream.getType(), invokable))
+    val invokable =  new StreamGroupedReduce[T](reducer,
+      getType().createSerializer(getExecutionConfig))
+     
+    new DataStream[T](javaStream.transform("aggregation", javaStream.getType(),invokable))
       .asInstanceOf[DataStream[T]]
   }
 
