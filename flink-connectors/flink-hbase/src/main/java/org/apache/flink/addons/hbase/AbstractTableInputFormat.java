@@ -137,7 +137,7 @@ public abstract class AbstractTableInputFormat<T> extends RichInputFormat<T, Tab
 			resultScanner.close();
 			//workaround for timeout on scan
 			LOG.warn("Error after scan of " + scannedRows + " rows. Retry with a new scanner...", e);
-			scan.setStartRow(currentRow);
+			scan.withStartRow(currentRow, false);
 			resultScanner = table.getScanner(scan);
 			Result res = resultScanner.next();
 			if (res != null) {
