@@ -112,7 +112,7 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 						bufferAndBacklog.buffer().recycleBuffer();
 
 						if (event.getClass() == EndOfPartitionEvent.class) {
-							subpartitionView.releaseAllResources();
+							subpartitionView.notifySubpartitionConsumed();
 
 							return true;
 						}
@@ -124,6 +124,10 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 		} finally {
 			subpartitionView.releaseAllResources();
 		}
+	}
+
+	@Override
+	public void registerPeriodicFlush(long flushTimeout) {
 	}
 
 	@Override
