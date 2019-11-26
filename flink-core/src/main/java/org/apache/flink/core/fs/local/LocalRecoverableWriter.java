@@ -19,7 +19,6 @@
 package org.apache.flink.core.fs.local;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.RecoverableFsDataOutputStream;
 import org.apache.flink.core.fs.RecoverableFsDataOutputStream.Committer;
@@ -28,7 +27,6 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.UUID;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -48,6 +46,14 @@ public class LocalRecoverableWriter implements RecoverableWriter {
 	@Override
 	public RecoverableFsDataOutputStream open(Path filePath) throws IOException {
 		final File targetFile = fs.pathToFile(filePath);
+
+		// the finalized part must not exist already
+		if (targetFile.exists()) {
+			throw new IOException("File \"" + filePath + "\" already exists." +
+					" This can be either because another job is writing at the bucket or an accidental \"split-brain\" scenario." +
+					" In any case, please investigate or report as this can have implications on the correctness of your data.");
+		}
+
 		final File tempFile = generateStagingTempFilePath(targetFile);
 
 		// try to create the parent
@@ -114,8 +120,7 @@ public class LocalRecoverableWriter implements RecoverableWriter {
 		return true;
 	}
 
-	@VisibleForTesting
-	static File generateStagingTempFilePath(File targetFile) {
+	private static File generateStagingTempFilePath(File targetFile) {
 		checkArgument(targetFile.isAbsolute(), "targetFile must be absolute");
 		checkArgument(!targetFile.isDirectory(), "targetFile must not be a directory");
 
@@ -124,11 +129,6 @@ public class LocalRecoverableWriter implements RecoverableWriter {
 
 		checkArgument(parent != null, "targetFile must not be the root directory");
 
-		while (true) {
-			File candidate = new File(parent, "." + name + ".inprogress." + UUID.randomUUID().toString());
-			if (!candidate.exists()) {
-				return candidate;
-			}
-		}
+		return new File(parent, "." + name + ".inprogress");
 	}
 }

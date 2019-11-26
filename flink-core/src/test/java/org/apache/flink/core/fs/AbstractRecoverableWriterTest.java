@@ -19,7 +19,6 @@
 package org.apache.flink.core.fs;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.StringUtils;
 import org.apache.flink.util.TestLogger;
 
@@ -92,7 +91,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 
 		final RecoverableFsDataOutputStream stream = writer.open(path);
 		for (Map.Entry<Path, String> fileContents : getFileContentByPath(testDir).entrySet()) {
-			Assert.assertTrue(fileContents.getKey().getName().startsWith(".part-0.inprogress."));
+			Assert.assertTrue(fileContents.getKey().getName().startsWith(".part-0.inprogress"));
 			Assert.assertTrue(fileContents.getValue().isEmpty());
 		}
 
@@ -105,6 +104,65 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 	}
 
 	@Test
+	public void testOverwritingUponReopeningClosedUncommittedFiles() throws Exception {
+		final Path testDir = getBasePathForTest();
+
+		final Path path = new Path(testDir, "part-0");
+
+		final RecoverableWriter initWriter = getNewFileSystemWriter();
+		final RecoverableFsDataOutputStream initStream = initWriter.open(path);
+		writeCompletedPart(initStream, testData1);
+
+		final RecoverableWriter newWriter = getNewFileSystemWriter();
+		final RecoverableFsDataOutputStream newStream = newWriter.open(path);
+
+		final RecoverableFsDataOutputStream.Committer committer =
+				writeCompletedPart(newStream, testData2);
+		committer.commit();
+
+		for (Map.Entry<Path, String> fileContents : getFileContentByPath(testDir).entrySet()) {
+			Assert.assertEquals("part-0", fileContents.getKey().getName());
+			Assert.assertEquals(testData2, fileContents.getValue());
+		}
+	}
+
+	@Test
+	public void testOverwritingUponReopeningNotClosedUncommittedFiles() throws Exception {
+		final Path testDir = getBasePathForTest();
+
+		final Path path = new Path(testDir, "part-0");
+
+		final RecoverableWriter initWriter = getNewFileSystemWriter();
+		final RecoverableFsDataOutputStream initStream = initWriter.open(path);
+		writeUncompletedPart(initStream, testData1);
+
+		final RecoverableWriter newWriter = getNewFileSystemWriter();
+		final RecoverableFsDataOutputStream newStream = newWriter.open(path);
+
+		final RecoverableFsDataOutputStream.Committer committer =
+				writeCompletedPart(newStream, testData2);
+		committer.commit();
+
+		for (Map.Entry<Path, String> fileContents : getFileContentByPath(testDir).entrySet()) {
+			Assert.assertEquals("part-0", fileContents.getKey().getName());
+			Assert.assertEquals(testData2, fileContents.getValue());
+		}
+	}
+
+	private RecoverableFsDataOutputStream.Committer writeCompletedPart(
+			final RecoverableFsDataOutputStream stream,
+			final String data) throws IOException {
+		writeUncompletedPart(stream, data);
+		return stream.closeForCommit();
+	}
+
+	private void writeUncompletedPart(
+			final RecoverableFsDataOutputStream stream,
+			final String data) throws IOException {
+		stream.write(bytesOf(data));
+	}
+
+	@Test
 	public void testCommitAfterNormalClose() throws Exception {
 		final RecoverableWriter writer = getNewFileSystemWriter();
 
@@ -112,9 +170,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 
 		final Path path = new Path(testDir, "part-0");
 
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = writer.open(path);
+		try (final RecoverableFsDataOutputStream stream = writer.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 			stream.closeForCommit().commit();
 
@@ -122,8 +178,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 				Assert.assertEquals("part-0", fileContents.getKey().getName());
 				Assert.assertEquals(testData1, fileContents.getValue());
 			}
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 	}
 
@@ -135,9 +189,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 
 		final Path path = new Path(testDir, "part-0");
 
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = writer.open(path);
+		try (final RecoverableFsDataOutputStream stream = writer.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 			stream.persist();
 
@@ -148,8 +200,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 				Assert.assertEquals("part-0", fileContents.getKey().getName());
 				Assert.assertEquals(testData1 + testData2, fileContents.getValue());
 			}
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 	}
 
@@ -203,9 +253,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		final RecoverableWriter initWriter = getNewFileSystemWriter();
 
 		final Map<String, RecoverableWriter.ResumeRecoverable> recoverables = new HashMap<>(4);
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = initWriter.open(path);
+		try (final RecoverableFsDataOutputStream stream = initWriter.open(path)) {
 			recoverables.put(INIT_EMPTY_PERSIST, stream.persist());
 
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
@@ -217,8 +265,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 			stream.write(testData2.getBytes(StandardCharsets.UTF_8));
 
 			recoverables.put(FINAL_WITH_EXTRA_STATE, stream.persist());
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 
 		final SimpleVersionedSerializer<RecoverableWriter.ResumeRecoverable> serializer = initWriter.getResumeRecoverableSerializer();
@@ -230,16 +276,14 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		final RecoverableWriter.ResumeRecoverable recoveredRecoverable =
 				deserializer.deserialize(serializer.getVersion(), serializedRecoverable);
 
-		RecoverableFsDataOutputStream recoveredStream = null;
-		try {
-			recoveredStream = newWriter.recover(recoveredRecoverable);
+		try (final RecoverableFsDataOutputStream recoveredStream = newWriter.recover(recoveredRecoverable)) {
 
 			// we expect the data to be truncated
 			Map<Path, String> files = getFileContentByPath(testDir);
 			Assert.assertEquals(1L, files.size());
 
 			for (Map.Entry<Path, String> fileContents : files.entrySet()) {
-				Assert.assertTrue(fileContents.getKey().getName().startsWith(".part-0.inprogress."));
+				Assert.assertTrue(fileContents.getKey().getName().startsWith(".part-0.inprogress"));
 				Assert.assertEquals(expectedPostRecoveryContents, fileContents.getValue());
 			}
 
@@ -253,8 +297,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 				Assert.assertEquals("part-0", fileContents.getKey().getName());
 				Assert.assertEquals(expectedFinalContents, fileContents.getValue());
 			}
-		} finally {
-			IOUtils.closeQuietly(recoveredStream);
 		}
 	}
 
@@ -266,9 +308,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		final RecoverableWriter initWriter = getNewFileSystemWriter();
 
 		final RecoverableWriter.CommitRecoverable recoverable;
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = initWriter.open(path);
+		try (final RecoverableFsDataOutputStream stream = initWriter.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 
 			stream.persist();
@@ -278,8 +318,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 			stream.write(testData2.getBytes(StandardCharsets.UTF_8));
 
 			recoverable = stream.closeForCommit().getRecoverable();
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 
 		final byte[] serializedRecoverable = initWriter.getCommitRecoverableSerializer().serialize(recoverable);
@@ -310,16 +348,12 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		final RecoverableWriter writer = getNewFileSystemWriter();
 		final Path path = new Path(testDir, "part-0");
 
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = writer.open(path);
+		try (final RecoverableFsDataOutputStream stream = writer.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 
 			stream.closeForCommit().getRecoverable();
 			stream.write(testData2.getBytes(StandardCharsets.UTF_8));
 			fail();
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 	}
 
@@ -331,17 +365,13 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		final Path path = new Path(testDir, "part-0");
 
 		RecoverableWriter.ResumeRecoverable recoverable;
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = writer.open(path);
+		try (final RecoverableFsDataOutputStream stream = writer.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 
 			recoverable = stream.persist();
 			stream.write(testData2.getBytes(StandardCharsets.UTF_8));
 
 			stream.closeForCommit().commit();
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 
 		// this should throw an exception as the file is already committed
@@ -361,9 +391,7 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 
 		final RecoverableWriter.ResumeRecoverable recoverable1;
 		final RecoverableWriter.ResumeRecoverable recoverable2;
-		RecoverableFsDataOutputStream stream = null;
-		try {
-			stream = writer.open(path);
+		try (final RecoverableFsDataOutputStream stream = writer.open(path)) {
 			stream.write(testData1.getBytes(StandardCharsets.UTF_8));
 
 			recoverable1 = stream.persist();
@@ -371,8 +399,6 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 
 			recoverable2 = stream.persist();
 			stream.write(testData3.getBytes(StandardCharsets.UTF_8));
-		} finally {
-			IOUtils.closeQuietly(stream);
 		}
 
 		try (RecoverableFsDataOutputStream ignored = writer.recover(recoverable1)) {
@@ -391,6 +417,8 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 		fail();
 	}
 
+	// ------------------------------------- Helper Methods ------------------------------------- //
+
 	private Map<Path, String> getFileContentByPath(Path directory) throws Exception {
 		Map<Path, String> contents = new HashMap<>();
 
@@ -405,6 +433,10 @@ public abstract class AbstractRecoverableWriterTest extends TestLogger {
 			contents.put(file.getPath(), new String(serContents, StandardCharsets.UTF_8));
 		}
 		return contents;
+	}
+
+	private static byte[] bytesOf(String text) {
+		return text.getBytes(StandardCharsets.UTF_8);
 	}
 
 	private static String randomName() {
