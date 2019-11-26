@@ -21,6 +21,7 @@ package org.apache.flink.runtime.rest.handler.legacy;
 import org.apache.flink.api.common.ArchivedExecutionConfig;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.interactive.DefaultIntermediateResultSummary;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.accumulators.StringifiedAccumulatorResult;
 import org.apache.flink.runtime.concurrent.FutureUtils;
@@ -168,7 +169,7 @@ public class ExecutionGraphCacheTest extends TestLogger {
 		final ArchivedExecutionGraph expectedExecutionGraph2 = new ArchivedExecutionGraphBuilder().build();
 
 		final AtomicInteger requestJobCalls = new AtomicInteger(0);
-		final TestingRestfulGateway restfulGateway = new TestingRestfulGateway.Builder()
+		final TestingRestfulGateway restfulGateway = TestingRestfulGateway.newBuilder()
 			.setRequestJobFunction(
 				jobId -> {
 					requestJobCalls.incrementAndGet();
@@ -295,6 +296,7 @@ public class ExecutionGraphCacheTest extends TestLogger {
 				"",
 				new StringifiedAccumulatorResult[0],
 				Collections.emptyMap(),
+				new DefaultIntermediateResultSummary(),
 				new ArchivedExecutionConfig(new ExecutionConfig()),
 				false,
 				null,
