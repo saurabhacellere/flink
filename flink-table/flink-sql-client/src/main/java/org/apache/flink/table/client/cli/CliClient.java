@@ -49,7 +49,6 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -264,26 +263,14 @@ public class CliClient {
 			case HELP:
 				callHelp();
 				break;
-			case SHOW_CATALOGS:
-				callShowCatalogs();
-				break;
-			case SHOW_DATABASES:
-				callShowDatabases();
-				break;
 			case SHOW_TABLES:
 				callShowTables();
 				break;
+			case SHOW_VIEWS:
+				callShowViews();
+				break;
 			case SHOW_FUNCTIONS:
 				callShowFunctions();
-				break;
-			case SHOW_MODULES:
-				callShowModules();
-				break;
-			case USE_CATALOG:
-				callUseCatalog(cmdCall);
-				break;
-			case USE:
-				callUseDatabase(cmdCall);
 				break;
 			case DESCRIBE:
 				callDescribe(cmdCall);
@@ -359,38 +346,6 @@ public class CliClient {
 		terminal.flush();
 	}
 
-	private void callShowCatalogs() {
-		final List<String> catalogs;
-		try {
-			catalogs = executor.listCatalogs(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (catalogs.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			catalogs.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowDatabases() {
-		final List<String> dbs;
-		try {
-			dbs = executor.listDatabases(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (dbs.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			dbs.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
 	private void callShowTables() {
 		final List<String> tables;
 		try {
@@ -407,10 +362,27 @@ public class CliClient {
 		terminal.flush();
 	}
 
+	private void callShowViews() {
+		final List<String> views;
+		try {
+			views = executor.listViews(context);
+		} catch (SqlExecutionException e) {
+			printExecutionException(e);
+			return;
+		}
+
+		if (views.isEmpty()) {
+			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
+		} else {
+			views.forEach((v) -> terminal.writer().println(v));
+		}
+		terminal.flush();
+	}
+
 	private void callShowFunctions() {
 		final List<String> functions;
 		try {
-			functions = executor.listFunctions(context);
+			functions = executor.listUserDefinedFunctions(context);
 		} catch (SqlExecutionException e) {
 			printExecutionException(e);
 			return;
@@ -418,45 +390,7 @@ public class CliClient {
 		if (functions.isEmpty()) {
 			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
 		} else {
-			Collections.sort(functions);
 			functions.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowModules() {
-		final List<String> modules;
-		try {
-			modules = executor.listModules(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (modules.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			// modules are already in the loaded order
-			modules.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callUseCatalog(SqlCommandCall cmdCall) {
-		try {
-			executor.useCatalog(context, cmdCall.operands[0]);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		terminal.flush();
-	}
-
-	private void callUseDatabase(SqlCommandCall cmdCall) {
-		try {
-			executor.useDatabase(context, cmdCall.operands[0]);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
 		}
 		terminal.flush();
 	}
