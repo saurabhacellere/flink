@@ -192,7 +192,7 @@ under the License.
 		<dependency>
 			<groupId>org.apache.curator</groupId>
 			<artifactId>curator-test</artifactId>
-			<version>${curator.version}</version>
+			<version>${curator.test.version}</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -591,25 +591,6 @@ under the License.
 							<attach>false</attach>
 							<descriptors>
 								<descriptor>src/test/assembly/test-checkpointing-custom_kv_state-assembly.xml</descriptor>
-							</descriptors>
-						</configuration>
-					</execution>
-					<execution>
-						<id>create-classloading_policy-jar</id>
-						<phase>process-test-classes</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<archive>
-								<manifest>
-									<mainClass>org.apache.flink.test.classloading.jar.ClassLoadingPolicyProgram</mainClass>
-								</manifest>
-							</archive>
-							<finalName>classloading_policy</finalName>
-							<attach>false</attach>
-							<descriptors>
-								<descriptor>src/test/assembly/test-classloading_policy-assembly.xml</descriptor>
 							</descriptors>
 						</configuration>
 					</execution>
