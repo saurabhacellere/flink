@@ -27,7 +27,8 @@ import org.apache.flink.runtime.clusterframework.types.ResourceIDRetrievable;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.taskexecutor.TaskManagerServices;
@@ -52,20 +53,22 @@ public abstract class ActiveResourceManagerFactory<T extends ResourceIDRetrievab
 			RpcService rpcService,
 			HighAvailabilityServices highAvailabilityServices,
 			HeartbeatServices heartbeatServices,
+			MetricRegistry metricRegistry,
 			FatalErrorHandler fatalErrorHandler,
 			ClusterInformation clusterInformation,
 			@Nullable String webInterfaceUrl,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) throws Exception {
+			JobManagerMetricGroup jobManagerMetricGroup) throws Exception {
 		return createActiveResourceManager(
 			createActiveResourceManagerConfiguration(configuration),
 			resourceId,
 			rpcService,
 			highAvailabilityServices,
 			heartbeatServices,
+			metricRegistry,
 			fatalErrorHandler,
 			clusterInformation,
 			webInterfaceUrl,
-			resourceManagerMetricGroup);
+			jobManagerMetricGroup);
 	}
 
 	public static Configuration createActiveResourceManagerConfiguration(Configuration originalConfiguration) {
@@ -75,7 +78,7 @@ public abstract class ActiveResourceManagerFactory<T extends ResourceIDRetrievab
 		final long managedMemoryBytes = TaskManagerServices.getManagedMemoryFromProcessMemory(originalConfiguration, processMemoryBytes);
 
 		final Configuration resourceManagerConfig = new Configuration(originalConfiguration);
-		resourceManagerConfig.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, managedMemoryBytes + "b");
+		resourceManagerConfig.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, managedMemoryBytes + "b");
 
 		return resourceManagerConfig;
 	}
@@ -86,8 +89,9 @@ public abstract class ActiveResourceManagerFactory<T extends ResourceIDRetrievab
 		RpcService rpcService,
 		HighAvailabilityServices highAvailabilityServices,
 		HeartbeatServices heartbeatServices,
+		MetricRegistry metricRegistry,
 		FatalErrorHandler fatalErrorHandler,
 		ClusterInformation clusterInformation,
 		@Nullable String webInterfaceUrl,
-		ResourceManagerMetricGroup resourceManagerMetricGroup) throws Exception;
+		JobManagerMetricGroup jobManagerMetricGroup) throws Exception;
 }

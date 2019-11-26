@@ -38,7 +38,6 @@ import org.apache.flink.runtime.heartbeat.HeartbeatListener;
 import org.apache.flink.runtime.heartbeat.HeartbeatManager;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.HeartbeatTarget;
-import org.apache.flink.runtime.heartbeat.NoOpHeartbeatManager;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.instance.HardwareDescription;
 import org.apache.flink.runtime.instance.InstanceID;
@@ -50,7 +49,8 @@ import org.apache.flink.runtime.leaderelection.LeaderContender;
 import org.apache.flink.runtime.leaderelection.LeaderElectionService;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.metrics.MetricNames;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
 import org.apache.flink.runtime.resourcemanager.exceptions.UnknownTaskExecutorException;
@@ -65,7 +65,6 @@ import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.taskexecutor.FileType;
 import org.apache.flink.runtime.taskexecutor.SlotReport;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
-import org.apache.flink.runtime.taskexecutor.TaskExecutorHeartbeatPayload;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorRegistrationSuccess;
 import org.apache.flink.runtime.taskexecutor.TaskManagerServices;
 import org.apache.flink.util.ExceptionUtils;
@@ -126,6 +125,9 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	private final HeartbeatServices heartbeatServices;
 
+	/** Registry to use for metrics. */
+	private final MetricRegistry metricRegistry;
+
 	/** Fatal error handler. */
 	private final FatalErrorHandler fatalErrorHandler;
 
@@ -134,13 +136,13 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	private final ClusterInformation clusterInformation;
 
-	private final ResourceManagerMetricGroup resourceManagerMetricGroup;
+	private final JobManagerMetricGroup jobManagerMetricGroup;
 
 	/** The service to elect a ResourceManager leader. */
 	private LeaderElectionService leaderElectionService;
 
 	/** The heartbeat manager with task managers. */
-	private HeartbeatManager<TaskExecutorHeartbeatPayload, Void> taskManagerHeartbeatManager;
+	private HeartbeatManager<SlotReport, Void> taskManagerHeartbeatManager;
 
 	/** The heartbeat manager with job managers. */
 	private HeartbeatManager<Void, Void> jobManagerHeartbeatManager;
@@ -160,29 +162,28 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			HighAvailabilityServices highAvailabilityServices,
 			HeartbeatServices heartbeatServices,
 			SlotManager slotManager,
+			MetricRegistry metricRegistry,
 			JobLeaderIdService jobLeaderIdService,
 			ClusterInformation clusterInformation,
 			FatalErrorHandler fatalErrorHandler,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) {
+			JobManagerMetricGroup jobManagerMetricGroup) {
 
-		super(rpcService, resourceManagerEndpointId, null);
+		super(rpcService, resourceManagerEndpointId);
 
 		this.resourceId = checkNotNull(resourceId);
 		this.highAvailabilityServices = checkNotNull(highAvailabilityServices);
 		this.heartbeatServices = checkNotNull(heartbeatServices);
 		this.slotManager = checkNotNull(slotManager);
+		this.metricRegistry = checkNotNull(metricRegistry);
 		this.jobLeaderIdService = checkNotNull(jobLeaderIdService);
 		this.clusterInformation = checkNotNull(clusterInformation);
 		this.fatalErrorHandler = checkNotNull(fatalErrorHandler);
-		this.resourceManagerMetricGroup = checkNotNull(resourceManagerMetricGroup);
+		this.jobManagerMetricGroup = checkNotNull(jobManagerMetricGroup);
 
 		this.jobManagerRegistrations = new HashMap<>(4);
 		this.jmResourceIdRegistrations = new HashMap<>(4);
 		this.taskExecutors = new HashMap<>(8);
 		this.taskExecutorGatewayFutures = new HashMap<>(8);
-
-		this.jobManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
-		this.taskManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
 	}
 
 
@@ -261,8 +262,6 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 		} catch (Exception e) {
 			exception = ExceptionUtils.firstOrSuppressed(e, exception);
 		}
-
-		resourceManagerMetricGroup.close();
 
 		clearStateInternal();
 
@@ -405,8 +404,8 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	}
 
 	@Override
-	public void heartbeatFromTaskManager(final ResourceID resourceID, final TaskExecutorHeartbeatPayload heartbeatPayload) {
-		taskManagerHeartbeatManager.receiveHeartbeat(resourceID, heartbeatPayload);
+	public void heartbeatFromTaskManager(final ResourceID resourceID, final SlotReport slotReport) {
+		taskManagerHeartbeatManager.receiveHeartbeat(resourceID, slotReport);
 	}
 
 	@Override
@@ -696,9 +695,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			log.debug("Replacing old registration of TaskExecutor {}.", taskExecutorResourceId);
 
 			// remove old task manager registration from slot manager
-			slotManager.unregisterTaskManager(
-				oldRegistration.getInstanceID(),
-				new ResourceManagerException(String.format("TaskExecutor %s re-connected to the ResourceManager.", taskExecutorResourceId)));
+			slotManager.unregisterTaskManager(oldRegistration.getInstanceID());
 		}
 
 		final WorkerType newWorker = workerStarted(taskExecutorResourceId);
@@ -735,13 +732,13 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	}
 
 	private void registerSlotAndTaskExecutorMetrics() {
-		resourceManagerMetricGroup.gauge(
+		jobManagerMetricGroup.gauge(
 			MetricNames.TASK_SLOTS_AVAILABLE,
 			() -> (long) slotManager.getNumberFreeSlots());
-		resourceManagerMetricGroup.gauge(
+		jobManagerMetricGroup.gauge(
 			MetricNames.TASK_SLOTS_TOTAL,
 			() -> (long) slotManager.getNumberRegisteredSlots());
-		resourceManagerMetricGroup.gauge(
+		jobManagerMetricGroup.gauge(
 			MetricNames.NUM_REGISTERED_TASK_MANAGERS,
 			() -> (long) taskExecutors.size());
 	}
@@ -806,7 +803,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			log.info("Closing TaskExecutor connection {} because: {}", resourceID, cause.getMessage());
 
 			// TODO :: suggest failed task executor to stop itself
-			slotManager.unregisterTaskManager(workerRegistration.getInstanceID(), cause);
+			slotManager.unregisterTaskManager(workerRegistration.getInstanceID());
 
 			workerRegistration.getTaskExecutorGateway().disconnectResourceManager(cause);
 		} else {
@@ -862,7 +859,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			}
 		} else {
 			// unregister in order to clean up potential left over state
-			slotManager.unregisterTaskManager(instanceId, cause);
+			slotManager.unregisterTaskManager(instanceId);
 		}
 	}
 
@@ -902,7 +899,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			(acceptLeadership) -> {
 				if (acceptLeadership) {
 					// confirming the leader session ID might be blocking,
-					leaderElectionService.confirmLeadership(newLeaderSessionID, getAddress());
+					leaderElectionService.confirmLeaderSessionID(newLeaderSessionID);
 				}
 			},
 			getRpcService().getExecutor());
@@ -977,8 +974,15 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	}
 
 	private void stopHeartbeatServices() {
+		if (taskManagerHeartbeatManager != null) {
 			taskManagerHeartbeatManager.stop();
+			taskManagerHeartbeatManager = null;
+		}
+
+		if (jobManagerHeartbeatManager != null) {
 			jobManagerHeartbeatManager.stop();
+			jobManagerHeartbeatManager = null;
+		}
 	}
 
 	/**
@@ -1130,7 +1134,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 		}
 	}
 
-	private class TaskManagerHeartbeatListener implements HeartbeatListener<TaskExecutorHeartbeatPayload, Void> {
+	private class TaskManagerHeartbeatListener implements HeartbeatListener<SlotReport, Void> {
 
 		@Override
 		public void notifyHeartbeatTimeout(final ResourceID resourceID) {
@@ -1143,7 +1147,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 		}
 
 		@Override
-		public void reportPayload(final ResourceID resourceID, final TaskExecutorHeartbeatPayload payload) {
+		public void reportPayload(final ResourceID resourceID, final SlotReport payload) {
 			validateRunsInMainThread();
 			final WorkerRegistration<WorkerType> workerRegistration = taskExecutors.get(resourceID);
 
@@ -1152,7 +1156,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 			} else {
 				InstanceID instanceId = workerRegistration.getInstanceID();
 
-				slotManager.reportSlotStatus(instanceId, payload.getSlotReport());
+				slotManager.reportSlotStatus(instanceId, payload);
 			}
 		}
 
@@ -1205,7 +1209,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	public static Collection<ResourceProfile> createWorkerSlotProfiles(Configuration config) {
 		final int numSlots = config.getInteger(TaskManagerOptions.NUM_TASK_SLOTS);
-		final long managedMemoryBytes = MemorySize.parse(config.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE)).getBytes();
+		final long managedMemoryBytes = MemorySize.parse(config.getString(TaskManagerOptions.MANAGED_MEMORY_SIZE)).getBytes();
 
 		final ResourceProfile resourceProfile = TaskManagerServices.computeSlotResourceProfile(numSlots, managedMemoryBytes);
 		return Collections.nCopies(numSlots, resourceProfile);

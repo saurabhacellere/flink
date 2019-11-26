@@ -301,6 +301,7 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 	}
 
 	private void releaseViewReader(NetworkSequenceViewReader reader) throws IOException {
+		reader.notifySubpartitionConsumed();
 		reader.setRegisteredAsAvailable(false);
 		reader.releaseAllResources();
 	}

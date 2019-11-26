@@ -21,7 +21,6 @@ package org.apache.flink.streaming.runtime.tasks;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.configuration.Configuration;
@@ -35,7 +34,6 @@ import org.apache.flink.streaming.api.functions.source.FromElementsFunction;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.graph.StreamConfig;
-import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.TestHarnessUtil;
@@ -50,6 +48,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -57,11 +56,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.flink.util.Preconditions.checkState;
+import static org.hamcrest.core.Is.isA;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -74,6 +74,7 @@ public class SourceStreamTaskTest {
 	 * This test verifies that open() and close() are correctly called by the StreamTask.
 	 */
 	@Test
+	@SuppressWarnings("unchecked")
 	public void testOpenClose() throws Exception {
 		final StreamTaskTestHarness<String> testHarness = new StreamTaskTestHarness<>(
 				SourceStreamTask::new, BasicTypeInfo.STRING_TYPE_INFO);
@@ -173,8 +174,8 @@ public class SourceStreamTaskTest {
 		testHarness
 			.setupOperatorChain(
 				new OperatorID(),
-				new OutputRecordInCloseTestSource<>(
-					"Source0", new FromElementsFunction<>(StringSerializer.INSTANCE, "Hello")))
+				new StreamSource<>(new FromElementsFunction<>(
+					BasicTypeInfo.STRING_TYPE_INFO.createSerializer(new ExecutionConfig()), "Hello")))
 			.chain(
 				new OperatorID(),
 				new TestBoundedOneInputStreamOperator("Operator1"),
@@ -190,9 +191,6 @@ public class SourceStreamTaskTest {
 		testHarness.waitForTaskCompletion();
 
 		expectedOutput.add(new StreamRecord<>("Hello"));
-		expectedOutput.add(new StreamRecord<>("[Source0]: EndOfInput"));
-		expectedOutput.add(new StreamRecord<>("[Source0]: Bye"));
-		expectedOutput.add(new StreamRecord<>("[Operator1]: EndOfInput"));
 		expectedOutput.add(new StreamRecord<>("[Operator1]: Bye"));
 
 		TestHarnessUtil.assertOutputEquals("Output was not correct.",
@@ -237,6 +235,41 @@ public class SourceStreamTaskTest {
 		TestHarnessUtil.assertOutputEquals("Output was not correct.",
 			expectedOutput,
 			testHarness.getOutput());
+	}
+
+	/**
+	 * Cancelling should not swallow exceptions in the Invokable. They will eventually be ignored
+	 * because the bubble up into the Task thread, where they go nowhere.
+	 */
+	@Test
+	public void cancellingForwardsExceptions() throws Exception {
+		final StreamTaskTestHarness<String> testHarness = new StreamTaskTestHarness<>(
+				SourceStreamTask::new,
+				BasicTypeInfo.STRING_TYPE_INFO);
+
+		final CompletableFuture<Void> operatorRunningWaitingFuture = new CompletableFuture<>();
+		ExceptionThrowingSource.setIsInRunLoopFuture(operatorRunningWaitingFuture);
+
+		testHarness.setupOutputForSingletonOperatorChain();
+		StreamConfig streamConfig = testHarness.getStreamConfig();
+		streamConfig.setStreamOperator(new StreamSource<>(new ExceptionThrowingSource()));
+		streamConfig.setOperatorID(new OperatorID());
+
+		testHarness.invoke();
+		operatorRunningWaitingFuture.get();
+		testHarness.getTask().cancel();
+
+		Optional<ExceptionThrowingSource.TestException> testException = Optional.empty();
+		try {
+			testHarness.waitForTaskCompletion();
+		} catch (Throwable t) {
+			testException = ExceptionUtils.findThrowable(
+					t,
+					ExceptionThrowingSource.TestException.class);
+		}
+
+		assertTrue(testException.isPresent());
+		assertThat(testException.get(), isA(ExceptionThrowingSource.TestException.class));
 	}
 
 	/**
@@ -287,6 +320,7 @@ public class SourceStreamTaskTest {
 
 		@Override
 		public void run(SourceContext<Tuple2<Long, Integer>> ctx) {
+			final Object lockObject = ctx.getCheckpointLock();
 			while (isRunning && count < maxElements) {
 				// simulate some work
 				try {
@@ -297,8 +331,8 @@ public class SourceStreamTaskTest {
 					Thread.currentThread().interrupt();
 				}
 
-				synchronized (ctx.getCheckpointLock()) {
-					ctx.collect(new Tuple2<>(lastCheckpointId, count));
+				synchronized (lockObject) {
+					ctx.collect(new Tuple2<Long, Integer>(lastCheckpointId, count));
 					count++;
 				}
 			}
@@ -328,7 +362,7 @@ public class SourceStreamTaskTest {
 				Assert.fail("Count is different at start end end of snapshot.");
 			}
 			semaphore.release();
-			return Collections.singletonList(sum);
+			return Collections.<Serializable>singletonList(sum);
 		}
 
 		@Override
@@ -336,14 +370,16 @@ public class SourceStreamTaskTest {
 		}
 	}
 
-	/** This calls triggerCheckpointAsync on the given task with the given interval. */
+	/**
+	 * This calls triggerInterrupt on the given task with the given interval.
+	 */
 	private static class Checkpointer implements Callable<Boolean> {
 		private final int numCheckpoints;
 		private final int checkpointInterval;
 		private final AtomicLong checkpointId;
 		private final StreamTask<Tuple2<Long, Integer>, ?> sourceTask;
 
-		Checkpointer(int numCheckpoints, int checkpointInterval, StreamTask<Tuple2<Long, Integer>, ?> task) {
+		public Checkpointer(int numCheckpoints, int checkpointInterval, StreamTask<Tuple2<Long, Integer>, ?> task) {
 			this.numCheckpoints = numCheckpoints;
 			checkpointId = new AtomicLong(0);
 			sourceTask = task;
@@ -354,15 +390,8 @@ public class SourceStreamTaskTest {
 		public Boolean call() throws Exception {
 			for (int i = 0; i < numCheckpoints; i++) {
 				long currentCheckpointId = checkpointId.getAndIncrement();
-				try {
-					sourceTask.triggerCheckpointAsync(
-						new CheckpointMetaData(currentCheckpointId, 0L),
-						CheckpointOptions.forCheckpointWithDefaultLocation(),
-						false);
-				} catch (RejectedExecutionException e) {
-					// We are late with a checkpoint, the mailbox is already closed.
-					return false;
-				}
+				CheckpointMetaData checkpointMetaData = new CheckpointMetaData(currentCheckpointId, 0L);
+				sourceTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false);
 				Thread.sleep(checkpointInterval);
 			}
 			return true;
@@ -480,27 +509,6 @@ public class SourceStreamTaskTest {
 		@Override
 		public void cancel() {
 			running = false;
-		}
-	}
-
-	private static final class OutputRecordInCloseTestSource<SRC extends SourceFunction<String>>
-		extends StreamSource<String, SRC> implements BoundedOneInput {
-
-		private final String name;
-
-		public OutputRecordInCloseTestSource(String name, SRC sourceFunction) {
-			super(sourceFunction);
-			this.name = name;
-		}
-
-		@Override
-		public void endInput() {
-			output.collect(new StreamRecord<>("[" + name + "]: EndOfInput"));
-		}
-
-		@Override
-		public void close() {
-			output.collect(new StreamRecord<>("[" + name + "]: Bye"));
 		}
 	}
 }

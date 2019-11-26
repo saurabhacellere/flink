@@ -124,6 +124,11 @@ final class BoundedBlockingSubpartitionReader implements ResultSubpartitionView 
 	}
 
 	@Override
+	public void notifySubpartitionConsumed() throws IOException {
+		parent.onConsumedSubpartition();
+	}
+
+	@Override
 	public void releaseAllResources() throws IOException {
 		// it is not a problem if this method executes multiple times
 		isReleased = true;

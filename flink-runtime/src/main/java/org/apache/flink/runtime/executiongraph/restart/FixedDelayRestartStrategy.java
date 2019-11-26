@@ -19,14 +19,16 @@
 package org.apache.flink.runtime.executiongraph.restart;
 
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.concurrent.ScheduledExecutor;
 import org.apache.flink.runtime.executiongraph.ExecutionGraph;
 import org.apache.flink.util.Preconditions;
 
 import java.util.concurrent.CompletableFuture;
+
+import scala.concurrent.duration.Duration;
 
 /**
  * Restart strategy which tries to restart the given {@link ExecutionGraph} a fixed number of times
@@ -73,8 +75,19 @@ public class FixedDelayRestartStrategy implements RestartStrategy {
 	 * @throws Exception
 	 */
 	public static FixedDelayRestartStrategyFactory createFactory(Configuration configuration) throws Exception {
-		int maxAttempts = configuration.getInteger(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS);
-		long delay = configuration.get(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY).toMillis();
+		int maxAttempts = configuration.getInteger(ConfigConstants.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, 1);
+
+		String delayString = configuration.getString(ConfigConstants.RESTART_STRATEGY_FIXED_DELAY_DELAY);
+
+		long delay;
+
+		try {
+			delay = Duration.apply(delayString).toMillis();
+		} catch (NumberFormatException nfe) {
+			throw new Exception("Invalid config value for " +
+					ConfigConstants.RESTART_STRATEGY_FIXED_DELAY_DELAY + ": " + delayString +
+					". Value must be a valid duration (such as '100 milli' or '10 s')");
+		}
 
 		return new FixedDelayRestartStrategyFactory(maxAttempts, delay);
 	}
@@ -91,25 +104,17 @@ public class FixedDelayRestartStrategy implements RestartStrategy {
 
 		private static final long serialVersionUID = 6642934067762271950L;
 
-		private final int maxNumberRestartAttempts;
-		private final long delayBetweenRestartAttempts;
+		private final int maxAttempts;
+		private final long delay;
 
-		public FixedDelayRestartStrategyFactory(int maxNumberRestartAttempts, long delayBetweenRestartAttempts) {
-			this.maxNumberRestartAttempts = maxNumberRestartAttempts;
-			this.delayBetweenRestartAttempts = delayBetweenRestartAttempts;
+		public FixedDelayRestartStrategyFactory(int maxAttempts, long delay) {
+			this.maxAttempts = maxAttempts;
+			this.delay = delay;
 		}
 
 		@Override
 		public RestartStrategy createRestartStrategy() {
-			return new FixedDelayRestartStrategy(maxNumberRestartAttempts, delayBetweenRestartAttempts);
-		}
-
-		int getMaxNumberRestartAttempts() {
-			return maxNumberRestartAttempts;
-		}
-
-		long getDelayBetweenRestartAttempts() {
-			return delayBetweenRestartAttempts;
+			return new FixedDelayRestartStrategy(maxAttempts, delay);
 		}
 	}
 }

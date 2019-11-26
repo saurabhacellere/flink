@@ -23,6 +23,7 @@ import org.apache.flink.api.common.io.InitializeOnMaster;
 import org.apache.flink.api.java.hadoop.common.HadoopInputFormatCommonBase;
 import org.apache.flink.api.java.hadoop.common.HadoopOutputFormatCommonBase;
 import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -37,6 +38,7 @@ import org.apache.flink.table.catalog.hive.util.HiveTableUtil;
 import org.apache.flink.table.functions.hive.conversion.HiveInspectors;
 import org.apache.flink.table.functions.hive.conversion.HiveObjectConversion;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.utils.LegacyTypeInfoDataTypeConverter;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
@@ -45,7 +47,8 @@ import org.apache.flink.util.StringUtils;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PathFilter;
+import org.apache.hadoop.hive.common.FileUtils;
+import org.apache.hadoop.hive.common.HiveStatsUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.MetaException;
@@ -53,6 +56,8 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.exec.FileSinkOperator;
+import org.apache.hadoop.hive.ql.io.HiveFileFormatUtils;
+import org.apache.hadoop.hive.ql.metadata.HiveException;
 import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
@@ -69,6 +74,8 @@ import org.apache.hadoop.mapred.JobContext;
 import org.apache.hadoop.mapred.JobContextImpl;
 import org.apache.hadoop.mapred.JobID;
 import org.apache.hadoop.mapred.OutputCommitter;
+import org.apache.hadoop.mapred.OutputFormat;
+import org.apache.hadoop.mapred.Reporter;
 import org.apache.hadoop.mapred.SequenceFileOutputFormat;
 import org.apache.hadoop.mapred.TaskAttemptContext;
 import org.apache.hadoop.mapred.TaskAttemptContextImpl;
@@ -104,17 +111,10 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 
 	private static final long serialVersionUID = 5167529504848109023L;
 
-	private static final PathFilter HIDDEN_FILES_PATH_FILTER = p -> {
-		String name = p.getName();
-		return !name.startsWith("_") && !name.startsWith(".");
-	};
-
 	private transient JobConf jobConf;
 	private transient ObjectPath tablePath;
 	private transient List<String> partitionColumns;
-	// Ideally we should maintain a TableSchema here, but it's not Serializable
-	private transient String[] fieldNames;
-	private transient DataType[] fieldTypes;
+	private transient RowTypeInfo rowTypeInfo;
 	private transient HiveTablePartition hiveTablePartition;
 	private transient Properties tableProperties;
 	private transient boolean overwrite;
@@ -140,8 +140,6 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 
 	private transient String hiveVersion;
 
-	private transient HiveShim hiveShim;
-
 	// to convert Flink object to Hive object
 	private transient HiveObjectConversion[] hiveConversions;
 
@@ -161,8 +159,7 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 		this.tablePath = tablePath;
 		this.partitionColumns = table.getPartitionKeys();
 		TableSchema tableSchema = table.getSchema();
-		this.fieldNames = tableSchema.getFieldNames();
-		this.fieldTypes = tableSchema.getFieldDataTypes();
+		this.rowTypeInfo = new RowTypeInfo(tableSchema.getFieldTypes(), tableSchema.getFieldNames());
 		this.hiveTablePartition = hiveTablePartition;
 		this.tableProperties = tableProperties;
 		this.overwrite = overwrite;
@@ -170,7 +167,6 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 		isDynamicPartition = isPartitioned && partitionColumns.size() > hiveTablePartition.getPartitionSpec().size();
 		hiveVersion = Preconditions.checkNotNull(jobConf.get(HiveCatalogValidator.CATALOG_HIVE_VERSION),
 				"Hive version is not defined");
-		hiveShim = HiveShimLoader.loadHiveShim(hiveVersion);
 	}
 
 	//  Custom serialization methods
@@ -181,8 +177,7 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 		out.writeObject(isPartitioned);
 		out.writeObject(isDynamicPartition);
 		out.writeObject(overwrite);
-		out.writeObject(fieldNames);
-		out.writeObject(fieldTypes);
+		out.writeObject(rowTypeInfo);
 		out.writeObject(hiveTablePartition);
 		out.writeObject(partitionColumns);
 		out.writeObject(tablePath);
@@ -205,15 +200,13 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 		isPartitioned = (boolean) in.readObject();
 		isDynamicPartition = (boolean) in.readObject();
 		overwrite = (boolean) in.readObject();
-		fieldNames = (String[]) in.readObject();
-		fieldTypes = (DataType[]) in.readObject();
+		rowTypeInfo = (RowTypeInfo) in.readObject();
 		hiveTablePartition = (HiveTablePartition) in.readObject();
 		partitionColumns = (List<String>) in.readObject();
 		tablePath = (ObjectPath) in.readObject();
 		partitionToWriter = new HashMap<>();
 		tableProperties = (Properties) in.readObject();
 		hiveVersion = (String) in.readObject();
-		hiveShim = HiveShimLoader.loadHiveShim(hiveVersion);
 	}
 
 	@Override
@@ -228,12 +221,12 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 			}
 			if (isPartitioned) {
 				if (isDynamicPartition) {
-					FileStatus[] generatedParts = hiveShim.getFileStatusRecurse(stagingDir,
+					FileStatus[] generatedParts = HiveStatsUtils.getFileStatusRecurse(stagingDir,
 						partitionColumns.size() - hiveTablePartition.getPartitionSpec().size(), fs);
 					for (FileStatus part : generatedParts) {
 						commitJob(part.getPath().toString());
 						LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
-						hiveShim.makeSpecFromName(fullPartSpec, part.getPath());
+						Warehouse.makeSpecFromName(fullPartSpec, part.getPath());
 						loadPartition(part.getPath(), table, fullPartSpec, client);
 					}
 				} else {
@@ -293,25 +286,26 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 		if (!isDynamicPartition) {
 			staticWriter = writerForLocation(hiveTablePartition.getStorageDescriptor().getLocation());
 		} else {
-			dynamicPartitionOffset = fieldNames.length - partitionColumns.size() + hiveTablePartition.getPartitionSpec().size();
+			dynamicPartitionOffset = rowTypeInfo.getArity() - partitionColumns.size() + hiveTablePartition.getPartitionSpec().size();
 		}
 
-		numNonPartitionColumns = isPartitioned ? fieldNames.length - partitionColumns.size() : fieldNames.length;
+		numNonPartitionColumns = isPartitioned ? rowTypeInfo.getArity() - partitionColumns.size() : rowTypeInfo.getArity();
 		hiveConversions = new HiveObjectConversion[numNonPartitionColumns];
 		List<ObjectInspector> objectInspectors = new ArrayList<>(hiveConversions.length);
 		for (int i = 0; i < numNonPartitionColumns; i++) {
-			ObjectInspector objectInspector = HiveInspectors.getObjectInspector(fieldTypes[i]);
+			DataType dataType = LegacyTypeInfoDataTypeConverter.toDataType(rowTypeInfo.getTypeAt(i));
+			ObjectInspector objectInspector = HiveInspectors.getObjectInspector(dataType);
 			objectInspectors.add(objectInspector);
-			hiveConversions[i] = HiveInspectors.getConversion(objectInspector, fieldTypes[i].getLogicalType());
+			hiveConversions[i] = HiveInspectors.getConversion(objectInspector, dataType.getLogicalType());
 		}
 
 		if (!isPartitioned) {
 			rowObjectInspector = ObjectInspectorFactory.getStandardStructObjectInspector(
-				Arrays.asList(fieldNames),
+				Arrays.asList(rowTypeInfo.getFieldNames()),
 				objectInspectors);
 		} else {
 			rowObjectInspector = ObjectInspectorFactory.getStandardStructObjectInspector(
-				Arrays.asList(fieldNames).subList(0, fieldNames.length - partitionColumns.size()),
+				Arrays.asList(rowTypeInfo.getFieldNames()).subList(0, rowTypeInfo.getArity() - partitionColumns.size()),
 				objectInspectors);
 			defaultPartitionName = jobConf.get(HiveConf.ConfVars.DEFAULTPARTITIONNAME.varname,
 					HiveConf.ConfVars.DEFAULTPARTITIONNAME.defaultStrVal);
@@ -382,15 +376,16 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 				// TODO: support setting auto-purge?
 				final boolean purge = true;
 				// Note we assume the srcDir is a hidden dir, otherwise it will be deleted if it's a sub-dir of destDir
-				FileStatus[] existingFiles = fs.listStatus(destDir, HIDDEN_FILES_PATH_FILTER);
+				FileStatus[] existingFiles = fs.listStatus(destDir, FileUtils.HIDDEN_FILES_PATH_FILTER);
 				if (existingFiles != null) {
+					HiveShim hiveShim = HiveShimLoader.loadHiveShim(hiveVersion);
 					for (FileStatus existingFile : existingFiles) {
 						Preconditions.checkState(hiveShim.moveToTrash(fs, existingFile.getPath(), jobConf, purge),
 							"Failed to overwrite existing file " + existingFile);
 					}
 				}
 			}
-			FileStatus[] srcFiles = fs.listStatus(srcDir, HIDDEN_FILES_PATH_FILTER);
+			FileStatus[] srcFiles = fs.listStatus(srcDir, FileUtils.HIDDEN_FILES_PATH_FILTER);
 			for (FileStatus srcFile : srcFiles) {
 				Path srcPath = srcFile.getPath();
 				Path destPath = new Path(destDir, srcPath.getName());
@@ -444,6 +439,17 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 	private HivePartitionWriter writerForLocation(String location) throws IOException {
 		JobConf clonedConf = new JobConf(jobConf);
 		clonedConf.set(OUTDIR, location);
+		OutputFormat outputFormat;
+		try {
+			StorageDescriptor sd = hiveTablePartition.getStorageDescriptor();
+			Class outputFormatClz = Class.forName(sd.getOutputFormat(), true,
+				Thread.currentThread().getContextClassLoader());
+			outputFormatClz = HiveFileFormatUtils.getOutputFormatSubstitute(outputFormatClz);
+			outputFormat = (OutputFormat) outputFormatClz.newInstance();
+		} catch (InstantiationException | IllegalAccessException | ClassNotFoundException e) {
+			throw new FlinkRuntimeException("Unable to instantiate the hadoop output format", e);
+		}
+		ReflectionUtils.setConf(outputFormat, clonedConf);
 		OutputCommitter outputCommitter = clonedConf.getOutputCommitter();
 		JobContext jobContext = new JobContextImpl(clonedConf, new JobID());
 		outputCommitter.setupJob(jobContext);
@@ -466,19 +472,28 @@ public class HiveTableOutputFormat extends HadoopOutputFormatCommonBase<Row> imp
 				SequenceFileOutputFormat.setOutputCompressionType(clonedConf, style);
 			}
 		}
-		StorageDescriptor sd = hiveTablePartition.getStorageDescriptor();
 		String taskPartition = String.valueOf(clonedConf.getInt("mapreduce.task.partition", -1));
 		Path taskPath = FileOutputFormat.getTaskOutputPath(clonedConf, taskPartition);
-		FileSinkOperator.RecordWriter recordWriter = hiveShim.getHiveRecordWriter(
-				clonedConf, sd.getOutputFormat(), outputClass, isCompressed, tableProperties, taskPath);
-		return new HivePartitionWriter(recordWriter, outputCommitter);
+		FileSinkOperator.RecordWriter recordWriter;
+		try {
+			recordWriter = HiveFileFormatUtils.getRecordWriter(clonedConf, outputFormat,
+				outputClass, isCompressed, tableProperties, taskPath, Reporter.NULL);
+		} catch (HiveException e) {
+			throw new IOException(e);
+		}
+		return new HivePartitionWriter(clonedConf, outputFormat, recordWriter, outputCommitter);
 	}
 
 	private static class HivePartitionWriter {
+		private final JobConf jobConf;
+		private final OutputFormat outputFormat;
 		private final FileSinkOperator.RecordWriter recordWriter;
 		private final OutputCommitter outputCommitter;
 
-		HivePartitionWriter(FileSinkOperator.RecordWriter recordWriter, OutputCommitter outputCommitter) {
+		HivePartitionWriter(JobConf jobConf, OutputFormat outputFormat, FileSinkOperator.RecordWriter recordWriter,
+							OutputCommitter outputCommitter) {
+			this.jobConf = jobConf;
+			this.outputFormat = outputFormat;
 			this.recordWriter = recordWriter;
 			this.outputCommitter = outputCommitter;
 		}

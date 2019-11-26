@@ -34,13 +34,9 @@ import java.util.Set;
  * This class implements a {@link SlotSelectionStrategy} that is based on previous allocations and
  * falls back to using location preference hints if there is no previous allocation.
  */
-public class PreviousAllocationSlotSelectionStrategy implements SlotSelectionStrategy {
+public enum PreviousAllocationSlotSelectionStrategy implements SlotSelectionStrategy {
 
-	private final SlotSelectionStrategy fallbackSlotSelectionStrategy;
-
-	private PreviousAllocationSlotSelectionStrategy(SlotSelectionStrategy fallbackSlotSelectionStrategy) {
-		this.fallbackSlotSelectionStrategy = fallbackSlotSelectionStrategy;
-	}
+	INSTANCE;
 
 	@Override
 	public Optional<SlotInfoAndLocality> selectBestSlotForProfile(
@@ -62,7 +58,7 @@ public class PreviousAllocationSlotSelectionStrategy implements SlotSelectionStr
 		// Second, select based on location preference, excluding blacklisted allocations
 		Set<AllocationID> blackListedAllocations = slotProfile.getPreviousExecutionGraphAllocations();
 		Collection<SlotInfoAndResources> availableAndAllowedSlots = computeWithoutBlacklistedSlots(availableSlots, blackListedAllocations);
-		return fallbackSlotSelectionStrategy.selectBestSlotForProfile(availableAndAllowedSlots, slotProfile);
+		return LocationPreferenceSlotSelectionStrategy.INSTANCE.selectBestSlotForProfile(availableAndAllowedSlots, slotProfile);
 	}
 
 	@Nonnull
@@ -82,13 +78,5 @@ public class PreviousAllocationSlotSelectionStrategy implements SlotSelectionStr
 		}
 
 		return availableAndAllowedSlots;
-	}
-
-	public static PreviousAllocationSlotSelectionStrategy create() {
-		return create(LocationPreferenceSlotSelectionStrategy.createDefault());
-	}
-
-	public static PreviousAllocationSlotSelectionStrategy create(SlotSelectionStrategy fallbackSlotSelectionStrategy) {
-		return new PreviousAllocationSlotSelectionStrategy(fallbackSlotSelectionStrategy);
 	}
 }

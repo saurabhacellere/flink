@@ -20,13 +20,12 @@ package org.apache.flink.table.client.gateway.local;
 
 import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.Utils;
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.sinks.BatchTableSink;
 import org.apache.flink.table.sinks.OutputFormatTableSink;
-import org.apache.flink.table.types.DataType;
 import org.apache.flink.types.Row;
 
 /**
@@ -36,12 +35,13 @@ public class CollectBatchTableSink extends OutputFormatTableSink<Row> implements
 
 	private final String accumulatorName;
 	private final TypeSerializer<Row> serializer;
-	private final TableSchema tableSchema;
 
-	public CollectBatchTableSink(String accumulatorName, TypeSerializer<Row> serializer, TableSchema tableSchema) {
+	private String[] fieldNames;
+	private TypeInformation<?>[] fieldTypes;
+
+	public CollectBatchTableSink(String accumulatorName, TypeSerializer<Row> serializer) {
 		this.accumulatorName = accumulatorName;
 		this.serializer = serializer;
-		this.tableSchema = tableSchema;
 	}
 
 	/**
@@ -52,18 +52,26 @@ public class CollectBatchTableSink extends OutputFormatTableSink<Row> implements
 	}
 
 	@Override
-	public DataType getConsumedDataType() {
-		return getTableSchema().toRowDataType();
+	public TypeInformation<Row> getOutputType() {
+		return Types.ROW_NAMED(fieldNames, fieldTypes);
 	}
 
 	@Override
-	public TableSchema getTableSchema() {
-		return tableSchema;
+	public String[] getFieldNames() {
+		return fieldNames;
+	}
+
+	@Override
+	public TypeInformation<?>[] getFieldTypes() {
+		return fieldTypes;
 	}
 
 	@Override
 	public CollectBatchTableSink configure(String[] fieldNames, TypeInformation<?>[] fieldTypes) {
-		return new CollectBatchTableSink(accumulatorName, serializer, tableSchema);
+		final CollectBatchTableSink copy = new CollectBatchTableSink(accumulatorName, serializer);
+		copy.fieldNames = fieldNames;
+		copy.fieldTypes = fieldTypes;
+		return copy;
 	}
 
 	@Override

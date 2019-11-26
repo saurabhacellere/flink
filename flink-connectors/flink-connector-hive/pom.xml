@@ -26,7 +26,7 @@ under the License.
 	<parent>
 		<groupId>org.apache.flink</groupId>
 		<artifactId>flink-connectors</artifactId>
-		<version>1.10-SNAPSHOT</version>
+		<version>1.9.0</version>
 		<relativePath>..</relativePath>
 	</parent>
 
@@ -113,6 +113,10 @@ under the License.
 				<exclusion>
 					<groupId>commons-lang</groupId>
 					<artifactId>commons-lang</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>com.zaxxer</groupId>
+					<artifactId>HikariCP</artifactId>
 				</exclusion>
 				<exclusion>
 					<groupId>co.cask.tephra</groupId>
@@ -416,10 +420,6 @@ under the License.
 					<artifactId>hive-hcatalog-core</artifactId>
 				</exclusion>
 				<exclusion>
-					<groupId>org.apache.hive.hcatalog</groupId>
-					<artifactId>hive-webhcat-java-client</artifactId>
-				</exclusion>
-				<exclusion>
 					<groupId>org.apache.tez</groupId>
 					<artifactId>tez-common</artifactId>
 				</exclusion>
@@ -512,7 +512,7 @@ under the License.
 					<artifactId>guava</artifactId>
 				</exclusion>
 				<exclusion>
-					<!-- This dependency is no longer shipped with the JDK since Java 9.-->
+					<!-- This dependency is not available with java 9.-->
 					<groupId>jdk.tools</groupId>
 					<artifactId>jdk.tools</artifactId>
 				</exclusion>
@@ -605,19 +605,8 @@ under the License.
 					<artifactId>hadoop-mapreduce-client-core</artifactId>
 					<groupId>org.apache.hadoop</groupId>
 				</exclusion>
-				<exclusion>
-					<groupId>org.apache.hadoop</groupId>
-					<artifactId>hadoop-yarn-server-resourcemanager</artifactId>
-				</exclusion>
             </exclusions>
         </dependency>
-
-		<dependency>
-			<groupId>org.apache.hive.hcatalog</groupId>
-			<artifactId>hive-webhcat-java-client</artifactId>
-			<version>${hive.version}</version>
-			<scope>test</scope>
-		</dependency>
 
 		<!-- TODO: move to flink-connector-hive-test end-to-end test module once it's setup -->
 		<dependency>
@@ -627,14 +616,7 @@ under the License.
 			<scope>test</scope>
 		</dependency>
 
-		<dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-test-utils_${scala.binary.version}</artifactId>
-            <version>${project.version}</version>
-			<scope>test</scope>
-        </dependency>
-
-    </dependencies>
+	</dependencies>
 
 	<build>
 		<plugins>
@@ -646,6 +628,35 @@ under the License.
 						<goals>
 							<goal>test-jar</goal>
 						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-shade-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>shade-flink</id>
+						<phase>package</phase>
+						<goals>
+							<goal>shade</goal>
+						</goals>
+						<configuration>
+							<shadeTestJar>false</shadeTestJar>
+							<artifactSet>
+								<includes>
+									<include>*:*</include>
+								</includes>
+							</artifactSet>
+							<promoteTransitiveDependencies>true</promoteTransitiveDependencies>
+							<!-- DO NOT RELOCATE GUAVA IN THIS PACKAGE -->
+							<filters>
+								<filter>
+									<artifact>*:*</artifact>
+								</filter>
+							</filters>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>
@@ -666,24 +677,7 @@ under the License.
 	</build>
 
 	<profiles>
-		<!-- Activate these profiles with -Phive-x.x.x to build and test against different Hive versions -->
-		<profile>
-			<id>hive-1.0.1</id>
-			<properties>
-				<hive.version>1.0.1</hive.version>
-				<hivemetastore.hadoop.version>2.6.5</hivemetastore.hadoop.version>
-				<hiverunner.version>3.1.1</hiverunner.version>
-			</properties>
-		</profile>
-		<profile>
-			<!-- Hive-1.1.1 has issue that it can't handle 'stored as file_format' syntax. So test against 1.1.0 -->
-			<id>hive-1.1.0</id>
-			<properties>
-				<hive.version>1.1.0</hive.version>
-				<hivemetastore.hadoop.version>2.6.5</hivemetastore.hadoop.version>
-				<hiverunner.version>3.1.1</hiverunner.version>
-			</properties>
-		</profile>
+		<!-- Activate this profile with -Phive-1.2.1 to build and test against hive-1.2.1 -->
 		<profile>
 			<id>hive-1.2.1</id>
 			<properties>
@@ -691,31 +685,6 @@ under the License.
 				<hivemetastore.hadoop.version>2.6.5</hivemetastore.hadoop.version>
 				<hiverunner.version>3.2.1</hiverunner.version>
 			</properties>
-		</profile>
-		<profile>
-			<id>hive-2.0.0</id>
-			<properties>
-				<hive.version>2.0.0</hive.version>
-			</properties>
-		</profile>
-		<profile>
-			<id>hive-2.1.1</id>
-			<properties>
-				<hive.version>2.1.1</hive.version>
-			</properties>
-		</profile>
-		<profile>
-			<id>hive-2.2.0</id>
-			<properties>
-				<hive.version>2.2.0</hive.version>
-			</properties>
-		</profile>
-		<profile>
-			<id>hive-3.1.1</id>
-			<properties>
-				<hive.version>3.1.1</hive.version>
-			</properties>
-
 		</profile>
 		<profile>
 			<id>skip-hive-tests</id>
@@ -732,9 +701,9 @@ under the License.
 			</build>
 		</profile>
 		<profile>
-			<id>java11</id>
+			<id>java9</id>
 			<activation>
-				<jdk>11</jdk>
+				<jdk>9</jdk>
 			</activation>
 
 			<build>
@@ -743,7 +712,7 @@ under the License.
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-surefire-plugin</artifactId>
 						<configuration>
-							<!-- hive does not support Java 11 -->
+							<!-- hive does not support Java 9 -->
 							<skip>true</skip>
 						</configuration>
 					</plugin>

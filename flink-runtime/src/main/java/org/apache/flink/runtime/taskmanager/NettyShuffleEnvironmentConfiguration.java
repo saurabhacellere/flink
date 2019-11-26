@@ -231,8 +231,8 @@ public class NettyShuffleEnvironmentConfiguration {
 	 *
 	 * <p>The following configuration parameters are involved:
 	 * <ul>
-	 *  <li>{@link TaskManagerOptions#LEGACY_MANAGED_MEMORY_SIZE},</li>
-	 *  <li>{@link TaskManagerOptions#LEGACY_MANAGED_MEMORY_FRACTION},</li>
+	 *  <li>{@link TaskManagerOptions#MANAGED_MEMORY_SIZE},</li>
+	 *  <li>{@link TaskManagerOptions#MANAGED_MEMORY_FRACTION},</li>
 	 *  <li>{@link NettyShuffleEnvironmentOptions#NETWORK_BUFFERS_MEMORY_FRACTION},</li>
 	 * 	<li>{@link NettyShuffleEnvironmentOptions#NETWORK_BUFFERS_MEMORY_MIN},</li>
 	 * 	<li>{@link NettyShuffleEnvironmentOptions#NETWORK_BUFFERS_MEMORY_MAX}, and</li>
@@ -248,40 +248,32 @@ public class NettyShuffleEnvironmentConfiguration {
 	public static long calculateNewNetworkBufferMemory(Configuration config, long maxJvmHeapMemory) {
 		// The maximum heap memory has been adjusted as in TaskManagerServices#calculateHeapSizeMB
 		// and we need to invert these calculations.
-		final long heapAndManagedMemory;
+		final long jvmHeapNoNet;
 		final MemoryType memoryType = ConfigurationParserUtils.getMemoryType(config);
 		if (memoryType == MemoryType.HEAP) {
-			heapAndManagedMemory = maxJvmHeapMemory;
+			jvmHeapNoNet = maxJvmHeapMemory;
 		} else if (memoryType == MemoryType.OFF_HEAP) {
 			long configuredMemory = ConfigurationParserUtils.getManagedMemorySize(config) << 20; // megabytes to bytes
 			if (configuredMemory > 0) {
 				// The maximum heap memory has been adjusted according to configuredMemory, i.e.
 				// maxJvmHeap = jvmHeapNoNet - configuredMemory
-				heapAndManagedMemory = maxJvmHeapMemory + configuredMemory;
+				jvmHeapNoNet = maxJvmHeapMemory + configuredMemory;
 			} else {
 				// The maximum heap memory has been adjusted according to the fraction, i.e.
 				// maxJvmHeap = jvmHeapNoNet - jvmHeapNoNet * managedFraction = jvmHeapNoNet * (1 - managedFraction)
-				heapAndManagedMemory = (long) (maxJvmHeapMemory / (1.0 - ConfigurationParserUtils.getManagedMemoryFraction(config)));
+				jvmHeapNoNet = (long) (maxJvmHeapMemory / (1.0 - ConfigurationParserUtils.getManagedMemoryFraction(config)));
 			}
 		} else {
 			throw new RuntimeException("No supported memory type detected.");
 		}
 
 		// finally extract the network buffer memory size again from:
-		// heapAndManagedMemory = totalProcessMemory - networkReservedMemory
-		//                      = totalProcessMemory - Math.min(networkBufMax, Math.max(networkBufMin, totalProcessMemory * networkBufFraction)
-		// totalProcessMemory = heapAndManagedMemory / (1.0 - networkBufFraction)
+		// jvmHeapNoNet = jvmHeap - networkBufBytes
+		//              = jvmHeap - Math.min(networkBufMax, Math.max(networkBufMin, jvmHeap * netFraction)
+		// jvmHeap = jvmHeapNoNet / (1.0 - networkBufFraction)
 		float networkBufFraction = config.getFloat(NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_FRACTION);
-
-		// Converts to double for higher precision. Converting via string achieve higher precision for those
-		// numbers can not be represented preciously by float, like 0.4f.
-		double heapAndManagedFraction = 1.0 - Double.valueOf(Float.toString(networkBufFraction));
-		long totalProcessMemory = (long) (heapAndManagedMemory / heapAndManagedFraction);
-		long networkMemoryByFraction = (long) (totalProcessMemory * networkBufFraction);
-
-		// Do not need to check the maximum allowed memory since the computed total memory should always
-		// be larger than the computed network buffer memory as long as the fraction is less than 1.
-		return calculateNewNetworkBufferMemory(config, networkMemoryByFraction, Long.MAX_VALUE);
+		long networkBufSize = (long) (jvmHeapNoNet / (1.0 - networkBufFraction) * networkBufFraction);
+		return calculateNewNetworkBufferMemory(config, networkBufSize, maxJvmHeapMemory);
 	}
 
 	/**
@@ -296,34 +288,34 @@ public class NettyShuffleEnvironmentConfiguration {
 	 *  <li>{@link NettyShuffleEnvironmentOptions#NETWORK_NUM_BUFFERS} (fallback if the ones above do not exist)</li>
 	 * </ul>.
 	 *
-	 * @param totalProcessMemory overall available memory to use (in bytes)
+	 * @param totalJavaMemorySize overall available memory to use (in bytes)
 	 * @param config configuration object
 	 *
 	 * @return memory to use for network buffers (in bytes)
 	 */
 	@SuppressWarnings("deprecation")
-	public static long calculateNetworkBufferMemory(long totalProcessMemory, Configuration config) {
+	public static long calculateNetworkBufferMemory(long totalJavaMemorySize, Configuration config) {
 		final int segmentSize = ConfigurationParserUtils.getPageSize(config);
 
-		final long networkReservedMemory;
+		final long networkBufBytes;
 		if (hasNewNetworkConfig(config)) {
 			float networkBufFraction = config.getFloat(NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_FRACTION);
-			long networkMemoryByFraction = (long) (totalProcessMemory * networkBufFraction);
-			networkReservedMemory = calculateNewNetworkBufferMemory(config, networkMemoryByFraction, totalProcessMemory);
+			long networkBufSize = (long) (totalJavaMemorySize * networkBufFraction);
+			networkBufBytes = calculateNewNetworkBufferMemory(config, networkBufSize, totalJavaMemorySize);
 		} else {
 			// use old (deprecated) network buffers parameter
 			int numNetworkBuffers = config.getInteger(NettyShuffleEnvironmentOptions.NETWORK_NUM_BUFFERS);
-			networkReservedMemory = (long) numNetworkBuffers * (long) segmentSize;
+			networkBufBytes = (long) numNetworkBuffers * (long) segmentSize;
 
 			checkOldNetworkConfig(numNetworkBuffers);
 
-			ConfigurationParserUtils.checkConfigParameter(networkReservedMemory < totalProcessMemory,
-				networkReservedMemory, NettyShuffleEnvironmentOptions.NETWORK_NUM_BUFFERS.key(),
-				"Network buffer memory size too large: " + networkReservedMemory + " >= " +
-					totalProcessMemory + " (total JVM memory size)");
+			ConfigurationParserUtils.checkConfigParameter(networkBufBytes < totalJavaMemorySize,
+				networkBufBytes, NettyShuffleEnvironmentOptions.NETWORK_NUM_BUFFERS.key(),
+				"Network buffer memory size too large: " + networkBufBytes + " >= " +
+					totalJavaMemorySize + " (total JVM memory size)");
 		}
 
-		return networkReservedMemory;
+		return networkBufBytes;
 	}
 
 	/**
@@ -338,12 +330,12 @@ public class NettyShuffleEnvironmentConfiguration {
 	 * </ul>.
 	 *
 	 * @param config configuration object
-	 * @param networkMemoryByFraction memory of network buffers based on JVM memory size and network fraction
-	 * @param maxAllowedMemory maximum memory used for checking the results of network memory
+	 * @param networkBufSize memory of network buffers based on JVM memory size and network fraction
+	 * @param maxJvmHeapMemory maximum memory used for checking the results of network memory
 	 *
 	 * @return memory to use for network buffers (in bytes)
 	 */
-	private static long calculateNewNetworkBufferMemory(Configuration config, long networkMemoryByFraction, long maxAllowedMemory) {
+	private static long calculateNewNetworkBufferMemory(Configuration config, long networkBufSize, long maxJvmHeapMemory) {
 		float networkBufFraction = config.getFloat(NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_FRACTION);
 		long networkBufMin = MemorySize.parse(config.getString(NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_MIN)).getBytes();
 		long networkBufMax = MemorySize.parse(config.getString(NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_MAX)).getBytes();
@@ -352,15 +344,15 @@ public class NettyShuffleEnvironmentConfiguration {
 
 		checkNewNetworkConfig(pageSize, networkBufFraction, networkBufMin, networkBufMax);
 
-		long networkBufBytes = Math.min(networkBufMax, Math.max(networkBufMin, networkMemoryByFraction));
+		long networkBufBytes = Math.min(networkBufMax, Math.max(networkBufMin, networkBufSize));
 
-		ConfigurationParserUtils.checkConfigParameter(networkBufBytes < maxAllowedMemory,
+		ConfigurationParserUtils.checkConfigParameter(networkBufBytes < maxJvmHeapMemory,
 			"(" + networkBufFraction + ", " + networkBufMin + ", " + networkBufMax + ")",
 			"(" + NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_FRACTION.key() + ", " +
 				NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_MIN.key() + ", " +
 				NettyShuffleEnvironmentOptions.NETWORK_BUFFERS_MEMORY_MAX.key() + ")",
 			"Network buffer memory size too large: " + networkBufBytes + " >= " +
-				maxAllowedMemory + " (maximum JVM memory size)");
+				maxJvmHeapMemory + " (maximum JVM memory size)");
 
 		return networkBufBytes;
 	}

@@ -17,31 +17,48 @@
 
 package org.apache.flink.runtime.io.network.partition;
 
+import org.apache.flink.runtime.clusterframework.types.ResourceID;
+import org.apache.flink.runtime.deployment.ResultPartitionDeploymentDescriptor;
+
 import java.util.Collection;
 
 /**
- * Utility for tracking partitions.
- *
- * <p>This interface deliberately does not have a method to start tracking partitions, so that implementation are
- * flexible in their definitions for this method (otherwise one would end up with multiple methods, with one part likely
- * being unused).
+ * Utility for tracking partitions and issuing release calls to task executors and shuffle masters.
  */
-public interface PartitionTracker<K, M> {
+public interface PartitionTracker {
 
 	/**
-	 * Stops the tracking of all partitions for the given key.
+	 * Starts the tracking of the given partition for the given task executor ID.
+	 *
+	 * @param producingTaskExecutorId ID of task executor on which the partition is produced
+	 * @param resultPartitionDeploymentDescriptor deployment descriptor of the partition
 	 */
-	Collection<PartitionTrackerEntry<K, M>> stopTrackingPartitionsFor(K key);
+	void startTrackingPartition(ResourceID producingTaskExecutorId, ResultPartitionDeploymentDescriptor resultPartitionDeploymentDescriptor);
+
+	/**
+	 * Stops the tracking of all partitions for the given task executor ID, without issuing any release calls.
+	 */
+	void stopTrackingPartitionsFor(ResourceID producingTaskExecutorId);
+
+	/**
+	 * Releases the given partitions and stop the tracking of partitions that were released.
+	 */
+	void stopTrackingAndReleasePartitions(Collection<ResultPartitionID> resultPartitionIds);
 
 	/**
 	 * Stops the tracking of the given partitions.
 	 */
-	Collection<PartitionTrackerEntry<K, M>> stopTrackingPartitions(Collection<ResultPartitionID> resultPartitionIds);
+	void stopTrackingPartitions(Collection<ResultPartitionID> resultPartitionIds);
 
 	/**
-	 * Returns whether any partition is being tracked for the given key.
+	 * Releases all partitions for the given task executor ID, and stop the tracking of partitions that were released.
 	 */
-	boolean isTrackingPartitionsFor(K key);
+	void stopTrackingAndReleasePartitionsFor(ResourceID producingTaskExecutorId);
+
+	/**
+	 * Returns whether any partition is being tracked for the given task executor ID.
+	 */
+	boolean isTrackingPartitionsFor(ResourceID producingTaskExecutorId);
 
 	/**
 	 * Returns whether the given partition is being tracked.

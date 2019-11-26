@@ -24,6 +24,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.runtime.state.InternalPriorityQueue;
 import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.KeyGroupedInternalPriorityQueue;
+import org.apache.flink.streaming.runtime.tasks.ProcessingTimeCallback;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.FlinkRuntimeException;
@@ -42,7 +43,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /**
  * {@link InternalTimerService} that stores timers on the Java heap.
  */
-public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
+public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N>, ProcessingTimeCallback {
 
 	private final ProcessingTimeService processingTimeService;
 
@@ -174,7 +175,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 			// re-register the restored timers (if any)
 			final InternalTimer<K, N> headTimer = processingTimeTimersQueue.peek();
 			if (headTimer != null) {
-				nextTimer = processingTimeService.registerTimer(headTimer.getTimestamp(), this::onProcessingTime);
+				nextTimer = processingTimeService.registerTimer(headTimer.getTimestamp(), this);
 			}
 			this.isInitialized = true;
 		} else {
@@ -205,7 +206,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 				if (nextTimer != null) {
 					nextTimer.cancel(false);
 				}
-				nextTimer = processingTimeService.registerTimer(time, this::onProcessingTime);
+				nextTimer = processingTimeService.registerTimer(time, this);
 			}
 		}
 	}
@@ -245,7 +246,8 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 		}
 	}
 
-	private void onProcessingTime(long time) throws Exception {
+	@Override
+	public void onProcessingTime(long time) throws Exception {
 		// null out the timer in case the Triggerable calls registerProcessingTimeTimer()
 		// inside the callback.
 		nextTimer = null;
@@ -259,7 +261,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 		}
 
 		if (timer != null && nextTimer == null) {
-			nextTimer = processingTimeService.registerTimer(timer.getTimestamp(), this::onProcessingTime);
+			nextTimer = processingTimeService.registerTimer(timer.getTimestamp(), this);
 		}
 	}
 

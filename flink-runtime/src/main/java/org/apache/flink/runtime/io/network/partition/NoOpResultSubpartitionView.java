@@ -39,6 +39,10 @@ public class NoOpResultSubpartitionView implements ResultSubpartitionView {
 	}
 
 	@Override
+	public void notifySubpartitionConsumed() {
+	}
+
+	@Override
 	public boolean isReleased() {
 		return true;
 	}

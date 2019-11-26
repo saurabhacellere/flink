@@ -68,10 +68,6 @@ public final class ObjectIdentifier implements Serializable {
 		return objectName;
 	}
 
-	public ObjectPath toObjectPath() {
-		return new ObjectPath(databaseName, objectName);
-	}
-
 	/**
 	 * Returns a string that fully serializes this instance. The serialized string can be used for
 	 * transmitting or persisting an object identifier.
@@ -82,13 +78,6 @@ public final class ObjectIdentifier implements Serializable {
 			escapeIdentifier(catalogName),
 			escapeIdentifier(databaseName),
 			escapeIdentifier(objectName));
-	}
-
-	/**
-	 * Returns a string that summarizes this instance for printing to a console or log.
-	 */
-	public String asSummaryString() {
-		return String.join(".", catalogName, databaseName, objectName);
 	}
 
 	@Override

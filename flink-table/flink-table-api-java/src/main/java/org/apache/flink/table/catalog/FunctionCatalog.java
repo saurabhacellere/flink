@@ -21,15 +21,14 @@ package org.apache.flink.table.catalog;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.table.api.TableException;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.table.delegation.PlannerTypeInferenceUtil;
+import org.apache.flink.table.factories.FunctionDefinitionFactory;
 import org.apache.flink.table.functions.AggregateFunction;
 import org.apache.flink.table.functions.AggregateFunctionDefinition;
+import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
 import org.apache.flink.table.functions.FunctionDefinition;
-import org.apache.flink.table.functions.FunctionDefinitionUtil;
-import org.apache.flink.table.functions.FunctionIdentifier;
 import org.apache.flink.table.functions.ScalarFunction;
 import org.apache.flink.table.functions.ScalarFunctionDefinition;
 import org.apache.flink.table.functions.TableAggregateFunction;
@@ -38,14 +37,14 @@ import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.functions.TableFunctionDefinition;
 import org.apache.flink.table.functions.UserDefinedAggregateFunction;
 import org.apache.flink.table.functions.UserFunctionsTypeHelper;
-import org.apache.flink.table.module.ModuleManager;
 import org.apache.flink.util.Preconditions;
 
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -57,34 +56,33 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class FunctionCatalog implements FunctionLookup {
 
 	private final CatalogManager catalogManager;
-	private final ModuleManager moduleManager;
 
-	private final Map<String, FunctionDefinition> tempSystemFunctions = new LinkedHashMap<>();
-	private final Map<ObjectIdentifier, FunctionDefinition> tempCatalogFunctions = new LinkedHashMap<>();
+	// For simplicity, currently hold registered Flink functions in memory here
+	// TODO: should move to catalog
+	private final Map<String, FunctionDefinition> userFunctions = new LinkedHashMap<>();
 
 	/**
 	 * Temporary utility until the new type inference is fully functional. It needs to be set by the planner.
 	 */
 	private PlannerTypeInferenceUtil plannerTypeInferenceUtil;
 
-	public FunctionCatalog(CatalogManager catalogManager, ModuleManager moduleManager) {
+	public FunctionCatalog(CatalogManager catalogManager) {
 		this.catalogManager = checkNotNull(catalogManager);
-		this.moduleManager = checkNotNull(moduleManager);
 	}
 
 	public void setPlannerTypeInferenceUtil(PlannerTypeInferenceUtil plannerTypeInferenceUtil) {
 		this.plannerTypeInferenceUtil = plannerTypeInferenceUtil;
 	}
 
-	public void registerTempSystemScalarFunction(String name, ScalarFunction function) {
+	public void registerScalarFunction(String name, ScalarFunction function) {
 		UserFunctionsTypeHelper.validateInstantiation(function.getClass());
-		registerTempSystemFunction(
+		registerFunction(
 			name,
 			new ScalarFunctionDefinition(name, function)
 		);
 	}
 
-	public <T> void registerTempSystemTableFunction(
+	public <T> void registerTableFunction(
 			String name,
 			TableFunction<T> function,
 			TypeInformation<T> resultType) {
@@ -93,7 +91,7 @@ public class FunctionCatalog implements FunctionLookup {
 		// check if class could be instantiated
 		UserFunctionsTypeHelper.validateInstantiation(function.getClass());
 
-		registerTempSystemFunction(
+		registerFunction(
 			name,
 			new TableFunctionDefinition(
 				name,
@@ -102,7 +100,7 @@ public class FunctionCatalog implements FunctionLookup {
 		);
 	}
 
-	public <T, ACC> void registerTempSystemAggregateFunction(
+	public <T, ACC> void registerAggregateFunction(
 			String name,
 			UserDefinedAggregateFunction<T, ACC> function,
 			TypeInformation<T> resultType,
@@ -129,236 +127,93 @@ public class FunctionCatalog implements FunctionLookup {
 			throw new TableException("Unknown function class: " + function.getClass());
 		}
 
-		registerTempSystemFunction(
+		registerFunction(
 			name,
 			definition
 		);
 	}
 
-	public void registerTempCatalogScalarFunction(ObjectIdentifier oi, ScalarFunction function) {
-		UserFunctionsTypeHelper.validateInstantiation(function.getClass());
-		registerTempCatalogFunction(
-			oi,
-			new ScalarFunctionDefinition(oi.getObjectName(), function)
-		);
-	}
-
-	public <T> void registerTempCatalogTableFunction(
-			ObjectIdentifier oi,
-			TableFunction<T> function,
-			TypeInformation<T> resultType) {
-		// check if class not Scala object
-		UserFunctionsTypeHelper.validateNotSingleton(function.getClass());
-		// check if class could be instantiated
-		UserFunctionsTypeHelper.validateInstantiation(function.getClass());
-
-		registerTempCatalogFunction(
-			oi,
-			new TableFunctionDefinition(
-				oi.getObjectName(),
-				function,
-				resultType)
-		);
-	}
-
-	public <T, ACC> void registerTempCatalogAggregateFunction(
-			ObjectIdentifier oi,
-			UserDefinedAggregateFunction<T, ACC> function,
-			TypeInformation<T> resultType,
-			TypeInformation<ACC> accType) {
-		// check if class not Scala object
-		UserFunctionsTypeHelper.validateNotSingleton(function.getClass());
-		// check if class could be instantiated
-		UserFunctionsTypeHelper.validateInstantiation(function.getClass());
-
-		final FunctionDefinition definition;
-		if (function instanceof AggregateFunction) {
-			definition = new AggregateFunctionDefinition(
-				oi.getObjectName(),
-				(AggregateFunction<?, ?>) function,
-				resultType,
-				accType);
-		} else if (function instanceof TableAggregateFunction) {
-			definition = new TableAggregateFunctionDefinition(
-				oi.getObjectName(),
-				(TableAggregateFunction<?, ?>) function,
-				resultType,
-				accType);
-		} else {
-			throw new TableException("Unknown function class: " + function.getClass());
-		}
-
-		registerTempCatalogFunction(
-			oi,
-			definition
-		);
-	}
-
-	/**
-	 * Drop a temporary system function.
-	 *
-	 * @param funcName name of the function
-	 * @param ignoreIfNotExist Flag to specify behavior when the function does not exist:
-	 *                         if set to false, throw an exception,
-	 *                         if set to true, do nothing.
-	 */
-	public void dropTempSystemFunction(String funcName, boolean ignoreIfNotExist) {
-		String normalizedName = FunctionIdentifier.normalizeName(funcName);
-
-		FunctionDefinition fd = tempSystemFunctions.remove(normalizedName);
-
-		if (fd == null && !ignoreIfNotExist) {
-			throw new ValidationException(String.format("Temporary system function %s doesn't exist", funcName));
-		}
-	}
-
-	/**
-	 * Drop a temporary catalog function.
-	 *
-	 * @param identifier identifier of the function
-	 * @param ignoreIfNotExist Flag to specify behavior when the function does not exist:
-	 *                         if set to false, throw an exception,
-	 *                         if set to true, do nothing.
-	 */
-	public void dropTempCatalogFunction(ObjectIdentifier identifier, boolean ignoreIfNotExist) {
-		ObjectIdentifier normalizedName = FunctionIdentifier.normalizeObjectIdentifier(identifier);
-
-		FunctionDefinition fd = tempCatalogFunctions.remove(normalizedName);
-
-		if (fd == null && !ignoreIfNotExist) {
-			throw new ValidationException(String.format("Temporary catalog function %s doesn't exist", identifier));
-		}
-	}
-
-	/**
-	 * Get names of all user defined functions, including temp system functions, temp catalog functions and catalog functions
-	 * in the current catalog and current database.
-	 */
 	public String[] getUserDefinedFunctions() {
-		return getUserDefinedFunctionNames().toArray(new String[0]);
-	}
+		List<String> result = new ArrayList<>();
 
-	/**
-	 * Get names of all functions, including temp system functions, system functions, temp catalog functions and catalog functions
-	 * in the current catalog and current database.
-	 */
-	public String[] getFunctions() {
-		Set<String> result = getUserDefinedFunctionNames();
-
-		// add system functions
-		result.addAll(moduleManager.listFunctions());
-
-		return result.toArray(new String[0]);
-	}
-
-	private Set<String> getUserDefinedFunctionNames() {
-
-		// add temp system functions
-		Set<String> result = new HashSet<>(tempSystemFunctions.keySet());
-
-		String currentCatalog = catalogManager.getCurrentCatalog();
-		String currentDatabase = catalogManager.getCurrentDatabase();
-
-		// add temp catalog functions
-		result.addAll(tempCatalogFunctions.keySet().stream()
-			.filter(oi -> oi.getCatalogName().equals(currentCatalog)
-				&& oi.getDatabaseName().equals(currentDatabase))
-			.map(ObjectIdentifier::getObjectName)
-			.collect(Collectors.toSet())
-		);
-
-		// add catalog functions
-		Catalog catalog = catalogManager.getCatalog(currentCatalog).get();
+		// Get functions in catalog
+		Catalog catalog = catalogManager.getCatalog(catalogManager.getCurrentCatalog()).get();
 		try {
-			result.addAll(catalog.listFunctions(currentDatabase));
+			result.addAll(catalog.listFunctions(catalogManager.getCurrentDatabase()));
 		} catch (DatabaseNotExistException e) {
 			// Ignore since there will always be a current database of the current catalog
 		}
 
-		return result;
+		// Get functions registered in memory
+		result.addAll(
+			userFunctions.values().stream()
+				.map(FunctionDefinition::toString)
+				.collect(Collectors.toList()));
+
+		return result.toArray(new String[0]);
 	}
 
 	@Override
-	public Optional<FunctionLookup.Result> lookupFunction(UnresolvedIdentifier identifier) {
-		// precise function reference
-		if (identifier.getDatabaseName().isPresent()) {
-			return resolvePreciseFunctionReference(catalogManager.qualifyIdentifier(identifier));
-		} else {
-			// ambiguous function reference
-			return resolveAmbiguousFunctionReference(identifier.getObjectName());
-		}
-	}
+	public Optional<FunctionLookup.Result> lookupFunction(String name) {
+		String functionName = normalizeName(name);
 
-	private Optional<FunctionLookup.Result> resolvePreciseFunctionReference(ObjectIdentifier oi) {
-		// resolve order:
-		// 1. Temporary functions
-		// 2. Catalog functions
-		ObjectIdentifier normalizedIdentifier = FunctionIdentifier.normalizeObjectIdentifier(oi);
-		FunctionDefinition potentialResult = tempCatalogFunctions.get(normalizedIdentifier);
+		FunctionDefinition userCandidate;
 
-		if (potentialResult != null) {
-			return Optional.of(
-				new FunctionLookup.Result(
-					FunctionIdentifier.of(oi),
-					potentialResult
-				)
-			);
-		}
+		Catalog catalog = catalogManager.getCatalog(catalogManager.getCurrentCatalog()).get();
 
-		Optional<Catalog> catalogOptional = catalogManager.getCatalog(oi.getCatalogName());
+		try {
+			CatalogFunction catalogFunction = catalog.getFunction(
+				new ObjectPath(catalogManager.getCurrentDatabase(), functionName));
 
-		if (catalogOptional.isPresent()) {
-			Catalog catalog = catalogOptional.get();
-			try {
-				CatalogFunction catalogFunction = catalog.getFunction(
-					new ObjectPath(oi.getDatabaseName(), oi.getObjectName()));
+			if (catalog.getTableFactory().isPresent() &&
+				catalog.getTableFactory().get() instanceof FunctionDefinitionFactory) {
 
-				FunctionDefinition fd;
-				if (catalog.getFunctionDefinitionFactory().isPresent()) {
-					fd = catalog.getFunctionDefinitionFactory().get()
-						.createFunctionDefinition(oi.getObjectName(), catalogFunction);
-				} else {
-					fd = FunctionDefinitionUtil.createFunctionDefinition(oi.getObjectName(), catalogFunction);
-				}
+				FunctionDefinitionFactory factory = (FunctionDefinitionFactory) catalog.getTableFactory().get();
+
+				userCandidate = factory.createFunctionDefinition(functionName, catalogFunction);
 
 				return Optional.of(
-					new FunctionLookup.Result(FunctionIdentifier.of(oi), fd));
-			} catch (FunctionNotExistException e) {
-				// Ignore
+					new FunctionLookup.Result(
+						ObjectIdentifier.of(catalogManager.getCurrentCatalog(), catalogManager.getCurrentDatabase(), name),
+						userCandidate)
+				);
+			} else {
+				// TODO: should go through function definition discover service
 			}
+		} catch (FunctionNotExistException e) {
+			// Ignore
 		}
 
-		return Optional.empty();
-	}
+		// If no corresponding function is found in catalog, check in-memory functions
+		userCandidate = userFunctions.get(functionName);
 
-	private Optional<FunctionLookup.Result> resolveAmbiguousFunctionReference(String funcName) {
-		// resolve order:
-		// 1. Temporary system functions
-		// 2. System functions
-		// 3. Temporary catalog functions
-		// 4. Catalog functions
+		final Optional<FunctionDefinition> foundDefinition;
+		if (userCandidate != null) {
+			foundDefinition = Optional.of(userCandidate);
+		} else {
 
-		String normalizedName = FunctionIdentifier.normalizeName(funcName);
-		if (tempSystemFunctions.containsKey(normalizedName)) {
-			return Optional.of(
-				new FunctionLookup.Result(
-					FunctionIdentifier.of(funcName),
-					tempSystemFunctions.get(normalizedName))
-			);
+			// TODO once we connect this class with the Catalog APIs we need to make sure that
+			//  built-in functions are present in "root" built-in catalog. This allows to
+			//  overwrite built-in functions but also fallback to the "root" catalog. It should be
+			//  possible to disable the "root" catalog if that is desired.
+
+			foundDefinition = BuiltInFunctionDefinitions.getDefinitions()
+				.stream()
+				.filter(f -> functionName.equals(normalizeName(f.getName())))
+				.findFirst()
+				.map(Function.identity());
 		}
 
-		Optional<FunctionDefinition> candidate = moduleManager.getFunctionDefinition(normalizedName);
-		ObjectIdentifier oi = ObjectIdentifier.of(
-			catalogManager.getCurrentCatalog(),
-			catalogManager.getCurrentDatabase(),
-			funcName);
-
-		return candidate.map(fd ->
-			Optional.of(new Result(FunctionIdentifier.of(funcName), fd)
-		)).orElseGet(() -> resolvePreciseFunctionReference(oi));
+		return foundDefinition.map(definition -> new FunctionLookup.Result(
+			ObjectIdentifier.of(
+				catalogManager.getBuiltInCatalogName(),
+				catalogManager.getBuiltInDatabaseName(),
+				name),
+			definition)
+		);
 	}
 
-		@Override
+	@Override
 	public PlannerTypeInferenceUtil getPlannerTypeInferenceUtil() {
 		Preconditions.checkNotNull(
 			plannerTypeInferenceUtil,
@@ -366,11 +221,12 @@ public class FunctionCatalog implements FunctionLookup {
 		return plannerTypeInferenceUtil;
 	}
 
-	private void registerTempSystemFunction(String name, FunctionDefinition functionDefinition) {
-		tempSystemFunctions.put(FunctionIdentifier.normalizeName(name), functionDefinition);
+	private void registerFunction(String name, FunctionDefinition functionDefinition) {
+		// TODO: should register to catalog
+		userFunctions.put(normalizeName(name), functionDefinition);
 	}
 
-	private void registerTempCatalogFunction(ObjectIdentifier oi, FunctionDefinition functionDefinition) {
-		tempCatalogFunctions.put(FunctionIdentifier.normalizeObjectIdentifier(oi), functionDefinition);
+	private String normalizeName(String name) {
+		return name.toUpperCase();
 	}
 }

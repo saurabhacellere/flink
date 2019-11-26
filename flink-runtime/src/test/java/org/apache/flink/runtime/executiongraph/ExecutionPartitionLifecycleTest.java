@@ -33,12 +33,13 @@ import org.apache.flink.runtime.concurrent.ComponentMainThreadExecutorServiceAda
 import org.apache.flink.runtime.deployment.ResultPartitionDeploymentDescriptor;
 import org.apache.flink.runtime.executiongraph.restart.NoRestartStrategy;
 import org.apache.flink.runtime.executiongraph.utils.SimpleAckingTaskManagerGateway;
+import org.apache.flink.runtime.instance.SimpleSlot;
 import org.apache.flink.runtime.instance.SlotSharingGroupId;
-import org.apache.flink.runtime.io.network.partition.NoOpJobMasterPartitionTracker;
-import org.apache.flink.runtime.io.network.partition.JobMasterPartitionTracker;
+import org.apache.flink.runtime.io.network.partition.NoOpPartitionTracker;
+import org.apache.flink.runtime.io.network.partition.PartitionTracker;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
-import org.apache.flink.runtime.io.network.partition.TestingJobMasterPartitionTracker;
+import org.apache.flink.runtime.io.network.partition.TestingPartitionTracker;
 import org.apache.flink.runtime.jobgraph.DistributionPattern;
 import org.apache.flink.runtime.jobgraph.IntermediateResultPartitionID;
 import org.apache.flink.runtime.jobgraph.JobGraph;
@@ -50,7 +51,6 @@ import org.apache.flink.runtime.jobmanager.slots.TaskManagerGateway;
 import org.apache.flink.runtime.jobmaster.LogicalSlot;
 import org.apache.flink.runtime.jobmaster.SlotOwner;
 import org.apache.flink.runtime.jobmaster.SlotRequestId;
-import org.apache.flink.runtime.jobmaster.TestingLogicalSlotBuilder;
 import org.apache.flink.runtime.jobmaster.slotpool.SlotProvider;
 import org.apache.flink.runtime.shuffle.NettyShuffleMaster;
 import org.apache.flink.runtime.shuffle.PartitionDescriptor;
@@ -77,7 +77,6 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -120,7 +119,7 @@ public class ExecutionPartitionLifecycleTest extends TestLogger {
 
 		final TestingShuffleMaster testingShuffleMaster = new TestingShuffleMaster();
 
-		setupExecutionGraphAndStartRunningJob(ResultPartitionType.PIPELINED, NoOpJobMasterPartitionTracker.INSTANCE, taskManagerGateway, testingShuffleMaster);
+		setupExecutionGraphAndStartRunningJob(ResultPartitionType.PIPELINED, NoOpPartitionTracker.INSTANCE, taskManagerGateway, testingShuffleMaster);
 
 		stateTransition1.accept(execution);
 		assertFalse(releasePartitionsCallFuture.isDone());
@@ -130,7 +129,7 @@ public class ExecutionPartitionLifecycleTest extends TestLogger {
 
 		final Tuple2<JobID, Collection<ResultPartitionID>> releasePartitionsCall = releasePartitionsCallFuture.get();
 		assertEquals(jobId, releasePartitionsCall.f0);
-		assertThat(releasePartitionsCall.f1, contains(descriptor.getShuffleDescriptor().getResultPartitionID()));
+		assertEquals(Collections.singletonList(descriptor.getShuffleDescriptor().getResultPartitionID()), releasePartitionsCall.f1);
 
 		assertEquals(1, testingShuffleMaster.externallyReleasedPartitions.size());
 		assertEquals(descriptor.getShuffleDescriptor(), testingShuffleMaster.externallyReleasedPartitions.poll());
@@ -188,7 +187,7 @@ public class ExecutionPartitionLifecycleTest extends TestLogger {
 		CompletableFuture<Tuple2<ResourceID, ResultPartitionDeploymentDescriptor>> partitionStartTrackingFuture = new CompletableFuture<>();
 		CompletableFuture<Collection<ResultPartitionID>> partitionStopTrackingFuture = new CompletableFuture<>();
 		CompletableFuture<Collection<ResultPartitionID>> partitionStopTrackingAndReleaseFuture = new CompletableFuture<>();
-		final TestingJobMasterPartitionTracker partitionTracker = new TestingJobMasterPartitionTracker();
+		final TestingPartitionTracker partitionTracker = new TestingPartitionTracker();
 		partitionTracker.setStartTrackingPartitionsConsumer(
 			(resourceID, resultPartitionDeploymentDescriptor) ->
 				partitionStartTrackingFuture.complete(Tuple2.of(resourceID, resultPartitionDeploymentDescriptor))
@@ -224,7 +223,7 @@ public class ExecutionPartitionLifecycleTest extends TestLogger {
 		}
 	}
 
-	private void setupExecutionGraphAndStartRunningJob(ResultPartitionType resultPartitionType, JobMasterPartitionTracker partitionTracker, TaskManagerGateway taskManagerGateway, ShuffleMaster<?> shuffleMaster) throws JobException, JobExecutionException {
+	private void setupExecutionGraphAndStartRunningJob(ResultPartitionType resultPartitionType, PartitionTracker partitionTracker, TaskManagerGateway taskManagerGateway, ShuffleMaster<?> shuffleMaster) throws JobException, JobExecutionException {
 		final JobVertex producerVertex = createNoOpJobVertex();
 		final JobVertex consumerVertex = createNoOpJobVertex();
 		consumerVertex.connectNewDataSetAsInput(producerVertex, DistributionPattern.ALL_TO_ALL, resultPartitionType);
@@ -233,13 +232,12 @@ public class ExecutionPartitionLifecycleTest extends TestLogger {
 
 		final SlotProvider slotProvider = new SlotProvider() {
 			@Override
-			public CompletableFuture<LogicalSlot> allocateSlot(SlotRequestId slotRequestId, ScheduledUnit scheduledUnit, SlotProfile slotProfile, Time allocationTimeout) {
-				return CompletableFuture.completedFuture(
-					new TestingLogicalSlotBuilder()
-						.setTaskManagerLocation(taskManagerLocation)
-						.setTaskManagerGateway(taskManagerGateway)
-						.setSlotOwner(new SingleSlotTestingSlotOwner())
-						.createTestingLogicalSlot());
+			public CompletableFuture<LogicalSlot> allocateSlot(SlotRequestId slotRequestId, ScheduledUnit scheduledUnit, SlotProfile slotProfile, boolean allowQueuedScheduling, Time allocationTimeout) {
+				return CompletableFuture.completedFuture(new SimpleSlot(
+					new SingleSlotTestingSlotOwner(),
+					taskManagerLocation,
+					0,
+					taskManagerGateway));
 			}
 
 			@Override

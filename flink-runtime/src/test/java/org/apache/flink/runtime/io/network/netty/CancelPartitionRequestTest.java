@@ -109,6 +109,7 @@ public class CancelPartitionRequestTest {
 			}
 
 			verify(view, times(1)).releaseAllResources();
+			verify(view, times(1)).notifySubpartitionConsumed();
 		}
 		finally {
 			shutdown(serverAndClient);
@@ -167,6 +168,7 @@ public class CancelPartitionRequestTest {
 			NettyTestUtil.awaitClose(ch);
 
 			verify(view, times(1)).releaseAllResources();
+			verify(view, times(1)).notifySubpartitionConsumed();
 		}
 		finally {
 			shutdown(serverAndClient);
@@ -188,14 +190,10 @@ public class CancelPartitionRequestTest {
 
 		@Nullable
 		@Override
-		public BufferAndBacklog getNextBuffer() throws IOException {
-			Buffer buffer = bufferProvider.requestBuffer();
-			if (buffer != null) {
-				buffer.setSize(buffer.getMaxCapacity()); // fake some data
-				return new BufferAndBacklog(buffer, true, 0, false);
-			} else {
-				return null;
-			}
+		public BufferAndBacklog getNextBuffer() throws IOException, InterruptedException {
+			Buffer buffer = bufferProvider.requestBufferBlocking();
+			buffer.setSize(buffer.getMaxCapacity()); // fake some data
+			return new BufferAndBacklog(buffer, true, 0, false);
 		}
 
 		@Override
@@ -205,6 +203,10 @@ public class CancelPartitionRequestTest {
 		@Override
 		public void releaseAllResources() throws IOException {
 			sync.countDown();
+		}
+
+		@Override
+		public void notifySubpartitionConsumed() throws IOException {
 		}
 
 		@Override

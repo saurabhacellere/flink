@@ -101,10 +101,9 @@ public interface SlotManager extends AutoCloseable {
 	 * from the slot manager.
 	 *
 	 * @param instanceId identifying the task manager to unregister
-	 * @param cause for unregistering the TaskManager
 	 * @return True if there existed a registered task manager with the given instance id
 	 */
-	boolean unregisterTaskManager(InstanceID instanceId, Exception cause);
+	boolean unregisterTaskManager(InstanceID instanceId);
 
 	/**
 	 * Reports the current slot allocations for a task manager identified by the given instance id.

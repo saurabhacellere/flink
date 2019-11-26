@@ -81,6 +81,7 @@ public class SourceTaskTerminationTest extends TestLogger {
 		final StreamTaskTestHarness<Long> srcTaskTestHarness = getSourceStreamTaskTestHarness();
 		final Thread executionThread = srcTaskTestHarness.invoke();
 		final StreamTask<Long, ?> srcTask = srcTaskTestHarness.getTask();
+		final SynchronousSavepointLatch syncSavepointLatch = srcTask.getSynchronousSavepointLatch();
 
 		ready.await();
 
@@ -88,21 +89,27 @@ public class SourceTaskTerminationTest extends TestLogger {
 		emitAndVerifyWatermarkAndElement(srcTaskTestHarness, 1L);
 		emitAndVerifyWatermarkAndElement(srcTaskTestHarness, 2L);
 
-		srcTask.triggerCheckpointAsync(
+		srcTask.triggerCheckpoint(
 				new CheckpointMetaData(31L, 900),
 				CheckpointOptions.forCheckpointWithDefaultLocation(),
-				false)
-				.get();
+				false);
+
+		assertFalse(syncSavepointLatch.isSet());
+		assertFalse(syncSavepointLatch.isCompleted());
+		assertFalse(syncSavepointLatch.isWaiting());
 
 		verifyCheckpointBarrier(srcTaskTestHarness.getOutput(), 31L);
 
 		emitAndVerifyWatermarkAndElement(srcTaskTestHarness, 3L);
 
-		srcTask.triggerCheckpointAsync(
+		srcTask.triggerCheckpoint(
 				new CheckpointMetaData(syncSavepointId, 900),
 				new CheckpointOptions(CheckpointType.SYNC_SAVEPOINT, CheckpointStorageLocationReference.getDefault()),
-				withMaxWatermark)
-				.get();
+				withMaxWatermark);
+
+		assertTrue(syncSavepointLatch.isSet());
+		assertFalse(syncSavepointLatch.isCompleted());
+		assertFalse(syncSavepointLatch.isWaiting());
 
 		if (withMaxWatermark) {
 			// if we are in TERMINATE mode, we expect the source task
@@ -112,12 +119,8 @@ public class SourceTaskTerminationTest extends TestLogger {
 
 		verifyCheckpointBarrier(srcTaskTestHarness.getOutput(), syncSavepointId);
 
-		waitForSynchronousSavepointIdToBeSet(srcTask);
-
-		assertTrue(srcTask.getSynchronousSavepointId().isPresent());
-
-		srcTask.notifyCheckpointCompleteAsync(syncSavepointId).get();
-		assertFalse(srcTask.getSynchronousSavepointId().isPresent());
+		srcTask.notifyCheckpointComplete(syncSavepointId);
+		assertTrue(syncSavepointLatch.isCompleted());
 
 		executionThread.join();
 	}
@@ -137,12 +140,6 @@ public class SourceTaskTerminationTest extends TestLogger {
 		streamConfig.setStreamOperator(sourceOperator);
 		streamConfig.setOperatorID(new OperatorID());
 		return testHarness;
-	}
-
-	private void waitForSynchronousSavepointIdToBeSet(final StreamTask streamTaskUnderTest) throws InterruptedException {
-		while (!streamTaskUnderTest.getSynchronousSavepointId().isPresent()) {
-			Thread.sleep(10L);
-		}
 	}
 
 	private void emitAndVerifyWatermarkAndElement(
