@@ -25,11 +25,11 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The map-like container class for parameter. This class is provided to unify the interaction with
@@ -39,11 +39,6 @@ import java.util.Map;
 public class Params implements Serializable, Cloneable {
 	private static final long serialVersionUID = 1L;
 
-	/**
-	 * A mapping from param name to its value.
-	 *
-	 * <p>The value is stored in map using json format.
-	 */
 	private final Map<String, String> params;
 
 	private transient ObjectMapper mapper;
@@ -52,77 +47,56 @@ public class Params implements Serializable, Cloneable {
 		this.params = new HashMap<>();
 	}
 
-	/**
-	 * Return the number of params.
-	 *
-	 * @return Return the number of params.
-	 */
 	public int size() {
 		return params.size();
 	}
 
-	/**
-	 * Removes all of the params.
-	 * The params will be empty after this call returns.
-	 */
 	public void clear() {
 		params.clear();
 	}
 
-	/**
-	 * Returns <tt>true</tt> if this params contains no mappings.
-	 *
-	 * @return <tt>true</tt> if this map contains no mappings
-	 */
 	public boolean isEmpty() {
 		return params.isEmpty();
 	}
 
 	/**
 	 * Returns the value of the specific parameter, or default value defined in the {@code info} if
-	 * this Params doesn't have a value set for the parameter. An exception will be thrown in the
-	 * following cases because no value could be found for the specified parameter.
-	 * <ul>
-	 *     <li>
-	 *         Non-optional parameter: no value is defined in this params for a non-optional parameter.
-	 *     </li>
-	 *     <li>
-	 *         Optional parameter: no value is defined in this params and no default value is defined.
-	 *     </li>
-	 * </ul>
+	 * this Params doesn't contain the param.
 	 *
 	 * @param info the info of the specific parameter, usually with default value
 	 * @param <V>  the type of the specific parameter
 	 * @return the value of the specific parameter, or default value defined in the {@code info} if
 	 * this Params doesn't contain the parameter
-	 * @throws IllegalArgumentException if no value can be found for specified parameter
+	 * @throws RuntimeException if the Params doesn't contains the specific parameter, while the
+	 *                          param is not optional but has no default value in the {@code info}
 	 */
 	public <V> V get(ParamInfo<V> info) {
-		String value = null;
-		String usedParamName = null;
-		for (String nameOrAlias : getParamNameAndAlias(info)) {
-			if (params.containsKey(nameOrAlias)) {
-				if (usedParamName != null) {
-					throw new IllegalArgumentException(String.format("Duplicate parameters of %s and %s",
-						usedParamName, nameOrAlias));
-				}
-				usedParamName = nameOrAlias;
-				value = params.get(nameOrAlias);
-			}
-		}
+		Stream<V> paramValue = getParamNameAndAlias(info)
+			.filter(this.params::containsKey)
+			.map(x -> this.params.get(x))
+			.map(x -> valueFromJson(x, info.getValueClass()))
+			.limit(1);
 
-		if (usedParamName != null) {
-			// The param value was set by the user.
-			return valueFromJson(value, info.getValueClass());
-		} else {
-			// The param value was not set by the user.
-			if (!info.isOptional()) {
-				throw new IllegalArgumentException("Missing non-optional parameter " + info.getName());
-			} else if (!info.hasDefaultValue()) {
-				throw new IllegalArgumentException("Cannot find default value for optional parameter " + info.getName());
+		if (info.isOptional()) {
+			if (info.hasDefaultValue()) {
+				return paramValue.reduce(info.getDefaultValue(), (a, b) -> b);
+			} else {
+				return paramValue.collect(Collectors.collectingAndThen(Collectors.toList(),
+					a -> {
+						if (a.isEmpty()) {
+							throw new RuntimeException("Not have defaultValue for parameter: " + info.getName());
+						}
+						return a.get(0);
+					}));
 			}
-			return info.getDefaultValue();
 		}
+		return paramValue.collect(Collectors.collectingAndThen(Collectors.toList(),
+			a -> {
+				if (a.isEmpty()) {
+					throw new RuntimeException("Not have parameter: " + info.getName());
+				}
+				return a.get(0);
+			}));
 	}
 
 	/**
@@ -158,24 +132,17 @@ public class Params implements Serializable, Cloneable {
 		}
 	}
 
-	/**
-	 * Check whether this params has a value set for the given {@code info}.
-	 *
-	 * @return <tt>true</tt> if this params has a value set for the specified {@code info}, false otherwise.
-	 */
-	public <V> boolean contains(ParamInfo<V> info) {
-		return params.containsKey(info.getName()) ||
-			Arrays.stream(info.getAlias()).anyMatch(params::containsKey);
+	public <V> boolean contains(ParamInfo<V> paramInfo) {
+		return params.containsKey(paramInfo.getName()) ||
+			Arrays.stream(paramInfo.getAlias()).anyMatch(params::containsKey);
 	}
 
 	/**
-	 * Returns a json containing all parameters in this Params. The json should be human-readable if
-	 * possible.
+	 * Creates and returns a deep clone of this Params.
 	 *
 	 * @return a json containing all parameters in this Params
 	 */
 	public String toJson() {
-		assertMapperInited();
 		try {
 			return mapper.writeValueAsString(params);
 		} catch (JsonProcessingException e) {
@@ -191,34 +158,23 @@ public class Params implements Serializable, Cloneable {
 	 */
 	@SuppressWarnings("unchecked")
 	public void loadJson(String json) {
-		assertMapperInited();
+		ObjectMapper mapper = new ObjectMapper();
 		Map<String, String> params;
 		try {
 			params = mapper.readValue(json, Map.class);
 		} catch (IOException e) {
 			throw new RuntimeException("Failed to deserialize json:" + json, e);
 		}
+		this.params.clear();
 		this.params.putAll(params);
 	}
 
-	/**
-	 * Factory method for constructing params.
-	 *
-	 * @param json the json string to load
-	 * @return the {@code Params} loaded from the json string.
-	 */
 	public static Params fromJson(String json) {
 		Params params = new Params();
 		params.loadJson(json);
 		return params;
 	}
 
-	/**
-	 * Merge other params into this.
-	 *
-	 * @param otherParams other params
-	 * @return this
-	 */
 	public Params merge(Params otherParams) {
 		if (otherParams != null) {
 			this.params.putAll(otherParams.params);
@@ -226,11 +182,6 @@ public class Params implements Serializable, Cloneable {
 		return this;
 	}
 
-	/**
-	 * Creates and returns a deep clone of this Params.
-	 *
-	 * @return a deep clone of this Params
-	 */
 	@Override
 	public Params clone() {
 		Params newParams = new Params();
@@ -268,11 +219,12 @@ public class Params implements Serializable, Cloneable {
 		}
 	}
 
-	private <V> List<String> getParamNameAndAlias(
-		ParamInfo <V> info) {
-		List<String> paramNames = new ArrayList<>(info.getAlias().length + 1);
-		paramNames.add(info.getName());
-		paramNames.addAll(Arrays.asList(info.getAlias()));
+	private <V> Stream <String> getParamNameAndAlias(
+		ParamInfo <V> paramInfo) {
+		Stream <String> paramNames = Stream.of(paramInfo.getName());
+		if (null != paramInfo.getAlias() && paramInfo.getAlias().length > 0) {
+			paramNames = Stream.concat(paramNames, Arrays.stream(paramInfo.getAlias())).sequential();
+		}
 		return paramNames;
 	}
 }
