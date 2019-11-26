@@ -25,7 +25,6 @@ import org.apache.flink.core.fs.RecoverableFsDataOutputStream;
 import org.apache.flink.core.fs.RecoverableFsDataOutputStream.Committer;
 import org.apache.flink.core.fs.RecoverableWriter;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.runtime.util.HadoopUtils;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -50,12 +49,9 @@ public class HadoopRecoverableWriter implements RecoverableWriter {
 	public HadoopRecoverableWriter(org.apache.hadoop.fs.FileSystem fs) {
 		this.fs = checkNotNull(fs);
 
-		// This writer is only supported on a subset of file systems, and on
-		// specific versions. We check these schemes and versions eagerly for
-		// better error messages.
-		if (!"hdfs".equalsIgnoreCase(fs.getScheme()) || !HadoopUtils.isMinHadoopVersion(2, 7)) {
+		if (!"hdfs".equalsIgnoreCase(fs.getScheme())) {
 			throw new UnsupportedOperationException(
-					"Recoverable writers on Hadoop are only supported for HDFS and for Hadoop version 2.7 or newer");
+				"Hadoop recoverable writers support only 'hdfs' schema");
 		}
 	}
 
@@ -75,16 +71,6 @@ public class HadoopRecoverableWriter implements RecoverableWriter {
 			throw new IllegalArgumentException(
 					"Hadoop File System cannot recover a recoverable for another file system: " + recoverable);
 		}
-	}
-
-	@Override
-	public boolean requiresCleanupOfRecoverableState() {
-		return false;
-	}
-
-	@Override
-	public boolean cleanupRecoverableState(ResumeRecoverable resumable) throws IOException {
-		throw new UnsupportedOperationException();
 	}
 
 	@Override
