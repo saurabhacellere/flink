@@ -177,8 +177,10 @@ class FlinkPlannerImpl(
     root.withRel(RelDecorrelator.decorrelateQuery(root.project()))
   }
 
-  override def createRelBuilder(): RelBuilder = {
-    sqlToRelConverterConfig.getRelBuilderFactory.create(cluster, null)
+  override def createRelBuilder(): FlinkRelBuilder = {
+    sqlToRelConverterConfig.getRelBuilderFactory
+      .create(cluster, null)
+      .asInstanceOf[FlinkRelBuilder]
   }
 }
 

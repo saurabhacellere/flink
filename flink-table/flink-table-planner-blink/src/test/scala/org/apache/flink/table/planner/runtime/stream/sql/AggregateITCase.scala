@@ -517,7 +517,7 @@ class AggregateITCase(
       case (a, b, c, d, e) => (b, a, c, d, e)
     }).assignTimestampsAndWatermarks(
       new TimestampAndWatermarkWithOffset[(Long, Int, Int, String, Long)](0L))
-        .toTable(tEnv, 'rowtime, 'a, 'c, 'd, 'e)
+        .toTable(tEnv, 'rowtime.rowtime, 'a, 'c, 'd, 'e)
     tEnv.registerTable("MyTable", t)
     val sourceTable = tEnv.scan("MyTable")
     addTableWithWatermark("MyTable1", sourceTable, "rowtime", 0)

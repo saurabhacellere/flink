@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.runtime.operators.wmassigners;
 
+import org.apache.flink.api.common.functions.util.FunctionUtils;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -27,67 +29,81 @@ import org.apache.flink.streaming.runtime.streamstatus.StreamStatus;
 import org.apache.flink.streaming.runtime.streamstatus.StreamStatusMaintainer;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeCallback;
 import org.apache.flink.table.dataformat.BaseRow;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.runtime.generated.WatermarkGenerator;
+
+import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
  * A stream operator that extracts timestamps from stream elements and
  * generates watermarks with specified emit latency.
+ *
+ * <p>The difference between this operator and {@link WatermarkAssignerOperator} is that:
+ * <ul>
+ *     <li>This operator has an additional parameter {@link #minibatchInterval} which is
+ *     used to buffer watermarks and emit in an aligned interval with following window operators.</li>
+ * </ul>
  */
 public class MiniBatchedWatermarkAssignerOperator
 	extends AbstractStreamOperator<BaseRow>
 	implements OneInputStreamOperator<BaseRow, BaseRow>, ProcessingTimeCallback {
 
+	private static final long serialVersionUID = 1L;
+
+	/** The field index of rowtime attribute. */
 	private final int rowtimeFieldIndex;
 
-	private final long watermarkDelay;
+	/** The watermark generator which generates watermark from the input row. */
+	private final WatermarkGenerator watermarkGenerator;
 
-	// timezone offset.
-	private final long tzOffset;
-
+	/** The idle timeout for how long it doesn't receive elements to mark this channel idle. */
 	private final long idleTimeout;
 
-	private long watermarkInterval;
+	/** The event-time interval for emitting watermarks. */
+	private final long minibatchInterval;
 
+	/** Current watermark of this operator, but may not be emitted. */
 	private transient long currentWatermark;
 
-	private transient long expectedWatermark;
+	/** The next watermark to be emitted. */
+	private transient long nextWatermark;
 
+	/** The processing time when the last record is processed. */
 	private transient long lastRecordTime;
 
+	/** Channel status maintainer which is used to inactive channel when channel is idle. */
 	private transient StreamStatusMaintainer streamStatusMaintainer;
 
-	public MiniBatchedWatermarkAssignerOperator(
-		int rowtimeFieldIndex,
-		long watermarkDelay,
-		long tzOffset,
-		long idleTimeout,
-		long watermarkInterval) {
-		this.rowtimeFieldIndex = rowtimeFieldIndex;
-		this.watermarkDelay = watermarkDelay;
-		this.tzOffset = tzOffset;
-		this.chainingStrategy = ChainingStrategy.ALWAYS;
-		this.watermarkInterval = watermarkInterval;
+	/** Flag to prevent duplicate function.close() calls in close() and dispose(). */
+	private transient boolean functionsClosed = false;
 
+	public MiniBatchedWatermarkAssignerOperator(
+			int rowtimeFieldIndex,
+			WatermarkGenerator watermarkGenerator,
+			long idleTimeout,
+			long minibatchInterval) {
+		checkArgument(minibatchInterval > 0, "The inferred emit latency should be larger than 0");
+		this.rowtimeFieldIndex = rowtimeFieldIndex;
+		this.watermarkGenerator = watermarkGenerator;
 		this.idleTimeout = idleTimeout;
+		this.minibatchInterval = minibatchInterval;
+		this.chainingStrategy = ChainingStrategy.ALWAYS;
 	}
 
 	@Override
 	public void open() throws Exception {
 		super.open();
 
-		Preconditions.checkArgument(watermarkInterval > 0,
-			"The inferred emit latency should be larger than 0");
-
-		// timezone watermarkDelay should be considered when calculating watermark start time.
 		currentWatermark = 0;
-		expectedWatermark = getMiniBatchStart(currentWatermark, tzOffset, watermarkInterval)
-			+ watermarkInterval - 1;
+		nextWatermark = getMiniBatchStart(currentWatermark, minibatchInterval) + minibatchInterval - 1;
 
 		if (idleTimeout > 0) {
 			this.lastRecordTime = getProcessingTimeService().getCurrentProcessingTime();
 			this.streamStatusMaintainer = getContainingTask().getStreamStatusMaintainer();
 			getProcessingTimeService().registerTimer(lastRecordTime + idleTimeout, this);
 		}
+
+		FunctionUtils.setFunctionRuntimeContext(watermarkGenerator, getRuntimeContext());
+		FunctionUtils.openFunction(watermarkGenerator, new Configuration());
 	}
 
 	@Override
@@ -102,19 +118,30 @@ public class MiniBatchedWatermarkAssignerOperator
 			throw new RuntimeException("RowTime field should not be null," +
 				" please convert it to a non-null long value.");
 		}
-		long wm = row.getLong(rowtimeFieldIndex) - watermarkDelay;
-		currentWatermark = Math.max(currentWatermark, wm);
+		Long watermark = watermarkGenerator.currentWatermark(row);
+		if (watermark != null) {
+			currentWatermark = Math.max(currentWatermark, watermark);
+		}
 		// forward element
 		output.collect(element);
 
-		if (currentWatermark >= expectedWatermark) {
-			output.emitWatermark(new Watermark(currentWatermark));
-			long start = getMiniBatchStart(currentWatermark, tzOffset, watermarkInterval);
-			long end = start + watermarkInterval - 1;
-			expectedWatermark = end > currentWatermark ? end : end + watermarkInterval;
+		// emit watermark if reach to the next watermark
+		if (currentWatermark >= nextWatermark) {
+			advanceWatermark();
 		}
 	}
 
+	private void advanceWatermark() {
+		output.emitWatermark(new Watermark(currentWatermark));
+		long start = getMiniBatchStart(currentWatermark, minibatchInterval);
+		long end = start + minibatchInterval - 1;
+		nextWatermark = end > currentWatermark ? end : end + minibatchInterval;
+	}
+
+	/**
+	 * The processing time trigger is only used for idle timeout. This will not flush watermarks
+	 * because watermark advancing is all controlled by {@link #processElement(StreamRecord)}.
+	 */
 	@Override
 	public void onProcessingTime(long timestamp) throws Exception {
 		if (idleTimeout > 0) {
@@ -127,7 +154,7 @@ public class MiniBatchedWatermarkAssignerOperator
 
 		// register next timer
 		long now = getProcessingTimeService().getCurrentProcessingTime();
-		getProcessingTimeService().registerTimer(now + watermarkInterval, this);
+		getProcessingTimeService().registerTimer(now + idleTimeout, this);
 	}
 
 	/**
@@ -149,14 +176,24 @@ public class MiniBatchedWatermarkAssignerOperator
 		}
 	}
 
-	public void endInput() throws Exception {
-		processWatermark(Watermark.MAX_WATERMARK);
+	@Override
+	public void close() throws Exception {
+		super.close();
+
+		// emit a final watermark
+		advanceWatermark();
+
+		functionsClosed = true;
+		FunctionUtils.closeFunction(watermarkGenerator);
 	}
 
 	@Override
-	public void close() throws Exception {
-		endInput(); // TODO after introduce endInput
-		super.close();
+	public void dispose() throws Exception {
+		super.dispose();
+		if (!functionsClosed) {
+			functionsClosed = true;
+			FunctionUtils.closeFunction(watermarkGenerator);
+		}
 	}
 
 	// ------------------------------------------------------------------------
@@ -165,7 +202,7 @@ public class MiniBatchedWatermarkAssignerOperator
 	/**
 	 * Method to get the mini-batch start for a watermark.
 	 */
-	public static long getMiniBatchStart(long watermark, long tzOffset, long interval) {
-		return watermark - (watermark - tzOffset + interval) % interval;
+	private static long getMiniBatchStart(long watermark, long interval) {
+		return watermark - (watermark + interval) % interval;
 	}
 }

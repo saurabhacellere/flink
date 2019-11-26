@@ -243,6 +243,8 @@ public class SqlToOperationConverter {
 				SqlNode validatedExpr = validator
 					.validateParameterizedExpression(call.operand(0), nameToType);
 				final RelDataType validatedType = validator.getValidatedNodeType(validatedExpr);
+				String fieldName = call.operand(1).toString();
+				nameToType.put(fieldName, validatedType);
 				builder.field(call.operand(1).toString(),
 					TypeConversions.fromLogicalToDataType(
 						FlinkTypeFactory.toLogicalType(validatedType)),

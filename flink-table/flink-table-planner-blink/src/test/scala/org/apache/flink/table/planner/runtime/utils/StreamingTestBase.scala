@@ -18,17 +18,22 @@
 
 package org.apache.flink.table.planner.runtime.utils
 
+import org.apache.calcite.avatica.util.TimeUnit
+import org.apache.calcite.sql.SqlIntervalQualifier
+import org.apache.calcite.sql.parser.SqlParserPos
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
 import org.apache.flink.table.api.scala.StreamTableEnvironment
 import org.apache.flink.table.api.{EnvironmentSettings, Table, TableException}
+import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable
 import org.apache.flink.table.planner.operations.PlannerQueryOperation
 import org.apache.flink.table.planner.plan.nodes.calcite.LogicalWatermarkAssigner
 import org.apache.flink.table.planner.utils.TableTestUtil
 import org.apache.flink.test.util.AbstractTestBase
-
 import org.junit.rules.{ExpectedException, TemporaryFolder}
 import org.junit.{Before, Rule}
+
+import java.math.{BigDecimal => JBigDecimal}
 
 class StreamingTestBase extends AbstractTestBase {
 
@@ -68,12 +73,18 @@ class StreamingTestBase extends AbstractTestBase {
     if (rowtimeFieldIdx < 0) {
       throw new TableException(s"$rowtimeField does not exist, please check it")
     }
+    val rexBuilder = sourceRel.getCluster.getRexBuilder
+    val inputRef = rexBuilder.makeInputRef(sourceRel, rowtimeFieldIdx)
+    val offsetLiteral = rexBuilder.makeIntervalLiteral(
+      JBigDecimal.valueOf(offset),
+      new SqlIntervalQualifier(TimeUnit.MILLISECOND, null, SqlParserPos.ZERO))
+    val expr = rexBuilder.makeCall(FlinkSqlOperatorTable.MINUS, inputRef, offsetLiteral)
     val watermarkAssigner = new LogicalWatermarkAssigner(
       sourceRel.getCluster,
       sourceRel.getTraitSet,
       sourceRel,
-      Some(rowtimeFieldIdx),
-      Option(offset)
+      rowtimeFieldIdx,
+      expr
     )
     val queryOperation = new PlannerQueryOperation(watermarkAssigner)
     tEnv.registerTable(tableName, TableTestUtil.createTable(tEnv, queryOperation))
