@@ -135,9 +135,9 @@ public class YARNITCase extends YarnTestBase {
 	}
 
 	private void waitApplicationFinishedElseKillIt(
-			ApplicationId applicationId,
-			Duration timeout,
-			YarnClusterDescriptor yarnClusterDescriptor) throws Exception {
+		ApplicationId applicationId,
+		Duration timeout,
+		YarnClusterDescriptor yarnClusterDescriptor) throws Exception {
 		Deadline deadline = Deadline.now().plus(timeout);
 		YarnApplicationState state = getYarnClient().getApplicationReport(applicationId).getYarnApplicationState();
 
