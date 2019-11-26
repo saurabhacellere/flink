@@ -18,7 +18,6 @@
 
 package org.apache.flink.cep.pattern.conditions;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.util.Preconditions;
 
 /**
@@ -26,11 +25,7 @@ import org.apache.flink.util.Preconditions;
  * {@code OR} and returns {@code true} if at least one is {@code true}.
  *
  * @param <T> Type of the element to filter
- * @deprecated Please use {@link RichOrCondition} instead. This class exists just for
- * backwards compatibility and will be removed in FLINK-10113.
  */
-@Internal
-@Deprecated
 public class OrCondition<T> extends IterativeCondition<T> {
 
 	private static final long serialVersionUID = 2554610954278485106L;
@@ -41,11 +36,23 @@ public class OrCondition<T> extends IterativeCondition<T> {
 	public OrCondition(final IterativeCondition<T> left, final IterativeCondition<T> right) {
 		this.left = Preconditions.checkNotNull(left, "The condition cannot be null.");
 		this.right = Preconditions.checkNotNull(right, "The condition cannot be null.");
+		Preconditions.checkArgument(!((this.left.isTimeCondition() && !this.right.isTimeCondition())
+			|| (!this.left.isTimeCondition() && this.right.isTimeCondition())), "timeCondition cannot combine with event driven condition.");
 	}
 
 	@Override
 	public boolean filter(T value, Context<T> ctx) throws Exception {
 		return left.filter(value, ctx) || right.filter(value, ctx);
+	}
+
+	@Override
+	public boolean filter(long timestamp, Context<T> ctx) throws Exception {
+		return  left.filter(timestamp, ctx) || right.filter(timestamp, ctx);
+	}
+
+	@Override
+	public boolean isTimeCondition() {
+		return this.left.isTimeCondition() && this.right.isTimeCondition();
 	}
 
 	/**

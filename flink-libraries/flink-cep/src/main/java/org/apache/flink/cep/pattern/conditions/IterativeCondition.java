@@ -18,9 +18,7 @@
 
 package org.apache.flink.cep.pattern.conditions;
 
-import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.functions.Function;
-import org.apache.flink.cep.time.TimeContext;
 
 import java.io.Serializable;
 
@@ -61,7 +59,6 @@ import java.io.Serializable;
  * the elements that belong to the pattern among the elements stored by the NFA. The cost of this operation can vary,
  * so when implementing your condition, try to minimize the times the method is called.
  */
-@PublicEvolving
 public abstract class IterativeCondition<T> implements Function, Serializable {
 
 	private static final long serialVersionUID = 7067817235759351255L;
@@ -84,10 +81,24 @@ public abstract class IterativeCondition<T> implements Function, Serializable {
 	 */
 	public abstract boolean filter(T value, Context<T> ctx) throws Exception;
 
+	public boolean filter(long timestamp, Context<T> ctx) throws Exception {
+		return false;
+	}
+
+	/**
+	 * Flag indicates whether the condition only accepts the timestamp for evaluation.
+	 * If the result is true it means the condition will be evaluated with the null event,
+	 * It should works with timeEnd pattern.
+	 * @return {@code true} for the condition which is time bounded, and {@code false} for not.
+	 */
+	public boolean isTimeCondition() {
+		return false;
+	}
+
 	/**
 	 * The context used when evaluating the {@link IterativeCondition condition}.
 	 */
-	public interface Context<T> extends TimeContext {
+	public interface Context<T> {
 
 		/**
 		 * @return An {@link Iterable} over the already accepted elements

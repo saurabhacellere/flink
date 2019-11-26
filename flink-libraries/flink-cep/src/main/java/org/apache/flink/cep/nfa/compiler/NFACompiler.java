@@ -19,20 +19,20 @@
 package org.apache.flink.cep.nfa.compiler;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.cep.nfa.AfterMatchSkipStrategy;
 import org.apache.flink.cep.nfa.NFA;
 import org.apache.flink.cep.nfa.State;
 import org.apache.flink.cep.nfa.StateTransition;
 import org.apache.flink.cep.nfa.StateTransitionAction;
-import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
 import org.apache.flink.cep.pattern.GroupPattern;
 import org.apache.flink.cep.pattern.MalformedPatternException;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.Quantifier;
 import org.apache.flink.cep.pattern.Quantifier.Times;
+import org.apache.flink.cep.pattern.conditions.AndCondition;
 import org.apache.flink.cep.pattern.conditions.BooleanConditions;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
-import org.apache.flink.cep.pattern.conditions.RichAndCondition;
-import org.apache.flink.cep.pattern.conditions.RichNotCondition;
+import org.apache.flink.cep.pattern.conditions.NotCondition;
 import org.apache.flink.streaming.api.windowing.time.Time;
 
 import java.io.Serializable;
@@ -40,13 +40,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.Stack;
-
-import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * Compiler class containing methods to compile a {@link Pattern} into a {@link NFA} or a
@@ -77,44 +72,6 @@ public class NFACompiler {
 			nfaFactoryCompiler.compileFactory();
 			return new NFAFactoryImpl<>(nfaFactoryCompiler.getWindowTime(), nfaFactoryCompiler.getStates(), timeoutHandling);
 		}
-	}
-
-	/**
-	 * Verifies if the provided pattern can possibly generate empty match. Example of patterns that can possibly
-	 * generate empty matches are: A*, A?, A* B? etc.
-	 *
-	 * @param pattern pattern to check
-	 * @return true if empty match could potentially match the pattern, false otherwise
-	 */
-	public static boolean canProduceEmptyMatches(final Pattern<?, ?> pattern) {
-		NFAFactoryCompiler<?> compiler = new NFAFactoryCompiler<>(checkNotNull(pattern));
-		compiler.compileFactory();
-		State<?> startState = compiler.getStates().stream().filter(State::isStart).findFirst().orElseThrow(
-			() -> new IllegalStateException("Compiler produced no start state. It is a bug. File a jira."));
-
-		Set<State<?>> visitedStates = new HashSet<>();
-		final Stack<State<?>> statesToCheck = new Stack<>();
-		statesToCheck.push(startState);
-		while (!statesToCheck.isEmpty()) {
-			final State<?> currentState = statesToCheck.pop();
-			if (visitedStates.contains(currentState)) {
-				continue;
-			} else {
-				visitedStates.add(currentState);
-			}
-
-			for (StateTransition<?> transition : currentState.getStateTransitions()) {
-				if (transition.getAction() == StateTransitionAction.PROCEED) {
-					if (transition.getTargetState().isFinal()) {
-						return true;
-					} else {
-						statesToCheck.push(transition.getTargetState());
-					}
-				}
-			}
-		}
-
-		return false;
 	}
 
 	/**
@@ -155,6 +112,8 @@ public class NFACompiler {
 
 			checkPatternSkipStrategy();
 
+			checkHasTimeEndAtPatternEnd();
+
 			// we're traversing the pattern from the end to the beginning --> the first state is the final state
 			State<T> sinkState = createEndingState();
 			// add all the normal states
@@ -179,19 +138,41 @@ public class NFACompiler {
 		 * Check pattern after match skip strategy.
 		 */
 		private void checkPatternSkipStrategy() {
-			if (afterMatchSkipStrategy.getPatternName().isPresent()) {
-				String patternName = afterMatchSkipStrategy.getPatternName().get();
+			if (afterMatchSkipStrategy.getStrategy() == AfterMatchSkipStrategy.SkipStrategy.SKIP_TO_FIRST ||
+				afterMatchSkipStrategy.getStrategy() == AfterMatchSkipStrategy.SkipStrategy.SKIP_TO_LAST) {
 				Pattern<T, ?> pattern = currentPattern;
-				while (pattern.getPrevious() != null && !pattern.getName().equals(patternName)) {
+				while (pattern.getPrevious() != null && !pattern.getName().equals(afterMatchSkipStrategy.getPatternName())) {
 					pattern = pattern.getPrevious();
 				}
 
 				// pattern name match check.
-				if (!pattern.getName().equals(patternName)) {
+				if (!pattern.getName().equals(afterMatchSkipStrategy.getPatternName())) {
 					throw new MalformedPatternException("The pattern name specified in AfterMatchSkipStrategy " +
 						"can not be found in the given Pattern");
 				}
 			}
+		}
+
+		/**
+		 * Check if the pattern has the timeEnd, it should at the end of pattern.
+		 */
+		private void checkHasTimeEndAtPatternEnd() {
+
+			// skip the last pattern
+			Pattern<T, ?> pattern = currentPattern.getPrevious();
+
+			if (pattern == null) {
+				return;
+			}
+
+			while (pattern.getPrevious() != null && pattern.getQuantifier().getConsumingStrategy() != Quantifier.ConsumingStrategy.SKIP_TILL_TIME_REACHED) {
+				pattern = pattern.getPrevious();
+			}
+
+			if (pattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.SKIP_TILL_TIME_REACHED) {
+				throw new MalformedPatternException("The timeEnd pattern should only put at the end of the pattern to reach a Final state by time.");
+			}
+
 		}
 
 		/**
@@ -281,16 +262,32 @@ public class NFACompiler {
 
 				if (currentPattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.NOT_FOLLOW) {
 					//skip notFollow patterns, they are converted into edge conditions
-				} else if (currentPattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.NOT_NEXT) {
+				} else if (currentPattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.SKIP_TILL_TIME_REACHED) {
+					if (!sinkState.isFinal()) {
+						// only support timeEnd state sink to Final state (double check)
+						throw new MalformedPatternException("timeEnd pattern should at the end!");
+					}
+					if (currentPattern.getCondition() == null || !currentPattern.getCondition().isTimeCondition()) {
+						throw new MalformedPatternException("timeEnd pattern should works with timeCondition!");
+					}
+					final State<T> timeState = createState(currentPattern.getName(), State.StateType.TimeEnd);
+					final IterativeCondition<T> proceedCondition = getTakeCondition(currentPattern);
+					final IterativeCondition<T> ignoreCondition = getIgnoreCondition(currentPattern);
+					// ignore the event, because the timeEnd state's event is time.
+					timeState.addIgnore(sinkState, proceedCondition);
+					timeState.addIgnore(timeState, ignoreCondition);
+					lastSink = timeState;
+					addStopStates(lastSink);
+				}  else if (currentPattern.getQuantifier().getConsumingStrategy() == Quantifier.ConsumingStrategy.NOT_NEXT) {
 					final State<T> notNext = createState(currentPattern.getName(), State.StateType.Normal);
 					final IterativeCondition<T> notCondition = getTakeCondition(currentPattern);
 					final State<T> stopState = createStopState(notCondition, currentPattern.getName());
 
 					if (lastSink.isFinal()) {
 						//so that the proceed to final is not fired
-						notNext.addIgnore(lastSink, new RichNotCondition<>(notCondition));
+						notNext.addIgnore(lastSink, new NotCondition<>(notCondition));
 					} else {
-						notNext.addProceed(lastSink, new RichNotCondition<>(notCondition));
+						notNext.addProceed(lastSink, new NotCondition<>(notCondition));
 					}
 					notNext.addProceed(stopState, notCondition);
 					lastSink = notNext;
@@ -612,11 +609,11 @@ public class NFACompiler {
 					if (untilCondition != null) {
 						singletonState.addProceed(
 							originalStateMap.get(proceedState.getName()),
-							new RichAndCondition<>(proceedCondition, untilCondition));
+							new AndCondition<>(proceedCondition, untilCondition));
 					}
 					singletonState.addProceed(proceedState,
 						untilCondition != null
-							? new RichAndCondition<>(proceedCondition, new RichNotCondition<>(untilCondition))
+							? new AndCondition<>(proceedCondition, new NotCondition<>(untilCondition))
 							: proceedCondition);
 				} else {
 					singletonState.addProceed(proceedState, proceedCondition);
@@ -734,12 +731,12 @@ public class NFACompiler {
 			if (currentPattern.getQuantifier().hasProperty(Quantifier.QuantifierProperty.GREEDY)) {
 				if (untilCondition != null) {
 					State<T> sinkStateCopy = copy(sinkState);
-					loopingState.addProceed(sinkStateCopy, new RichAndCondition<>(proceedCondition, untilCondition));
+					loopingState.addProceed(sinkStateCopy, new AndCondition<>(proceedCondition, untilCondition));
 					originalStateMap.put(sinkState.getName(), sinkStateCopy);
 				}
 				loopingState.addProceed(sinkState,
 					untilCondition != null
-						? new RichAndCondition<>(proceedCondition, new RichNotCondition<>(untilCondition))
+						? new AndCondition<>(proceedCondition, new NotCondition<>(untilCondition))
 						: proceedCondition);
 				updateWithGreedyCondition(sinkState, getTakeCondition(currentPattern));
 			} else {
@@ -774,9 +771,9 @@ public class NFACompiler {
 				IterativeCondition<T> untilCondition,
 				boolean isTakeCondition) {
 			if (untilCondition != null && condition != null) {
-				return new RichAndCondition<>(new RichNotCondition<>(untilCondition), condition);
+				return new AndCondition<>(new NotCondition<>(untilCondition), condition);
 			} else if (untilCondition != null && isTakeCondition) {
-				return new RichNotCondition<>(untilCondition);
+				return new NotCondition<>(untilCondition);
 			}
 
 			return condition;
@@ -802,7 +799,7 @@ public class NFACompiler {
 					innerIgnoreCondition = null;
 					break;
 				case SKIP_TILL_NEXT:
-					innerIgnoreCondition = new RichNotCondition<>((IterativeCondition<T>) pattern.getCondition());
+					innerIgnoreCondition = new NotCondition<>((IterativeCondition<T>) pattern.getCondition());
 					break;
 				case SKIP_TILL_ANY:
 					innerIgnoreCondition = BooleanConditions.trueFunction();
@@ -843,7 +840,7 @@ public class NFACompiler {
 					ignoreCondition = null;
 					break;
 				case SKIP_TILL_NEXT:
-					ignoreCondition = new RichNotCondition<>((IterativeCondition<T>) pattern.getCondition());
+					ignoreCondition = new NotCondition<>((IterativeCondition<T>) pattern.getCondition());
 					break;
 				case SKIP_TILL_ANY:
 					ignoreCondition = BooleanConditions.trueFunction();
@@ -896,7 +893,7 @@ public class NFACompiler {
 			IterativeCondition<T> takeCondition) {
 			for (StateTransition<T> stateTransition : state.getStateTransitions()) {
 				stateTransition.setCondition(
-					new RichAndCondition<>(stateTransition.getCondition(), new RichNotCondition<>(takeCondition)));
+					new AndCondition<>(stateTransition.getCondition(), new NotCondition<>(takeCondition)));
 			}
 		}
 	}
