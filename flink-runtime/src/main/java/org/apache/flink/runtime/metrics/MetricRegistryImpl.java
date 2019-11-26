@@ -60,7 +60,7 @@ import java.util.concurrent.TimeUnit;
  * connection between {@link MetricGroup MetricGroups} and {@link MetricReporter MetricReporters}.
  */
 public class MetricRegistryImpl implements MetricRegistry {
-	private static final Logger LOG = LoggerFactory.getLogger(MetricRegistryImpl.class);
+	static final Logger LOG = LoggerFactory.getLogger(MetricRegistryImpl.class);
 
 	private final Object lock = new Object();
 
@@ -147,7 +147,7 @@ public class MetricRegistryImpl implements MetricRegistry {
 					}
 					reporters.add(reporterInstance);
 
-					String delimiterForReporter = reporterSetup.getDelimiter().orElse(String.valueOf(globalDelimiter));
+					String delimiterForReporter = reporterSetup.getDelimiter().orElse(String.valueOf(reporterInstance.getDefaultScopeDelimiter()));
 					if (delimiterForReporter.length() != 1) {
 						LOG.warn("Failed to parse delimiter '{}' for reporter '{}', using global delimiter '{}'.", delimiterForReporter, namedReporter, globalDelimiter);
 						delimiterForReporter = String.valueOf(globalDelimiter);
