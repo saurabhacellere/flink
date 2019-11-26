@@ -24,6 +24,7 @@ import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.internal.TableImpl;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.config.CatalogConfig;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
 import org.apache.flink.table.catalog.hive.HiveTestUtils;
 import org.apache.flink.table.catalog.hive.client.HiveMetastoreClientFactory;
@@ -54,6 +55,7 @@ import scala.collection.JavaConverters;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -323,6 +325,35 @@ public class TableEnvHiveConnectorTest {
 					tableSchema.getFieldDataTypes()[1].getLogicalType().isNullable());
 			assertTrue("NOT NULL NORELY columns should be considered nullable",
 					tableSchema.getFieldDataTypes()[2].getLogicalType().isNullable());
+		} finally {
+			hiveShell.execute("drop database db1 cascade");
+		}
+	}
+
+	@Test
+	public void testPKConstraint() throws Exception {
+		// While PK constraints are supported since Hive 2.1.0, the constraints cannot be RELY in 2.x versions.
+		// So let's only test for 3.x.
+		Assume.assumeTrue(HiveVersionTestUtil.HIVE_310_OR_LATER);
+		hiveShell.execute("create database db1");
+		try {
+			// test rely PK constraints
+			hiveShell.execute("create table db1.tbl1 (x tinyint,y smallint,z int, primary key (x,z) disable novalidate rely)");
+			CatalogBaseTable catalogTable = hiveCatalog.getTable(new ObjectPath("db1", "tbl1"));
+			String pkCols = catalogTable.getProperties().get(CatalogConfig.PRIMARY_KEY_COLUMNS);
+			assertEquals("x,z", pkCols);
+
+			// test norely PK constraints
+			hiveShell.execute("create table db1.tbl2 (x tinyint,y smallint, primary key (x) disable norely)");
+			catalogTable = hiveCatalog.getTable(new ObjectPath("db1", "tbl2"));
+			pkCols = catalogTable.getProperties().get(CatalogConfig.PRIMARY_KEY_COLUMNS);
+			assertNull(pkCols);
+
+			// test table w/o PK
+			hiveShell.execute("create table db1.tbl3 (x tinyint)");
+			catalogTable = hiveCatalog.getTable(new ObjectPath("db1", "tbl3"));
+			pkCols = catalogTable.getProperties().get(CatalogConfig.PRIMARY_KEY_COLUMNS);
+			assertNull(pkCols);
 		} finally {
 			hiveShell.execute("drop database db1 cascade");
 		}
