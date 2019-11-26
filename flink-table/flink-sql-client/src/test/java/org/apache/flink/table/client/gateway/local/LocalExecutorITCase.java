@@ -23,8 +23,8 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.client.cli.util.DummyClusterClientServiceLoader;
-import org.apache.flink.client.cli.util.DummyCustomCommandLine;
+import org.apache.flink.client.cli.DefaultCLI;
+import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
@@ -607,30 +607,30 @@ public class LocalExecutorITCase extends TestLogger {
 		replaceVars.put("$VAR_UPDATE_MODE", "");
 		replaceVars.put("$VAR_MAX_ROWS", "100");
 		return new LocalExecutor(
-			EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
-			Collections.emptyList(),
-			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+				EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
+				Collections.emptyList(),
+				clusterClient.getFlinkConfiguration(),
+				new DefaultCLI(clusterClient.getFlinkConfiguration()),
+				new DefaultClusterClientServiceLoader());
 	}
 
 	private <T> LocalExecutor createModifiedExecutor(ClusterClient<T> clusterClient, Map<String, String> replaceVars) throws Exception {
 		return new LocalExecutor(
-			EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
-			Collections.emptyList(),
-			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+				EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
+				Collections.emptyList(),
+				clusterClient.getFlinkConfiguration(),
+				new DefaultCLI(clusterClient.getFlinkConfiguration()),
+				new DefaultClusterClientServiceLoader());
 	}
 
 	private <T> LocalExecutor createModifiedExecutor(
 			String yamlFile, ClusterClient<T> clusterClient, Map<String, String> replaceVars) throws Exception {
 		return new LocalExecutor(
-			EnvironmentFileUtil.parseModified(yamlFile, replaceVars),
-			Collections.emptyList(),
-			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+				EnvironmentFileUtil.parseModified(yamlFile, replaceVars),
+				Collections.emptyList(),
+				clusterClient.getFlinkConfiguration(),
+				new DefaultCLI(clusterClient.getFlinkConfiguration()),
+				new DefaultClusterClientServiceLoader());
 	}
 
 	private List<String> retrieveTableResult(

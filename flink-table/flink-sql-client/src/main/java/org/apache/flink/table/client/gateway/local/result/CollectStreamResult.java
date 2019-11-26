@@ -52,12 +52,18 @@ public abstract class CollectStreamResult<C> extends BasicResult<C> implements D
 	private final ResultRetrievalThread retrievalThread;
 	private final JobMonitoringThread monitoringThread;
 	private ProgramDeployer<C> deployer;
+	private final ClassLoader classLoader;
 
 	protected final Object resultLock;
 	protected SqlExecutionException executionException;
 
-	public CollectStreamResult(RowTypeInfo outputType, TableSchema tableSchema, ExecutionConfig config,
-			InetAddress gatewayAddress, int gatewayPort) {
+	public CollectStreamResult(
+			RowTypeInfo outputType,
+			TableSchema tableSchema,
+			ExecutionConfig config,
+			InetAddress gatewayAddress,
+			int gatewayPort,
+			ClassLoader classLoader) {
 		this.outputType = outputType;
 
 		resultLock = new Object();
@@ -77,6 +83,8 @@ public abstract class CollectStreamResult<C> extends BasicResult<C> implements D
 		collectTableSink = new CollectStreamTableSink(iterator.getBindAddress(), iterator.getPort(), serializer, tableSchema);
 		retrievalThread = new ResultRetrievalThread();
 		monitoringThread = new JobMonitoringThread();
+
+		this.classLoader = classLoader;
 	}
 
 	@Override
@@ -138,7 +146,10 @@ public abstract class CollectStreamResult<C> extends BasicResult<C> implements D
 		@Override
 		public void run() {
 			try {
-				deployer.run();
+				// fetch the job execution result, so that an attached cluster will shut down
+				deployer
+						.run()
+						.thenCompose((jobClient -> jobClient.getJobExecutionResult(classLoader)));
 			} catch (SqlExecutionException e) {
 				executionException = e;
 			}

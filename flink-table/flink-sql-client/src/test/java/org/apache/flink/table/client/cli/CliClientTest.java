@@ -302,7 +302,7 @@ public class CliClientTest extends TestLogger {
 			if (failExecution) {
 				throw new SqlExecutionException("Fail execution.");
 			}
-			return new ProgramTargetDescriptor("testClusterId", "testJobId", "http://testcluster:1234");
+			return new ProgramTargetDescriptor("testJobId");
 		}
 
 		@Override
