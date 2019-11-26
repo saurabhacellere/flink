@@ -25,6 +25,7 @@ if [ -z "$HERE" ] ; then
 	exit 1  # fail
 fi
 
+source "${HERE}/travis/differential_build.sh"
 source "${HERE}/travis/stage.sh"
 
 ARTIFACTS_DIR="${HERE}/artifacts"
@@ -59,17 +60,13 @@ MVN_TEST_MODULES=$(get_test_modules_for_stage ${TEST})
 #
 # -nsu option forbids downloading snapshot artifacts. The only snapshot artifacts we depend are from
 # Flink, which however should all be built locally. see FLINK-7230
-#
 MVN_LOGGING_OPTIONS="-Dlog.dir=${ARTIFACTS_DIR} -Dlog4j.configuration=file://$LOG4J_PROPERTIES -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
 MVN_COMMON_OPTIONS="-nsu -Dflink.forkCount=2 -Dflink.forkCountTestPackage=2 -Dfast -B -Pskip-webui-build $MVN_LOGGING_OPTIONS"
 MVN_COMPILE_OPTIONS="-DskipTests"
 MVN_TEST_OPTIONS="-Dflink.tests.with-openssl"
 
-e2e_modules=$(find flink-end-to-end-tests -mindepth 2 -maxdepth 5 -name 'pom.xml' -printf '%h\n' | sort -u | tr '\n' ',')
-
 MVN_COMPILE="mvn $MVN_COMMON_OPTIONS $MVN_COMPILE_OPTIONS $PROFILE $MVN_COMPILE_MODULES install"
 MVN_TEST="mvn $MVN_COMMON_OPTIONS $MVN_TEST_OPTIONS $PROFILE $MVN_TEST_MODULES verify"
-MVN_E2E="mvn $MVN_COMMON_OPTIONS $MVN_TEST_OPTIONS $PROFILE -DincludeE2E="org.apache.flink.tests.util.categories.PreCommit" -pl ${e2e_modules},flink-dist verify"
 
 MVN_PID="${ARTIFACTS_DIR}/watchdog.mvn.pid"
 MVN_EXIT="${ARTIFACTS_DIR}/watchdog.mvn.exit"
@@ -238,12 +235,16 @@ run_with_watchdog "$CMD"
 
 # Run tests if compilation was successful
 if [ $CMD_TYPE == "MVN" ]; then
-	if [ $EXIT_CODE == 0 ]; then
-		run_with_watchdog "$MVN_TEST"
-	else
+	if [ $EXIT_CODE != 0 ]; then
 		echo "=============================================================================="
 		echo "Compilation failure detected, skipping test execution."
 		echo "=============================================================================="
+	elif can_skip_mvn_test_run_for_stage "$TEST" ; then
+		echo "=============================================================================="
+		echo "Skipping mvn verify phase for stage '$TEST'"
+		echo "=============================================================================="
+	else
+		run_with_watchdog "$MVN_TEST"
 	fi
 fi
 
@@ -263,35 +264,29 @@ upload_artifacts_s3
 cd ../../
 
 # only run end-to-end tests in misc because we only have flink-dist here
-case $TEST in
-    (misc)
-        if [ $EXIT_CODE == 0 ]; then
-            printf "\n\n==============================================================================\n"
-            printf "Running bash end-to-end tests\n"
-            printf "==============================================================================\n"
-
-            FLINK_DIR=build-target flink-end-to-end-tests/run-pre-commit-tests.sh
-
-            EXIT_CODE=$?
-        else
-            printf "\n==============================================================================\n"
-            printf "Previous build failure detected, skipping bash end-to-end tests.\n"
-            printf "==============================================================================\n"
-        fi
-        if [ $EXIT_CODE == 0 ]; then
-            printf "\n\n==============================================================================\n"
-            printf "Running java end-to-end tests\n"
-            printf "==============================================================================\n"
-
-            run_with_watchdog "$MVN_E2E"
-
-            EXIT_CODE=$?
-        else
-            printf "\n==============================================================================\n"
-            printf "Previous build failure detected, skipping java end-to-end tests.\n"
-        fi
-    ;;
-esac
+if [[ ${PROFILE} == *"jdk9"* ]]; then
+    printf "\n\n==============================================================================\n"
+    printf "Skipping end-to-end tests since they fail on Java 9.\n"
+    printf "==============================================================================\n"
+else
+    case $TEST in
+        (misc)
+            if [ $EXIT_CODE == 0 ]; then
+                printf "\n\n==============================================================================\n"
+                printf "Running end-to-end tests\n"
+                printf "==============================================================================\n"
+    
+                FLINK_DIR=build-target flink-end-to-end-tests/run-pre-commit-tests.sh
+    
+                EXIT_CODE=$?
+            else
+                printf "\n==============================================================================\n"
+                printf "Previous build failure detected, skipping end-to-end tests.\n"
+                printf "==============================================================================\n"
+            fi
+        ;;
+    esac
+fi
 
 # Exit code for Travis build success/failure
 exit $EXIT_CODE
