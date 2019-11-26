@@ -23,10 +23,11 @@ import org.apache.flink.client.cli.CliFrontendTestUtils;
 import org.apache.flink.client.deployment.ClusterClientFactory;
 import org.apache.flink.client.deployment.ClusterClientServiceLoader;
 import org.apache.flink.client.program.ClusterClient;
-import org.apache.flink.client.program.TestingClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.JobManagerOptions;
+import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.yarn.cli.FlinkYarnSessionCli;
+import org.apache.flink.yarn.util.FakeClusterClient;
 import org.apache.flink.yarn.util.NonDeployingYarnClusterDescriptor;
 
 import org.apache.hadoop.yarn.api.records.ApplicationId;
@@ -69,9 +70,10 @@ public class CliFrontendRunWithYarnTest extends CliFrontendTestBase {
 		Configuration configuration = new Configuration();
 		configuration.setString(JobManagerOptions.ADDRESS, "localhost");
 		configuration.setInteger(JobManagerOptions.PORT, 8081);
+		configuration.setString(TaskManagerOptions.TOTAL_FLINK_MEMORY, "512m");
 
 		final ClusterClientServiceLoader testServiceLoader =
-			new TestingYarnClusterClientServiceLoader(new TestingClusterClient<>());
+			new TestingYarnClusterClientServiceLoader(new FakeClusterClient());
 
 		final FlinkYarnSessionCli yarnCLI = new FlinkYarnSessionCli(
 			configuration,
