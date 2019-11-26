@@ -45,8 +45,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
-
 /**
  * Internal configuration for a {@link StreamOperator}. This is created and populated by the
  * {@link StreamingJobGraphGenerator}.
@@ -60,9 +58,6 @@ public class StreamConfig implements Serializable {
 	//  Config Keys
 	// ------------------------------------------------------------------------
 
-	@VisibleForTesting
-	public static final String SERIALIZEDUDF = "serializedUDF";
-
 	private static final String NUMBER_OF_OUTPUTS = "numberOfOutputs";
 	private static final String NUMBER_OF_INPUTS = "numberOfInputs";
 	private static final String CHAINED_OUTPUTS = "chainedOutputs";
@@ -72,6 +67,7 @@ public class StreamConfig implements Serializable {
 	private static final String VERTEX_NAME = "vertexID";
 	private static final String ITERATION_ID = "iterationId";
 	private static final String OUTPUT_SELECTOR_WRAPPER = "outputSelectorWrapper";
+	private static final String SERIALIZEDUDF = "serializedUDF";
 	private static final String BUFFER_TIMEOUT = "bufferTimeout";
 	private static final String TYPE_SERIALIZER_IN_1 = "typeSerializer_in_1";
 	private static final String TYPE_SERIALIZER_IN_2 = "typeSerializer_in_2";
@@ -88,6 +84,7 @@ public class StreamConfig implements Serializable {
 
 	private static final String CHECKPOINTING_ENABLED = "checkpointing";
 	private static final String CHECKPOINT_MODE = "checkpointMode";
+	private static final String MAX_CONCURRENT_CHECKPOINTS = "maxConcurrentCheckpoints";
 
 	private static final String STATE_BACKEND = "statebackend";
 	private static final String STATE_PARTITIONER = "statePartitioner";
@@ -96,17 +93,14 @@ public class StreamConfig implements Serializable {
 
 	private static final String TIME_CHARACTERISTIC = "timechar";
 
-	private static final String MANAGED_MEMORY_FRACTION_ON_HEAP = "managedMemFractionOnHeap";
-	private static final String MANAGED_MEMORY_FRACTION_OFF_HEAP = "managedMemFractionOffHeap";
-
 	// ------------------------------------------------------------------------
 	//  Default Values
 	// ------------------------------------------------------------------------
 
 	private static final long DEFAULT_TIMEOUT = 100;
 	private static final CheckpointingMode DEFAULT_CHECKPOINTING_MODE = CheckpointingMode.EXACTLY_ONCE;
+	private static final int DEFAULT_MAX_CONCURRENT_CHECKPOINTS = 1;
 
-	private static final double DEFAULT_MANAGED_MEMORY_FRACTION = 0.0;
 
 	// ------------------------------------------------------------------------
 	//  Config
@@ -132,30 +126,6 @@ public class StreamConfig implements Serializable {
 
 	public Integer getVertexID() {
 		return config.getInteger(VERTEX_NAME, -1);
-	}
-
-	public void setManagedMemoryFractionOnHeap(double managedMemFractionOnHeap) {
-		checkArgument(
-			managedMemFractionOnHeap >= 0.0 && managedMemFractionOnHeap <= 1.0,
-			String.format("managedMemFractionOnHeap should be in range [0.0, 1.0], but was: %s", managedMemFractionOnHeap));
-
-		config.setDouble(MANAGED_MEMORY_FRACTION_ON_HEAP, managedMemFractionOnHeap);
-	}
-
-	public double getManagedMemoryFractionOnHeap() {
-		return config.getDouble(MANAGED_MEMORY_FRACTION_ON_HEAP, DEFAULT_MANAGED_MEMORY_FRACTION);
-	}
-
-	public void setManagedMemoryFractionOffHeap(double managedMemFractionOffHeap) {
-		checkArgument(
-			managedMemFractionOffHeap >= 0.0 && managedMemFractionOffHeap <= 1.0,
-			String.format("managedMemFractionOffHeap should be in range [0.0, 1.0], but was: %s", managedMemFractionOffHeap));
-
-		config.setDouble(MANAGED_MEMORY_FRACTION_OFF_HEAP, managedMemFractionOffHeap);
-	}
-
-	public double getManagedMemoryFractionOffHeap() {
-		return config.getDouble(MANAGED_MEMORY_FRACTION_OFF_HEAP, DEFAULT_MANAGED_MEMORY_FRACTION);
 	}
 
 	public void setTimeCharacteristic(TimeCharacteristic characteristic) {
@@ -423,6 +393,14 @@ public class StreamConfig implements Serializable {
 		} else {
 			return DEFAULT_CHECKPOINTING_MODE;
 		}
+	}
+
+	public void setMaxConcurrentCheckpoints(int maxConcurrentCheckpoints) {
+		config.setInteger(MAX_CONCURRENT_CHECKPOINTS, maxConcurrentCheckpoints);
+	}
+
+	public int getMaxConcurrentCheckpoints() {
+		return config.getInteger(MAX_CONCURRENT_CHECKPOINTS, DEFAULT_MAX_CONCURRENT_CHECKPOINTS);
 	}
 
 	public void setOutEdgesInOrder(List<StreamEdge> outEdgeList) {

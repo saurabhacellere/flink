@@ -30,10 +30,10 @@ import org.apache.flink.streaming.api.scala.DataStream
 import org.apache.flink.table.api.scala.StreamTableEnvironment
 import org.apache.flink.table.dataformat.{BaseRow, BinaryRow, BinaryRowWriter, BinaryString}
 import org.apache.flink.table.planner.runtime.utils.StreamingWithStateTestBase.{HEAP_BACKEND, ROCKSDB_BACKEND, StateBackendMode}
-import org.apache.flink.table.planner.utils.TableTestUtil
 import org.apache.flink.table.runtime.types.TypeInfoLogicalTypeConverter
 import org.apache.flink.table.runtime.typeutils.BaseRowTypeInfo
 import org.apache.flink.table.types.logical.RowType
+
 import org.junit.runners.Parameterized
 import org.junit.{After, Assert, Before}
 
@@ -65,14 +65,14 @@ class StreamingWithStateTestBase(state: StateBackendMode) extends StreamingTestB
         val conf = new Configuration()
         conf.setBoolean(CheckpointingOptions.ASYNC_SNAPSHOTS, true)
         env.setStateBackend(new MemoryStateBackend(
-          "file://" + baseCheckpointPath, null).configure(conf, classLoader))
+          "file://" + baseCheckpointPath, null).configure(conf, classLoader, 1))
       case ROCKSDB_BACKEND =>
         val conf = new Configuration()
         conf.setBoolean(CheckpointingOptions.INCREMENTAL_CHECKPOINTS, true)
         env.setStateBackend(new RocksDBStateBackend(
-          "file://" + baseCheckpointPath).configure(conf, classLoader))
+          "file://" + baseCheckpointPath).configure(conf, classLoader, 1))
     }
-    this.tEnv = StreamTableEnvironment.create(env, TableTestUtil.STREAM_SETTING)
+    this.tEnv = StreamTableEnvironment.create(env)
     FailingCollectionSource.failedBefore = true
   }
 

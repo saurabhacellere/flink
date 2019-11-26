@@ -74,16 +74,11 @@ public class MockStateBackend extends AbstractStateBackend {
 			}
 
 			@Override
-			public void initializeBaseLocations() {
-
-			}
-
-			@Override
 			public CheckpointStorageLocation initializeLocationForCheckpoint(long checkpointId) {
 				return new CheckpointStorageLocation() {
 
 					@Override
-					public CheckpointStateOutputStream createCheckpointStateOutputStream(CheckpointedStateScope scope) {
+					public CheckpointStateOutputStream createCheckpointStateOutputStream(long checkpointId, CheckpointedStateScope scope) {
 						return null;
 					}
 

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,8 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.state.StateBackend;
 import org.apache.flink.runtime.state.StateBackendLoader;
 import org.apache.flink.runtime.state.filesystem.AbstractFileStateBackend;
+import org.apache.flink.runtime.state.filesystem.FsSegmentStateBackend;
+import org.apache.flink.util.TestLogger;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -38,10 +40,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Tests for the RocksDBStateBackendFactory.
+ * Test for {@link RocksDBSegmentStateBackendFactory}.
  */
-public class RocksDBStateBackendFactoryTest {
-
+public class RocksDBSegmentStateBackendFactoryTest extends TestLogger {
 	@Rule
 	public final TemporaryFolder tmp = new TemporaryFolder();
 
@@ -55,10 +56,10 @@ public class RocksDBStateBackendFactoryTest {
 	public void testFactoryName() {
 		// construct the name such that it will not be automatically adjusted on refactorings
 		String factoryName = "org.apache.flink.contrib.streaming.state.Roc";
-		factoryName += "ksDBStateBackendFactory";
+		factoryName += "ksDBSegmentStateBackendFactory";
 
-		// !!! if this fails, the code in StateBackendLoader must be adjusted
-		assertEquals(factoryName, RocksDBStateBackendFactory.class.getName());
+		// !!! if this fails, the code in RocksDBSegmentStateBackendFactory must be adjusted
+		assertEquals(factoryName, RocksDBSegmentStateBackendFactory.class.getName());
 	}
 
 	/**
@@ -79,14 +80,14 @@ public class RocksDBStateBackendFactoryTest {
 		// we configure with the explicit string (rather than AbstractStateBackend#X_STATE_BACKEND_NAME)
 		// to guard against config-breaking changes of the name
 		final Configuration config1 = new Configuration();
-		config1.setString(backendKey, "rocksdb");
+		config1.setString(backendKey, "rocksdb-segment");
 		config1.setString(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir);
 		config1.setString(CheckpointingOptions.SAVEPOINT_DIRECTORY, savepointDir);
 		config1.setString(RocksDBOptions.LOCAL_DIRECTORIES, localDirs);
 		config1.setBoolean(CheckpointingOptions.INCREMENTAL_CHECKPOINTS, incremental);
 
 		final Configuration config2 = new Configuration();
-		config2.setString(backendKey, RocksDBStateBackendFactory.class.getName());
+		config2.setString(backendKey, RocksDBSegmentStateBackendFactory.class.getName());
 		config2.setString(CheckpointingOptions.CHECKPOINTS_DIRECTORY, checkpointDir);
 		config2.setString(CheckpointingOptions.SAVEPOINT_DIRECTORY, savepointDir);
 		config2.setString(RocksDBOptions.LOCAL_DIRECTORIES, localDirs);
@@ -102,7 +103,9 @@ public class RocksDBStateBackendFactoryTest {
 		RocksDBStateBackend fs2 = (RocksDBStateBackend) backend2;
 
 		AbstractFileStateBackend fs1back = (AbstractFileStateBackend) fs1.getCheckpointBackend();
+		assertTrue(fs1back instanceof FsSegmentStateBackend);
 		AbstractFileStateBackend fs2back = (AbstractFileStateBackend) fs2.getCheckpointBackend();
+		assertTrue(fs2back instanceof FsSegmentStateBackend);
 
 		assertEquals(expectedCheckpointsPath, fs1back.getCheckpointPath());
 		assertEquals(expectedCheckpointsPath, fs2back.getCheckpointPath());
@@ -135,7 +138,8 @@ public class RocksDBStateBackendFactoryTest {
 		final Path expectedCheckpointsPath = new Path(appCheckpointDir);
 		final Path expectedSavepointsPath = new Path(savepointDir);
 
-		final RocksDBStateBackend backend = new RocksDBStateBackend(appCheckpointDir, incremental);
+		final RocksDBStateBackend backend = new RocksDBStateBackend(appCheckpointDir, incremental, true);
+		assertTrue(backend.getCheckpointBackend() instanceof FsSegmentStateBackend);
 		backend.setDbStoragePaths(localDir1, localDir2);
 
 		final Configuration config = new Configuration();
@@ -146,7 +150,7 @@ public class RocksDBStateBackendFactoryTest {
 		config.setString(RocksDBOptions.LOCAL_DIRECTORIES, localDir3 + ":" + localDir4);  // this should not be picked up
 
 		final StateBackend loadedBackend =
-				StateBackendLoader.fromApplicationOrConfigOrDefault(backend, config, cl, 1, null);
+			StateBackendLoader.fromApplicationOrConfigOrDefault(backend, config, cl, 1, null);
 		assertTrue(loadedBackend instanceof RocksDBStateBackend);
 
 		final RocksDBStateBackend loadedRocks = (RocksDBStateBackend) loadedBackend;
@@ -155,6 +159,7 @@ public class RocksDBStateBackendFactoryTest {
 		checkPaths(loadedRocks.getDbStoragePaths(), localDir1, localDir2);
 
 		AbstractFileStateBackend fsBackend = (AbstractFileStateBackend) loadedRocks.getCheckpointBackend();
+		assertTrue(fsBackend instanceof FsSegmentStateBackend);
 		assertEquals(expectedCheckpointsPath, fsBackend.getCheckpointPath());
 		assertEquals(expectedSavepointsPath, fsBackend.getSavepointPath());
 	}
@@ -174,3 +179,4 @@ public class RocksDBStateBackendFactoryTest {
 		}
 	}
 }
+

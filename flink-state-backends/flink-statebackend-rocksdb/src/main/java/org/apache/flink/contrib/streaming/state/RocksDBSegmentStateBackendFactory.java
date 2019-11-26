@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,28 +22,26 @@ import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.runtime.state.StateBackendFactory;
-
-import java.io.IOException;
+import org.apache.flink.runtime.state.filesystem.FsSegmentStateBackend;
 
 /**
  * A factory that creates an {@link org.apache.flink.contrib.streaming.state.RocksDBStateBackend}
- * from a configuration.
+ * from a configuration, and use {@link FsSegmentStateBackend} for checkpoint.
  */
-public class RocksDBStateBackendFactory implements StateBackendFactory<RocksDBStateBackend> {
-
+public class RocksDBSegmentStateBackendFactory implements StateBackendFactory<RocksDBStateBackend> {
 	@Override
-	public RocksDBStateBackend createFromConfig(Configuration config, ClassLoader classLoader, int maxConcurrentCheckpoints)
-			throws IllegalConfigurationException, IOException {
-
+	public RocksDBStateBackend createFromConfig(
+		Configuration config, ClassLoader classLoader, int maxConcurrentCheckpoints) throws IllegalConfigurationException {
 		// we need to explicitly read the checkpoint directory here, because that
 		// is a required constructor parameter
 		final String checkpointDirURI = config.getString(CheckpointingOptions.CHECKPOINTS_DIRECTORY);
 		if (checkpointDirURI == null) {
 			throw new IllegalConfigurationException(
 				"Cannot create the RocksDB state backend: The configuration does not specify the " +
-				"checkpoint directory '" + CheckpointingOptions.CHECKPOINTS_DIRECTORY.key() + '\'');
+					"checkpoint directory '" + CheckpointingOptions.CHECKPOINTS_DIRECTORY.key() + '\'');
 		}
 
-		return new RocksDBStateBackend(checkpointDirURI).configure(config, classLoader, maxConcurrentCheckpoints);
+		return new RocksDBStateBackend(new FsSegmentStateBackend(checkpointDirURI)).configure(config, classLoader, maxConcurrentCheckpoints);
 	}
 }
+

@@ -56,7 +56,7 @@ public class BackendForTestStream extends MemoryStateBackend {
 
 	// make no reconfiguration!
 	@Override
-	public MemoryStateBackend configure(Configuration config, ClassLoader classLoader) {
+	public MemoryStateBackend configure(Configuration config, ClassLoader classLoader, int maxConcurrentCheckpoints) {
 		return this;
 	}
 
@@ -90,11 +90,6 @@ public class BackendForTestStream extends MemoryStateBackend {
 		}
 
 		@Override
-		public void initializeBaseLocations() {
-			throw new UnsupportedOperationException();
-		}
-
-		@Override
 		public CheckpointStorageLocation initializeLocationForCheckpoint(long checkpointId) {
 			throw new UnsupportedOperationException();
 		}
@@ -124,7 +119,7 @@ public class BackendForTestStream extends MemoryStateBackend {
 		}
 
 		@Override
-		public CheckpointStateOutputStream createCheckpointStateOutputStream(CheckpointedStateScope scope) throws IOException {
+		public CheckpointStateOutputStream createCheckpointStateOutputStream(long checkpointId, CheckpointedStateScope scope) throws IOException {
 			return streamFactory.get();
 		}
 	}

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,7 +24,7 @@ import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.local.LocalFileSystem;
 import org.apache.flink.runtime.state.CheckpointMetadataOutputStream;
-import org.apache.flink.runtime.state.CheckpointStreamFactory.CheckpointStateOutputStream;
+import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.CheckpointedStateScope;
 
 import org.junit.Rule;
@@ -42,8 +42,7 @@ import static org.junit.Assert.assertThat;
  * Tests verifying that the FsStateBackend passes the entropy injection option
  * to the FileSystem for state payload files, but not for metadata files.
  */
-public class FsStateBackendEntropyTest {
-
+public class FsSegmentStateBackendEntropyTest {
 	static final String ENTROPY_MARKER = "__ENTROPY__";
 	static final String RESOLVED_MARKER = "+RESOLVED+";
 
@@ -57,19 +56,19 @@ public class FsStateBackendEntropyTest {
 		final Path checkpointDir = new Path(Path.fromLocalFile(tmp.newFolder()), ENTROPY_MARKER + "/checkpoints");
 		final String checkpointDirStr = checkpointDir.toString();
 
-		FsCheckpointStorage storage = new FsCheckpointStorage(
-				fs, checkpointDir, null, new JobID(), 1024, 4096);
+		FsSegmentCheckpointStorage storage = new FsSegmentCheckpointStorage(
+			fs, checkpointDir, checkpointDir, new JobID(), 1024, 1024, 1);
 
-		FsCheckpointStorageLocation location = (FsCheckpointStorageLocation)
-				storage.initializeLocationForCheckpoint(96562);
+		FsSegmentCheckpointStorageLocation location = (FsSegmentCheckpointStorageLocation)
+			storage.initializeLocationForCheckpoint(96562);
 
 		assertThat(location.getCheckpointDirectory().toString(), startsWith(checkpointDirStr));
 		assertThat(location.getSharedStateDirectory().toString(), startsWith(checkpointDirStr));
 		assertThat(location.getTaskOwnedStateDirectory().toString(), startsWith(checkpointDirStr));
 		assertThat(location.getMetadataFilePath().toString(), not(containsString(ENTROPY_MARKER)));
 
-		// check entropy in task-owned state
-		try (CheckpointStateOutputStream stream = storage.createTaskOwnedStateStream()) {
+		// check entropy in task-owned state, task owned state use FsCheckpointStateOutputStream.
+		try (CheckpointStreamFactory.CheckpointStateOutputStream stream = storage.createTaskOwnedStateStream()) {
 			stream.flush();
 			FileStateHandle handle = (FileStateHandle) stream.closeAndGetHandle();
 
@@ -79,11 +78,24 @@ public class FsStateBackendEntropyTest {
 		}
 
 		// check entropy in the exclusive/shared state
-		try (CheckpointStateOutputStream stream =
-				location.createCheckpointStateOutputStream(1, CheckpointedStateScope.EXCLUSIVE)) {
+		try (CheckpointStreamFactory.CheckpointStateOutputStream stream =
+				 location.createCheckpointStateOutputStream(1, CheckpointedStateScope.EXCLUSIVE)) {
 
 			stream.flush();
 			FileStateHandle handle = (FileStateHandle) stream.closeAndGetHandle();
+
+			assertNotNull(handle);
+			assertThat(handle.getFilePath().toString(), not(containsString(ENTROPY_MARKER)));
+			assertThat(handle.getFilePath().toString(), containsString(RESOLVED_MARKER));
+		}
+
+		// check entropy in the exclusive/shared state
+		try (CheckpointStreamFactory.CheckpointStateOutputStream stream =
+				 location.createCheckpointStateOutputStream(1, CheckpointedStateScope.SHARED)) {
+
+			// write one byte, so that we'll create the underlying file.
+			stream.write(1);
+			FsSegmentStateHandle handle = (FsSegmentStateHandle) stream.closeAndGetHandle();
 
 			assertNotNull(handle);
 			assertThat(handle.getFilePath().toString(), not(containsString(ENTROPY_MARKER)));
@@ -95,7 +107,7 @@ public class FsStateBackendEntropyTest {
 		try (CheckpointMetadataOutputStream stream = location.createMetadataOutputStream()) {
 			stream.flush();
 			FsCompletedCheckpointStorageLocation handle =
-					(FsCompletedCheckpointStorageLocation) stream.closeAndFinalizeCheckpoint();
+				(FsCompletedCheckpointStorageLocation) stream.closeAndFinalizeCheckpoint();
 
 			assertNotNull(handle);
 
@@ -121,3 +133,4 @@ public class FsStateBackendEntropyTest {
 		}
 	}
 }
+
