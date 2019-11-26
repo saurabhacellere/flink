@@ -33,6 +33,7 @@ import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.streaming.connectors.fs.Clock;
+import org.apache.flink.streaming.connectors.fs.RollingSink;
 import org.apache.flink.streaming.connectors.fs.SequenceFileWriter;
 import org.apache.flink.streaming.connectors.fs.StringWriter;
 import org.apache.flink.streaming.connectors.fs.Writer;
@@ -44,7 +45,9 @@ import org.apache.commons.lang3.time.StopWatch;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocalFileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +61,7 @@ import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -159,16 +163,10 @@ import java.util.UUID;
  * @see SequenceFileWriter
  *
  * @param <T> Type of the elements emitted by this sink
- *
- * @deprecated Please use the
- * {@link org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink StreamingFileSink}
- * instead.
- *
  */
-@Deprecated
 public class BucketingSink<T>
 		extends RichSinkFunction<T>
-		implements InputTypeConfigurable, CheckpointedFunction, CheckpointListener, ProcessingTimeCallback {
+		implements BucketReady, InputTypeConfigurable, CheckpointedFunction, CheckpointListener, ProcessingTimeCallback {
 
 	private static final long serialVersionUID = 1L;
 
@@ -637,32 +635,29 @@ public class BucketingSink<T>
 
 			// verify that truncate actually works
 			Path testPath = new Path(basePath, UUID.randomUUID().toString());
-			try {
-				try (FSDataOutputStream outputStream = fs.create(testPath)) {
-					outputStream.writeUTF("hello");
-				} catch (IOException e) {
-					LOG.error("Could not create file for checking if truncate works.", e);
-					throw new RuntimeException(
-							"Could not create file for checking if truncate works. " +
-									"You can disable support for truncate() completely via " +
-									"BucketingSink.setUseTruncate(false).", e);
-				}
+			try (FSDataOutputStream outputStream = fs.create(testPath)) {
+				outputStream.writeUTF("hello");
+			} catch (IOException e) {
+				LOG.error("Could not create file for checking if truncate works.", e);
+				throw new RuntimeException("Could not create file for checking if truncate works. " +
+					"You can disable support for truncate() completely via " +
+					"BucketingSink.setUseTruncate(false).", e);
+			}
 
-				try {
-					m.invoke(fs, testPath, 2);
-				} catch (IllegalAccessException | InvocationTargetException e) {
-					LOG.debug("Truncate is not supported.", e);
-					m = null;
-				}
-			} finally {
-				try {
-					fs.delete(testPath, false);
-				} catch (IOException e) {
-					LOG.error("Could not delete truncate test file.", e);
-					throw new RuntimeException("Could not delete truncate test file. " +
-							"You can disable support for truncate() completely via " +
-							"BucketingSink.setUseTruncate(false).", e);
-				}
+			try {
+				m.invoke(fs, testPath, 2);
+			} catch (IllegalAccessException | InvocationTargetException e) {
+				LOG.debug("Truncate is not supported.", e);
+				m = null;
+			}
+
+			try {
+				fs.delete(testPath, false);
+			} catch (IOException e) {
+				LOG.error("Could not delete truncate test file.", e);
+				throw new RuntimeException("Could not delete truncate test file. " +
+					"You can disable support for truncate() completely via " +
+					"BucketingSink.setUseTruncate(false).", e);
 			}
 		}
 		return m;
@@ -689,6 +684,7 @@ public class BucketingSink<T>
 	public void notifyCheckpointComplete(long checkpointId) throws Exception {
 		synchronized (state.bucketStates) {
 
+			Set<Path> partitionPaths = new HashSet<>();
 			Iterator<Map.Entry<String, BucketState<T>>> bucketStatesIt = state.bucketStates.entrySet().iterator();
 			while (bucketStatesIt.hasNext()) {
 				BucketState<T> bucketState = bucketStatesIt.next().getValue();
@@ -715,6 +711,7 @@ public class BucketingSink<T>
 									"Moving pending file {} to final location having completed checkpoint {}.",
 									pendingPath,
 									pastCheckpointId);
+								partitionPaths.add(finalPath.getParent());
 							}
 							pendingCheckpointsIt.remove();
 						}
@@ -730,7 +727,28 @@ public class BucketingSink<T>
 					}
 				}
 			}
+			isBucketReady(partitionPaths);
 		}
+	}
+
+	@Override
+	public boolean isBucketReady(Set<Path> bucketPathes) {
+		for (Path path : bucketPathes) {
+			try {
+				RemoteIterator<LocatedFileStatus> files = fs.listFiles(path, false);
+				while (files.hasNext()) {
+					LocatedFileStatus fileStatus = files.next();
+					if (fileStatus.getPath().getName().endsWith(pendingSuffix) ||
+						fileStatus.getPath().getName().endsWith(inProgressSuffix)) {
+						return false;
+					}
+				}
+			} catch (IOException e) {
+				LOG.warn("Failed to access hdfs location {}.", path, e);
+				return false;
+			}
+		}
+		return true;
 	}
 
 	@Override
@@ -783,6 +801,20 @@ public class BucketingSink<T>
 
 			bucketState.pendingFilesPerCheckpoint.clear();
 		}
+	}
+
+	private void handleRestoredRollingSinkState(RollingSink.BucketState restoredState) {
+		restoredState.pendingFiles.clear();
+
+		handlePendingInProgressFile(restoredState.currentFile, restoredState.currentFileValidLength);
+
+		// Now that we've restored the bucket to a valid state, reset the current file info
+		restoredState.currentFile = null;
+		restoredState.currentFileValidLength = -1;
+
+		handlePendingFilesForPreviousCheckpoints(restoredState.pendingFilesPerCheckpoint);
+
+		restoredState.pendingFilesPerCheckpoint.clear();
 	}
 
 	private void handlePendingInProgressFile(String file, long validLength) {
@@ -995,7 +1027,7 @@ public class BucketingSink<T>
 	}
 
 	/**
-	 * Sets the suffix of in-progress part files. The default is {@code ".in-progress"}.
+	 * Sets the suffix of in-progress part files. The default is {@code "in-progress"}.
 	 */
 	public BucketingSink<T> setInProgressSuffix(String inProgressSuffix) {
 		this.inProgressSuffix = inProgressSuffix;
@@ -1043,7 +1075,7 @@ public class BucketingSink<T>
 	}
 
 	/**
-	 * Sets the suffix of part files.  The default is no suffix.
+	 * Sets the prefix of part files.  The default is no suffix.
 	 */
 	public BucketingSink<T> setPartSuffix(String partSuffix) {
 		this.partSuffix = partSuffix;
