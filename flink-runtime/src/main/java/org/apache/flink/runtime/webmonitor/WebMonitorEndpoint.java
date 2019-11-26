@@ -80,6 +80,7 @@ import org.apache.flink.runtime.rest.handler.legacy.metrics.MetricFetcher;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerDetailsHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerLogFileHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerStdoutFileHandler;
+import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerThreadDumpFileHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagersHandler;
 import org.apache.flink.runtime.rest.messages.ClusterConfigurationInfoHeaders;
 import org.apache.flink.runtime.rest.messages.ClusterOverviewHeaders;
@@ -112,6 +113,7 @@ import org.apache.flink.runtime.rest.messages.job.SubtaskExecutionAttemptDetails
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerDetailsHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerLogFileHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerStdoutFileHeaders;
+import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerThreadDumpFileHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagersHeaders;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.util.ExecutorThreadFactory;
@@ -631,8 +633,18 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
 			transientBlobService,
 			cacheEntryDuration);
 
+		final TaskManagerThreadDumpFileHandler taskManagerThreadDumpFileHandler = new TaskManagerThreadDumpFileHandler(
+			leaderRetriever,
+			timeout,
+			responseHeaders,
+			TaskManagerThreadDumpFileHeaders.getInstance(),
+			resourceManagerRetriever,
+			transientBlobService,
+			cacheEntryDuration);
+
 		handlers.add(Tuple2.of(TaskManagerLogFileHeaders.getInstance(), taskManagerLogFileHandler));
 		handlers.add(Tuple2.of(TaskManagerStdoutFileHeaders.getInstance(), taskManagerStdoutFileHandler));
+		handlers.add(Tuple2.of(TaskManagerThreadDumpFileHeaders.getInstance(), taskManagerThreadDumpFileHandler));
 
 		handlers.stream()
 			.map(tuple -> tuple.f1)

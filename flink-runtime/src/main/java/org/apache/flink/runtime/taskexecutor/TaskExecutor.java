@@ -64,7 +64,6 @@ import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.jobmaster.ResourceManagerAddress;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalListener;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
-import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.messages.TaskBackPressureResponse;
 import org.apache.flink.runtime.metrics.groups.TaskManagerMetricGroup;
@@ -114,6 +113,7 @@ import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkException;
 
 import org.apache.flink.shaded.guava18.com.google.common.collect.Sets;
+import org.apache.flink.runtime.util.JvmUtils;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -121,6 +121,7 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -270,7 +271,8 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
 		this.jobManagerConnections = new HashMap<>(4);
 
-		this.hardwareDescription = HardwareDescription.extractFromSystem(taskExecutorServices.getManagedMemorySize());
+		this.hardwareDescription = HardwareDescription.extractFromSystem(
+			taskExecutorServices.getMemoryManager().getMemorySize());
 
 		this.resourceManagerAddress = null;
 		this.resourceManagerConnection = null;
@@ -404,6 +406,8 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 		} catch (Exception e) {
 			exception = ExceptionUtils.firstOrSuppressed(e, exception);
 		}
+
+		taskSlotTable.stop();
 
 		try {
 			resourceManagerLeaderRetriever.stop();
@@ -551,13 +555,6 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 				taskRestore,
 				checkpointResponder);
 
-			MemoryManager memoryManager;
-			try {
-				memoryManager = taskSlotTable.getTaskMemoryManager(tdd.getAllocationId());
-			} catch (SlotNotFoundException e) {
-				throw new TaskSubmissionException("Could not submit task.", e);
-			}
-
 			Task task = new Task(
 				jobInformation,
 				taskInformation,
@@ -568,7 +565,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 				tdd.getProducedPartitions(),
 				tdd.getInputGates(),
 				tdd.getTargetSlotNumber(),
-				memoryManager,
+				taskExecutorServices.getMemoryManager(),
 				taskExecutorServices.getIOManager(),
 				taskExecutorServices.getShuffleEnvironment(),
 				taskExecutorServices.getKvStateService(),
@@ -897,6 +894,8 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			case STDOUT:
 				filePath = taskManagerConfiguration.getTaskManagerStdoutPath();
 				break;
+			case THREAD_DUMP:
+				return putTransientBlobStream(JvmUtils.threadDumpStream(), fileType);
 			default:
 				filePath = null;
 		}
@@ -905,16 +904,12 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			final File file = new File(filePath);
 
 			if (file.exists()) {
-				final TransientBlobCache transientBlobService = blobCacheService.getTransientBlobService();
-				final TransientBlobKey transientBlobKey;
-				try (FileInputStream fileInputStream = new FileInputStream(file)) {
-					transientBlobKey = transientBlobService.putTransient(fileInputStream);
+				try {
+					return putTransientBlobStream(new FileInputStream(file), fileType);
 				} catch (IOException e) {
 					log.debug("Could not upload file {}.", fileType, e);
 					return FutureUtils.completedExceptionally(new FlinkException("Could not upload file " + fileType + '.', e));
 				}
-
-				return CompletableFuture.completedFuture(transientBlobKey);
 			} else {
 				log.debug("The file {} does not exist on the TaskExecutor {}.", fileType, getResourceID());
 				return FutureUtils.completedExceptionally(new FlinkException("The file " + fileType + " does not exist on the TaskExecutor."));
@@ -950,6 +945,19 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	// ======================================================================
 	//  Internal methods
 	// ======================================================================
+
+	private CompletableFuture<TransientBlobKey> putTransientBlobStream(InputStream inputStream, FileType fileType) {
+		final TransientBlobCache transientBlobService = blobCacheService.getTransientBlobService();
+		final TransientBlobKey transientBlobKey;
+
+		try {
+			transientBlobKey = transientBlobService.putTransient(inputStream);
+		} catch (IOException e) {
+			log.debug("Could not upload file {}.", fileType, e);
+			return FutureUtils.completedExceptionally(new FlinkException("Could not upload file " + fileType + '.', e));
+		}
+		return CompletableFuture.completedFuture(transientBlobKey);
+	}
 
 	// ------------------------------------------------------------------------
 	//  Internal resource manager connection methods
