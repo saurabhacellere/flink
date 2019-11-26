@@ -177,181 +177,6 @@ SqlDescribeDatabase SqlDescribeDatabase() :
 
 }
 
-SqlCreate SqlCreateFunction(Span s, boolean replace) :
-{
-    SqlIdentifier functionIdentifier = null;
-    SqlCharStringLiteral functionClassName = null;
-    String functionLanguage = null;
-    boolean ifNotExists = false;
-    boolean isTemporary = false;
-    boolean isSystemFunction = false;
-}
-{
-    [ <TEMPORARY>   {isTemporary = true;}
-        [ <SYSTEM>   { isSystemFunction = true; } ]
-    ]
-
-    <FUNCTION>
-
-    [ <IF> <NOT> <EXISTS> { ifNotExists = true; } ]
-
-    functionIdentifier = CompoundIdentifier()
-
-    <AS> <QUOTED_STRING> {
-        String p = SqlParserUtil.parseString(token.image);
-        functionClassName = SqlLiteral.createCharString(p, getPos());
-    }
-    [<LANGUAGE>
-        (
-            <JAVA>  { functionLanguage = "JAVA"; }
-        |
-            <SCALA> { functionLanguage = "SCALA"; }
-        |
-            <SQL>   { functionLanguage = "SQL"; }
-        )
-    ]
-    {
-        return new SqlCreateFunction(s.pos(), functionIdentifier, functionClassName, functionLanguage,
-                ifNotExists, isTemporary, isSystemFunction);
-    }
-}
-
-SqlDrop SqlDropFunction(Span s, boolean replace) :
-{
-    SqlIdentifier functionIdentifier = null;
-    boolean ifExists = false;
-    boolean isTemporary = false;
-    boolean isSystemFunction = false;
-}
-{
-    [ <TEMPORARY> {isTemporary = true;}
-        [  <SYSTEM>   { isSystemFunction = true; }  ]
-    ]
-    <FUNCTION>
-
-    [ <IF> <EXISTS> { ifExists = true; } ]
-
-    functionIdentifier = CompoundIdentifier()
-
-    {
-        return new SqlDropFunction(s.pos(), functionIdentifier, ifExists, isTemporary, isSystemFunction);
-    }
-}
-
-SqlAlterFunction SqlAlterFunction() :
-{
-    SqlIdentifier functionIdentifier = null;
-    SqlCharStringLiteral functionClassName = null;
-    String functionLanguage = null;
-    SqlParserPos startPos;
-    boolean ifExists = false;
-    boolean isTemporary = false;
-    boolean isSystemFunction = false;
-}
-{
-    <ALTER>
-
-    [ <TEMPORARY> { isTemporary = true; }
-        [  <SYSTEM>   { isSystemFunction = true; } ]
-    ]
-
-    <FUNCTION> { startPos = getPos(); }
-
-    [ <IF> <EXISTS> { ifExists = true; } ]
-
-    functionIdentifier = CompoundIdentifier()
-
-    <AS> <QUOTED_STRING> {
-        String p = SqlParserUtil.parseString(token.image);
-        functionClassName = SqlLiteral.createCharString(p, getPos());
-    }
-
-    [<LANGUAGE>
-        (   <JAVA>  { functionLanguage = "JAVA"; }
-        |
-            <SCALA> { functionLanguage = "SCALA"; }
-        |
-            <SQL>   { functionLanguage = "SQL"; }
-        )
-    ]
-    {
-        return new SqlAlterFunction(startPos.plus(getPos()), functionIdentifier, functionClassName,
-            functionLanguage, ifExists, isTemporary, isSystemFunction);
-    }
-}
-
-SqlShowFunctions SqlShowFunctions() :
-{
-    SqlIdentifier database = null;
-    SqlParserPos pos;
-}
-{
-    <SHOW> <FUNCTIONS> { pos = getPos();}
-    [database = CompoundIdentifier()]
-    {
-        return new SqlShowFunctions(pos, database);
-    }
-}
-
-/**
-* Parse a "Show Tables" metadata query command.
-*/
-SqlShowTables SqlShowTables() :
-{
-}
-{
-    <SHOW> <TABLES>
-    {
-        return new SqlShowTables(getPos());
-    }
-}
-
-/**
- * DESCRIBE [ EXTENDED] [[catalogName.] dataBasesName].tableName sql call.
- * Here we add Rich in className to distinguish from calcite's original SqlDescribeTable.
- */
-SqlRichDescribeTable SqlRichDescribeTable() :
-{
-    SqlIdentifier tableName;
-    SqlParserPos pos;
-    boolean isExtended = false;
-}
-{
-    <DESCRIBE> { pos = getPos();}
-    [ <EXTENDED> { isExtended = true;} ]
-    tableName = CompoundIdentifier()
-    {
-        return new SqlRichDescribeTable(pos, tableName, isExtended);
-    }
-}
-
-SqlAlterTable SqlAlterTable() :
-{
-    SqlParserPos startPos;
-    SqlIdentifier tableIdentifier;
-    SqlIdentifier newTableIdentifier = null;
-    SqlNodeList propertyList = SqlNodeList.EMPTY;
-    boolean isRename = true;
-}
-{
-    <ALTER> <TABLE> { startPos = getPos(); }
-        tableIdentifier = CompoundIdentifier()
-    (
-        <RENAME> <TO> { isRename = true; }
-        newTableIdentifier = CompoundIdentifier()
-    |
-        <SET>   { isRename = false; }
-        propertyList = TableProperties()
-    )
-    {
-        return new SqlAlterTable(startPos.plus(getPos()),
-            tableIdentifier,
-            newTableIdentifier,
-            propertyList,
-            isRename);
-    }
-}
-
 void TableColumn(TableCreationContext context) :
 {
 }
@@ -527,6 +352,42 @@ SqlNodeList TableProperties():
     {  return new SqlNodeList(proList, span.end(this)); }
 }
 
+SqlCreate SqlCreateFunction(Span s, boolean replace) :
+{
+    SqlIdentifier functionName = null;
+    SqlCharStringLiteral functionClassName = null;
+    SqlCharStringLiteral functionLanguage = null;
+    boolean ifNotExists = false;
+    boolean isSystemFunction = false;
+
+}
+{
+    <TEMPORARY>
+    (
+        <SYSTEM>   { isSystemFunction = true; }
+    |
+        {isSystemFunction = false; }
+    )
+    <FUNCTION>
+    (
+        <IF> <NOT> <EXISTS> { ifNotExists = true; }
+    |
+        { ifNotExists = false; }
+    )
+    functionName = CompoundIdentifier()
+    [ <AS> <QUOTED_STRING> {
+        String p = SqlParserUtil.parseString(token.image);
+        functionClassName = SqlLiteral.createCharString(p, getPos());
+    }]
+    [ <LANGUAGE> <QUOTED_STRING> {
+        String lang = SqlParserUtil.parseString(token.image);
+        functionLanguage = SqlLiteral.createCharString(lang, getPos());
+    }]
+    {
+        return new SqlCreateFunction(s.pos(), functionName, functionClassName, functionLanguage, ifNotExists, isSystemFunction);
+    }
+}
+
 SqlCreate SqlCreateTable(Span s, boolean replace) :
 {
     final SqlParserPos startPos = s.pos();
@@ -603,6 +464,40 @@ SqlDrop SqlDropTable(Span s, boolean replace) :
 
     {
          return new SqlDropTable(s.pos(), tableName, ifExists);
+    }
+}
+
+SqlDrop SqlDropFunction(Span s, boolean replace) :
+{
+    SqlIdentifier functionName = null;
+    SqlCharStringLiteral functionLanguage = null;
+    boolean ifExists = false;
+    boolean isSystemFunction = false;
+
+}
+{
+    <TEMPORARY>
+    (
+        <SYSTEM>  { isSystemFunction = true; }
+    |
+        {isSystemFunction = false; }
+    )
+    <FUNCTION>
+
+    (
+        <IF> <EXISTS> { ifExists = true; }
+    |
+        { ifExists = false; }
+    )
+
+    functionName = CompoundIdentifier()
+
+    [ <LANGUAGE> <QUOTED_STRING> {
+        String lang = SqlParserUtil.parseString(token.image);
+        functionLanguage = SqlLiteral.createCharString(lang, getPos());
+    }]
+    {
+        return new SqlDropFunction(s.pos(), functionName, functionLanguage, ifExists, isSystemFunction);
     }
 }
 

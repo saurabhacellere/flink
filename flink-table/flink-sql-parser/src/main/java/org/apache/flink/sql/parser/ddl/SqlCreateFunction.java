@@ -42,32 +42,24 @@ import static java.util.Objects.requireNonNull;
  * CREATE FUNCTION DDL sql call.
  */
 public class SqlCreateFunction extends SqlCreate implements ExtendedSqlNode {
-
 	public static final SqlSpecialOperator OPERATOR = new SqlSpecialOperator("CREATE FUNCTION", SqlKind.CREATE_FUNCTION);
 
-	private final SqlIdentifier functionIdentifier;
-
-	private final SqlCharStringLiteral functionClassName;
-
-	private final String functionLanguage;
-
-	private final boolean isTemporary;
-
-	private final boolean isSystemFunction;
+	private SqlIdentifier functionName;
+	private SqlCharStringLiteral functionClassName;
+	private SqlCharStringLiteral functionLanguage;
+	private boolean isSystemFunction;
 
 	public SqlCreateFunction(
-			SqlParserPos pos,
-			SqlIdentifier functionIdentifier,
-			SqlCharStringLiteral functionClassName,
-			String functionLanguage,
-			boolean ifNotExists,
-			boolean isTemporary,
-			boolean isSystemFunction) {
+		SqlParserPos pos,
+		SqlIdentifier functionName,
+		SqlCharStringLiteral functionClassName,
+		SqlCharStringLiteral functionLanguage,
+		boolean ifNotExists,
+		boolean isSystemFunction) {
 		super(OPERATOR, pos, false, ifNotExists);
-		this.functionIdentifier = requireNonNull(functionIdentifier);
+		this.functionName = requireNonNull(functionName);
 		this.functionClassName = requireNonNull(functionClassName);
 		this.isSystemFunction = requireNonNull(isSystemFunction);
-		this.isTemporary = isTemporary;
 		this.functionLanguage = functionLanguage;
 	}
 
@@ -79,28 +71,27 @@ public class SqlCreateFunction extends SqlCreate implements ExtendedSqlNode {
 	@Nonnull
 	@Override
 	public List<SqlNode> getOperandList() {
-		return ImmutableNullableList.of(functionIdentifier, functionClassName);
+		return ImmutableNullableList.of(functionName, functionClassName, functionLanguage);
 	}
 
 	@Override
 	public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
 		writer.keyword("CREATE");
-		if (isTemporary) {
-			writer.keyword("TEMPORARY");
-		}
 		if (isSystemFunction) {
-			writer.keyword("SYSTEM");
+			writer.keyword("TEMPORARY SYSTEM");
+		} else {
+			writer.keyword("TEMPORARY");
 		}
 		writer.keyword("FUNCTION");
 		if (ifNotExists) {
 			writer.keyword("IF NOT EXISTS");
 		}
-		functionIdentifier.unparse(writer, leftPrec, rightPrec);
+		functionName.unparse(writer, leftPrec, rightPrec);
 		writer.keyword("AS");
 		functionClassName.unparse(writer, leftPrec, rightPrec);
 		if (functionLanguage != null) {
 			writer.keyword("LANGUAGE");
-			writer.keyword(functionLanguage);
+			functionLanguage.unparse(writer, leftPrec, rightPrec);
 		}
 	}
 
@@ -117,15 +108,19 @@ public class SqlCreateFunction extends SqlCreate implements ExtendedSqlNode {
 		return isSystemFunction;
 	}
 
+	public SqlIdentifier getFunctionName() {
+		return this.functionName;
+	}
+
 	public SqlCharStringLiteral getFunctionClassName() {
 		return this.functionClassName;
 	}
 
-	public String getFunctionLanguage() {
+	public SqlCharStringLiteral getFunctionLanguage() {
 		return this.functionLanguage;
 	}
 
-	public String[] getFunctionIdentifier() {
-		return functionIdentifier.names.toArray(new String[0]);
+	public String[] fullFunctionName() {
+		return functionName.names.toArray(new String[0]);
 	}
 }
