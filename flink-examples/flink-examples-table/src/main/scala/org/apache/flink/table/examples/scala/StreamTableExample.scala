@@ -19,6 +19,7 @@ package org.apache.flink.table.examples.scala
 
 import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.scala.{DataStream, StreamExecutionEnvironment}
+import org.apache.flink.table.api.TableEnvironment
 import org.apache.flink.table.api.scala._
 
 /**
@@ -38,17 +39,17 @@ object StreamTableExample {
 
     // set up execution environment
     val env = StreamExecutionEnvironment.getExecutionEnvironment
-    val tEnv = StreamTableEnvironment.create(env)
+    val tEnv = TableEnvironment.getTableEnvironment(env)
 
     val orderA = env.fromCollection(Seq(
       Order(1L, "beer", 3),
       Order(1L, "diaper", 4),
-      Order(3L, "rubber", 2))).toTable(tEnv)
+      Order(3L, "rubber", 2))).toTableFromAppendStream(tEnv)
 
     val orderB = env.fromCollection(Seq(
       Order(2L, "pen", 3),
       Order(2L, "rubber", 3),
-      Order(4L, "beer", 1))).toTable(tEnv)
+      Order(4L, "beer", 1))).toTableFromAppendStream(tEnv)
 
     // union the two tables
     val result: DataStream[Order] = orderA.unionAll(orderB)
