@@ -279,7 +279,9 @@ public class SingleInputGate extends InputGate {
 				int totalBuffers = 0;
 
 				for (InputChannel channel : inputChannels.values()) {
-					totalBuffers += channel.unsynchronizedGetNumberOfQueuedBuffers();
+					if (channel instanceof RemoteInputChannel) {
+						totalBuffers += ((RemoteInputChannel) channel).getNumberOfQueuedBuffers();
+					}
 				}
 
 				return  totalBuffers;
@@ -516,7 +518,7 @@ public class SingleInputGate extends InputGate {
 				}
 
 				if (inputChannelsWithData.isEmpty()) {
-					availabilityHelper.resetUnavailable();
+					resetIsAvailable();
 				}
 
 				if (result.isPresent()) {
@@ -559,6 +561,7 @@ public class SingleInputGate extends InputGate {
 					markAvailable();
 				}
 
+				currentChannel.notifySubpartitionConsumed();
 				currentChannel.releaseAllResources();
 			}
 
@@ -567,11 +570,12 @@ public class SingleInputGate extends InputGate {
 	}
 
 	private void markAvailable() {
-		CompletableFuture<?> toNotify;
+		CompletableFuture<?> toNotfiy;
 		synchronized (inputChannelsWithData) {
-			toNotify = availabilityHelper.getUnavailableToResetAvailable();
+			toNotfiy = isAvailable;
+			isAvailable = AVAILABLE;
 		}
-		toNotify.complete(null);
+		toNotfiy.complete(null);
 	}
 
 	@Override
@@ -628,7 +632,8 @@ public class SingleInputGate extends InputGate {
 
 			if (availableChannels == 0) {
 				inputChannelsWithData.notifyAll();
-				toNotify = availabilityHelper.getUnavailableToResetAvailable();
+				toNotify = isAvailable;
+				isAvailable = AVAILABLE;
 			}
 		}
 
@@ -648,7 +653,7 @@ public class SingleInputGate extends InputGate {
 					inputChannelsWithData.wait();
 				}
 				else {
-					availabilityHelper.resetUnavailable();
+					resetIsAvailable();
 					return Optional.empty();
 				}
 			}
