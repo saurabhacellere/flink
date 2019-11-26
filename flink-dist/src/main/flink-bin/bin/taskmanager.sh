@@ -40,7 +40,7 @@ if [[ $STARTSTOP == "start" ]] || [[ $STARTSTOP == "start-foreground" ]]; then
 
     # if memory allocation mode is lazy and no other JVM options are set,
     # set the 'Concurrent Mark Sweep GC'
-    if [ -z "${FLINK_ENV_JAVA_OPTS}" ] && [ -z "${FLINK_ENV_JAVA_OPTS_TM}" ]; then
+    if [[ $FLINK_TM_MEM_PRE_ALLOCATE == "false" ]] && [ -z "${FLINK_ENV_JAVA_OPTS}" ] && [ -z "${FLINK_ENV_JAVA_OPTS_TM}" ]; then
         export JVM_ARGS="$JVM_ARGS -XX:+UseG1GC"
     fi
 
@@ -60,7 +60,7 @@ if [[ $STARTSTOP == "start" ]] || [[ $STARTSTOP == "start-foreground" ]]; then
 
         TM_HEAP_SIZE=$(calculateTaskManagerHeapSizeMB)
         # Long.MAX_VALUE in TB: This is an upper bound, much less direct memory will be used
-        TM_MAX_OFFHEAP_SIZE="8388607T"
+        TM_MAX_OFFHEAP_SIZE=${FLINK_TM_MAX_OFFHEAP_SIZE}
 
         export JVM_ARGS="${JVM_ARGS} -Xms${TM_HEAP_SIZE}M -Xmx${TM_HEAP_SIZE}M -XX:MaxDirectMemorySize=${TM_MAX_OFFHEAP_SIZE}"
 
