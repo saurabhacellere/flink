@@ -23,9 +23,8 @@ import org.apache.flink.api.dag.Transformation
 import org.apache.flink.streaming.api.scala.{StreamExecutionEnvironment, _}
 import org.apache.flink.table.api.TableConfig
 import org.apache.flink.table.catalog.{CatalogManager, FunctionCatalog, GenericInMemoryCatalog}
-import org.apache.flink.table.module.ModuleManager
-import org.apache.flink.table.operations.ModifyOperation
-import org.apache.flink.table.utils.{ExecutorMock, PlannerMock}
+import org.apache.flink.table.delegation.{Executor, Planner}
+import org.apache.flink.table.operations.{ModifyOperation, Operation}
 import org.apache.flink.types.Row
 
 import org.hamcrest.CoreMatchers.equalTo
@@ -33,6 +32,7 @@ import org.junit.Assert.assertThat
 import org.junit.Test
 
 import java.util.{Collections, List => JList}
+import java.util.function.Consumer
 
 /**
  * Tests for [[StreamTableEnvironmentImpl]].
@@ -84,23 +84,35 @@ class StreamTableEnvironmentImplTest {
     val catalogManager = new CatalogManager(
       "cat",
       new GenericInMemoryCatalog("cat", "db"))
-    val moduleManager = new ModuleManager
     new StreamTableEnvironmentImpl(
       catalogManager,
-      moduleManager,
-      new FunctionCatalog(catalogManager, moduleManager),
+      new FunctionCatalog(catalogManager),
       new TableConfig,
       env,
       new TestPlanner(elements.javaStream.getTransformation),
-      new ExecutorMock,
+      executor,
       true)
   }
 
-  private class TestPlanner(transformation: Transformation[_]) extends PlannerMock {
+  private class TestPlanner(transformation: Transformation[_]) extends Planner {
+    def parse(statement: String, operationPreConsumer: Consumer[Operation]) =
+      throw new AssertionError("Should not be called")
+
     override def translate(modifyOperations: JList[ModifyOperation])
       : JList[Transformation[_]] = {
       Collections.singletonList(transformation)
     }
+
+    override def explain(operations: JList[Operation], extended: Boolean) =
+      throw new AssertionError("Should not be called")
+
+    override def getCompletionHints(statement: String, position: Int) =
+      throw new AssertionError("Should not be called")
   }
 
+  private val executor = new Executor() {
+    override def apply(transformations: JList[Transformation[_]]): Unit = {}
+
+    override def execute(jobName: String) = throw new AssertionError("Should not be called")
+  }
 }

@@ -25,12 +25,13 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.QueryOperation;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * This interface serves two purposes:
  * <ul>
- * <li>SQL parser via {@link #getParser()} - transforms a SQL string into a Table API specific objects
- * e.g. tree of {@link Operation}s</li>
+ * <li>SQL parser - transforms a SQL string into a Table API specific tree of
+ * {@link Operation}s</li>
  * <li>relational planner - provides a way to plan, optimize and transform tree of
  * {@link ModifyOperation} into a runnable form ({@link Transformation})</li>
  * </ul>.
@@ -43,7 +44,7 @@ import java.util.List;
  * of {@link Planner#translate(List)} will strip any execution configuration from
  * the DataStream information.
  *
- * <p>All Tables referenced in either {@link Parser#parse(String)} or
+ * <p>All Tables referenced in either {@link Planner#parse(String, Consumer)} or
  * {@link Planner#translate(List)} should be previously registered in a
  * {@link org.apache.flink.table.catalog.CatalogManager}, which will be provided during
  * instantiation of the {@link Planner}.
@@ -52,11 +53,19 @@ import java.util.List;
 public interface Planner {
 
 	/**
-	 * Retrieves a {@link Parser} that provides methods for parsing a SQL string.
+	 * Entry point for parsing sql queries expressed as a String.
 	 *
-	 * @return initialized {@link Parser}
+	 * <p><b>Note:</b>If the created {@link Operation} is a {@link QueryOperation}
+	 * it must be in a form that will be understood by the
+	 * {@link Planner#translate(List)} method.
+	 *
+	 * <p>The produced Operation trees should already be validated.
+	 *
+	 * @param statement the sql statement to evaluate
+	 * @param operationPreConsumer pre consumer for specific operations
+	 * @return parsed queries as trees of relational {@link Operation}s
 	 */
-	Parser getParser();
+	Iterable<Operation> parse(String statement, Consumer<Operation> operationPreConsumer);
 
 	/**
 	 * Converts a relational tree of {@link ModifyOperation}s into a set of runnable

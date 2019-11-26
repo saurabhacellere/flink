@@ -21,17 +21,19 @@ package org.apache.flink.table.planner.delegation
 import org.apache.flink.annotation.VisibleForTesting
 import org.apache.flink.api.dag.Transformation
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.sql.parser.dml.RichSqlInsert
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
 import org.apache.flink.table.api.config.ExecutionConfigOptions
 import org.apache.flink.table.api.{TableConfig, TableEnvironment, TableException}
 import org.apache.flink.table.catalog._
-import org.apache.flink.table.delegation.{Executor, Parser, Planner}
+import org.apache.flink.table.delegation.{Executor, Planner}
 import org.apache.flink.table.factories.{TableFactoryService, TableFactoryUtil, TableSinkFactory}
 import org.apache.flink.table.operations.OutputConversionModifyOperation.UpdateMode
 import org.apache.flink.table.operations._
-import org.apache.flink.table.planner.calcite.{CalciteParser, FlinkPlannerImpl, FlinkRelBuilder, FlinkTypeFactory}
+import org.apache.flink.table.planner.calcite.{FlinkPlannerImpl, FlinkRelBuilder, FlinkTypeFactory}
 import org.apache.flink.table.planner.catalog.CatalogManagerCalciteSchema
 import org.apache.flink.table.planner.expressions.PlannerTypeInferenceUtilImpl
+import org.apache.flink.table.planner.operations.SqlToOperationConverter
 import org.apache.flink.table.planner.plan.nodes.calcite.LogicalSink
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode
 import org.apache.flink.table.planner.plan.nodes.physical.FlinkPhysicalRel
@@ -40,16 +42,18 @@ import org.apache.flink.table.planner.plan.reuse.SubplanReuser
 import org.apache.flink.table.planner.plan.utils.SameRelObjectShuttle
 import org.apache.flink.table.planner.sinks.{DataStreamTableSink, TableSinkUtils}
 import org.apache.flink.table.planner.utils.JavaScalaConversionUtil
-import org.apache.flink.table.sinks.{OverwritableTableSink, TableSink}
+import org.apache.flink.table.sinks.{OverwritableTableSink, PartitionableTableSink, TableSink}
 import org.apache.flink.table.types.utils.LegacyTypeInfoDataTypeConverter
 
 import org.apache.calcite.jdbc.CalciteSchemaBuilder.asRootSchema
 import org.apache.calcite.plan.{RelTrait, RelTraitDef}
 import org.apache.calcite.rel.RelNode
+import org.apache.calcite.sql.{SqlKind, SqlNode}
 import org.apache.calcite.tools.FrameworkConfig
 
+import java.lang.{Iterable => JIterable}
 import java.util
-import java.util.function.{Supplier => JSupplier}
+import java.util.function.Consumer
 
 import _root_.scala.collection.JavaConversions._
 
@@ -71,7 +75,7 @@ abstract class PlannerBase(
     executor: Executor,
     config: TableConfig,
     val functionCatalog: FunctionCatalog,
-    val catalogManager: CatalogManager,
+    catalogManager: CatalogManager,
     isStreamingMode: Boolean)
   extends Planner {
 
@@ -80,28 +84,13 @@ abstract class PlannerBase(
 
   executor.asInstanceOf[ExecutorBase].setTableConfig(config)
 
-  @VisibleForTesting
-  private[flink] val plannerContext: PlannerContext =
+  private val plannerContext: PlannerContext =
     new PlannerContext(
       config,
       functionCatalog,
-      catalogManager,
       asRootSchema(new CatalogManagerCalciteSchema(catalogManager, isStreamingMode)),
       getTraitDefs.toList
     )
-
-  private val parser: Parser = new ParserImpl(
-    catalogManager,
-    new JSupplier[FlinkPlannerImpl] {
-      override def get(): FlinkPlannerImpl = createFlinkPlanner
-    },
-    // we do not cache the parser in order to use the most up to
-    // date configuration. Users might change parser configuration in TableConfig in between
-    // parsing statements
-    new JSupplier[CalciteParser] {
-      override def get(): CalciteParser = plannerContext.createCalciteParser()
-    }
-  )
 
   /** Returns the [[FlinkRelBuilder]] of this TableEnvironment. */
   private[flink] def getRelBuilder: FlinkRelBuilder = {
@@ -133,17 +122,39 @@ abstract class PlannerBase(
     executor.asInstanceOf[ExecutorBase].getExecutionEnvironment
   }
 
-  override def getParser: Parser = parser
+  override def parse(
+      stmt: String,
+      operationPreConsumer: Consumer[Operation]): JIterable[Operation] = {
+
+    val planner = createFlinkPlanner
+    // parse the sql query
+    val parsedList = planner.parse(stmt)
+
+    val parseHelper = (sqlNode: SqlNode) => {
+      val operation = SqlToOperationConverter.convert(planner, sqlNode)
+      operationPreConsumer.accept(operation)
+      operation
+    }
+
+    import _root_.scala.collection.JavaConverters._
+    parsedList.map {
+      case insert: RichSqlInsert =>
+        parseHelper(insert)
+      case query if query.getKind.belongsTo(SqlKind.QUERY) =>
+        parseHelper(query)
+      case ddl if ddl.getKind.belongsTo(SqlKind.DDL) =>
+        parseHelper(ddl)
+      case _ =>
+        throw new TableException(s"Unsupported query: $stmt")
+    }.asJava
+  }
 
   override def translate(
       modifyOperations: util.List[ModifyOperation]): util.List[Transformation[_]] = {
     if (modifyOperations.isEmpty) {
       return List.empty[Transformation[_]]
     }
-    // prepare the execEnv before translating
     mergeParameters()
-    overrideEnvParallelism()
-
     val relNodes = modifyOperations.map(translateToRel)
     val optimizedRelNodes = optimize(relNodes)
     val execNodes = translateToExecNodePlan(optimizedRelNodes)
@@ -155,7 +166,7 @@ abstract class PlannerBase(
     val defaultParallelism = getTableConfig.getConfiguration.getInteger(
       ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM)
     if (defaultParallelism > 0) {
-      getExecEnv.getConfig.setParallelism(defaultParallelism)
+      getExecEnv.setParallelism(defaultParallelism)
     }
   }
 
@@ -176,9 +187,16 @@ abstract class PlannerBase(
 
       case catalogSink: CatalogSinkModifyOperation =>
         val input = getRelBuilder.queryOperation(modifyOperation.getChild).build()
-        val identifier = catalogSink.getTableIdentifier
-        getTableSink(identifier).map { case (table, sink) =>
-          TableSinkUtils.validateSink(catalogSink, identifier, sink, table.getPartitionKeys)
+        val identifier = catalogManager.qualifyIdentifier(catalogSink.getTablePath: _*)
+        getTableSink(identifier).map(sink => {
+          TableSinkUtils.validateSink(catalogSink, identifier, sink)
+          sink match {
+            case partitionableSink: PartitionableTableSink
+              if partitionableSink.getPartitionFieldNames != null
+                && partitionableSink.getPartitionFieldNames.nonEmpty =>
+              partitionableSink.setStaticPartition(catalogSink.getStaticPartitions)
+            case _ =>
+          }
           sink match {
             case overwritableTableSink: OverwritableTableSink =>
               overwritableTableSink.setOverwrite(catalogSink.isOverwrite)
@@ -187,16 +205,10 @@ abstract class PlannerBase(
                 s"${classOf[OverwritableTableSink].getSimpleName} but actually got " +
                 sink.getClass.getName)
           }
-          LogicalSink.create(
-            input,
-            sink,
-            identifier.toString,
-            table,
-            catalogSink.getStaticPartitions.toMap)
-        } match {
+          LogicalSink.create(input, sink, catalogSink.getTablePath.mkString("."))
+        }) match {
           case Some(sinkRel) => sinkRel
-          case None =>
-            throw new TableException(s"Sink ${catalogSink.getTableIdentifier} does not exists")
+          case None => throw new TableException(s"Sink ${catalogSink.getTablePath} does not exists")
         }
 
       case outputConversion: OutputConversionModifyOperation =>
@@ -255,32 +267,28 @@ abstract class PlannerBase(
     */
   protected def translateToPlan(execNodes: util.List[ExecNode[_, _]]): util.List[Transformation[_]]
 
-  private def getTableSink(objectIdentifier: ObjectIdentifier)
-    : Option[(CatalogTable, TableSink[_])] = {
-    JavaScalaConversionUtil.toScala(catalogManager.getTable(objectIdentifier))
-      .map(_.getTable) match {
+  private def getTableSink(objectIdentifier: ObjectIdentifier): Option[TableSink[_]] = {
+    JavaScalaConversionUtil.toScala(catalogManager.getTable(objectIdentifier)) match {
       case Some(s) if s.isInstanceOf[ConnectorCatalogTable[_, _]] =>
-        val table = s.asInstanceOf[ConnectorCatalogTable[_, _]]
-        JavaScalaConversionUtil.toScala(table.getTableSink) match {
-          case Some(sink) => Some(table, sink)
-          case None => None
-        }
+        JavaScalaConversionUtil
+          .toScala(s.asInstanceOf[ConnectorCatalogTable[_, _]].getTableSink)
 
       case Some(s) if s.isInstanceOf[CatalogTable] =>
+
         val catalog = catalogManager.getCatalog(objectIdentifier.getCatalogName)
-        val table = s.asInstanceOf[CatalogTable]
+        val catalogTable = s.asInstanceOf[CatalogTable]
         if (catalog.isPresent && catalog.get().getTableFactory.isPresent) {
           val objectPath = objectIdentifier.toObjectPath
           val sink = TableFactoryUtil.createTableSinkForCatalogTable(
             catalog.get(),
-            table,
+            catalogTable,
             objectPath)
           if (sink.isPresent) {
-            return Option(table, sink.get())
+            return Option(sink.get())
           }
         }
-        val sinkProperties = table.toProperties
-        Option(table, TableFactoryService.find(classOf[TableSinkFactory[_]], sinkProperties)
+        val sinkProperties = catalogTable.toProperties
+        Option(TableFactoryService.find(classOf[TableSinkFactory[_]], sinkProperties)
           .createTableSink(sinkProperties))
 
       case _ => None

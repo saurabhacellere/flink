@@ -19,17 +19,12 @@
 package org.apache.flink.table.sqlexec;
 
 import org.apache.flink.sql.parser.ddl.SqlCreateTable;
-import org.apache.flink.sql.parser.dml.RichSqlInsert;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableConfig;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.api.Types;
-import org.apache.flink.table.calcite.FlinkPlannerImpl;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogManager;
-import org.apache.flink.table.catalog.CatalogManagerCalciteSchema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.FunctionCatalog;
@@ -38,24 +33,25 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.expressions.ExpressionBridge;
-import org.apache.flink.table.expressions.PlannerExpressionConverter;
 import org.apache.flink.table.operations.CatalogSinkModifyOperation;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateTableOperation;
-import org.apache.flink.table.planner.PlanningConfigurationBuilder;
+import org.apache.flink.table.planner.calcite.FlinkPlannerImpl;
+import org.apache.flink.table.planner.catalog.CatalogManagerCalciteSchema;
+import org.apache.flink.table.planner.delegation.PlannerContext;
+import org.apache.flink.table.planner.operations.SqlConversionException;
+import org.apache.flink.table.planner.operations.SqlToOperationConverter;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.utils.TypeConversions;
 
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlNodeList;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -67,7 +63,9 @@ import static org.apache.calcite.jdbc.CalciteSchemaBuilder.asRootSchema;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
-/** Test cases for {@link SqlToOperationConverter}. **/
+/**
+ * Test cases for {@link org.apache.flink.table.planner.operations.SqlToOperationConverter}.
+ */
 public class SqlToOperationConverterTest {
 	private final TableConfig tableConfig = new TableConfig();
 	private final Catalog catalog = new GenericInMemoryCatalog("MockCatalog",
@@ -75,15 +73,11 @@ public class SqlToOperationConverterTest {
 	private final CatalogManager catalogManager =
 		new CatalogManager("builtin", catalog);
 	private final FunctionCatalog functionCatalog = new FunctionCatalog(catalogManager);
-	private final PlanningConfigurationBuilder planningConfigurationBuilder =
-		new PlanningConfigurationBuilder(tableConfig,
+	private final PlannerContext plannerContext =
+		new PlannerContext(tableConfig,
 			functionCatalog,
 			asRootSchema(new CatalogManagerCalciteSchema(catalogManager, false)),
-			new ExpressionBridge<>(functionCatalog,
-				PlannerExpressionConverter.INSTANCE()));
-
-	@Rule
-	public ExpectedException expectedEx = ExpectedException.none();
+			new ArrayList<>());
 
 	@Before
 	public void before() throws TableAlreadyExistException, DatabaseNotExistException {
@@ -123,10 +117,8 @@ public class SqlToOperationConverterTest {
 			"    'connector' = 'kafka', \n" +
 			"    'kafka.topic' = 'log.test'\n" +
 			")\n";
-		final FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.DEFAULT);
-		SqlNode node = planner.parse(sql).get(0);
-		assert node instanceof SqlCreateTable;
-		Operation operation = SqlToOperationConverter.convert(planner, node);
+		FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.DEFAULT);
+		Operation operation = parse(sql, planner).get(0);
 		assert operation instanceof CreateTableOperation;
 		CreateTableOperation op = (CreateTableOperation) operation;
 		CatalogTable catalogTable = op.getCatalogTable();
@@ -139,6 +131,25 @@ public class SqlToOperationConverterTest {
 				DataTypes.VARCHAR(Integer.MAX_VALUE),
 				DataTypes.INT(),
 				DataTypes.VARCHAR(Integer.MAX_VALUE)});
+	}
+
+	@Test(expected = SqlConversionException.class)
+	public void testCreateTableWithPkUniqueKeys() {
+		FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.DEFAULT);
+		final String sql = "CREATE TABLE tbl1 (\n" +
+			"  a bigint,\n" +
+			"  b varchar, \n" +
+			"  c int, \n" +
+			"  d varchar, \n" +
+			"  primary key(a), \n" +
+			"  unique(a, b) \n" +
+			")\n" +
+			"  PARTITIONED BY (a, d)\n" +
+			"  with (\n" +
+			"    'connector' = 'kafka', \n" +
+			"    'kafka.topic' = 'log.test'\n" +
+			")\n";
+		parse(sql, planner);
 	}
 
 	@Test
@@ -171,34 +182,11 @@ public class SqlToOperationConverterTest {
 		assertEquals(expected, sortedProperties.toString());
 	}
 
-	@Test(expected = SqlConversionException.class)
-	public void testCreateTableWithPkUniqueKeys() {
-		final String sql = "CREATE TABLE tbl1 (\n" +
-			"  a bigint,\n" +
-			"  b varchar, \n" +
-			"  c int, \n" +
-			"  d varchar, \n" +
-			"  primary key(a), \n" +
-			"  unique(a, b) \n" +
-			")\n" +
-			"  PARTITIONED BY (a, d)\n" +
-			"  with (\n" +
-			"    'connector' = 'kafka', \n" +
-			"    'kafka.topic' = 'log.test'\n" +
-			")\n";
-		final FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.DEFAULT);
-		SqlNode node = planner.parse(sql).get(0);
-		assert node instanceof SqlCreateTable;
-		SqlToOperationConverter.convert(planner, node);
-	}
-
 	@Test
 	public void testSqlInsertWithStaticPartition() {
 		final String sql = "insert into t1 partition(a=1) select b, c, d from t2";
 		FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.HIVE);
-		SqlNode node = planner.parse(sql).get(0);
-		assert node instanceof RichSqlInsert;
-		Operation operation = SqlToOperationConverter.convert(planner, node);
+		Operation operation = parse(sql, planner).get(0);
 		assert operation instanceof CatalogSinkModifyOperation;
 		CatalogSinkModifyOperation sinkModifyOperation = (CatalogSinkModifyOperation) operation;
 		final Map<String, String> expectedStaticPartitions = new HashMap<>();
@@ -209,46 +197,28 @@ public class SqlToOperationConverterTest {
 	@Test // TODO: tweak the tests when FLINK-13604 is fixed.
 	public void testCreateTableWithFullDataTypes() {
 		final List<TestItem> testItems = Arrays.asList(
-			// Expect to be DataTypes.CHAR(1).
-			createTestItem("CHAR", DataTypes.STRING()),
-			// Expect to be DataTypes.CHAR(1).notNull().
-			createTestItem("CHAR NOT NULL", DataTypes.STRING()),
-			// Expect to be DataTypes.CHAR(1).
-			createTestItem("CHAR NULL", DataTypes.STRING()),
-			// Expect to be DataTypes.CHAR(33).
-			createTestItem("CHAR(33)", DataTypes.STRING()),
+			createTestItem("CHAR", DataTypes.CHAR(1)),
+			createTestItem("CHAR NOT NULL", DataTypes.CHAR(1).notNull()),
+			createTestItem("CHAR NULL", DataTypes.CHAR(1)),
+			createTestItem("CHAR(33)", DataTypes.CHAR(33)),
 			createTestItem("VARCHAR", DataTypes.STRING()),
-			// Expect to be DataTypes.VARCHAR(33).
-			createTestItem("VARCHAR(33)", DataTypes.STRING()),
+			createTestItem("VARCHAR(33)", DataTypes.VARCHAR(33)),
 			createTestItem("STRING", DataTypes.STRING()),
 			createTestItem("BOOLEAN", DataTypes.BOOLEAN()),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("DECIMAL",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("DEC",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("NUMERIC",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("DECIMAL(10)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("DEC(10)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 0).
-			createTestItem("NUMERIC(10)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 3).
-			createTestItem("DECIMAL(10, 3)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 3).
-			createTestItem("DEC(10, 3)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
-			// Expect to be DECIMAL(10, 3).
-			createTestItem("NUMERIC(10, 3)",
-				TypeConversions.fromLegacyInfoToDataType(Types.DECIMAL())),
+			createTestItem("BINARY", DataTypes.BINARY(1)),
+			createTestItem("BINARY(33)", DataTypes.BINARY(33)),
+			createTestItem("VARBINARY", DataTypes.BYTES()),
+			createTestItem("VARBINARY(33)", DataTypes.VARBINARY(33)),
+			createTestItem("BYTES", DataTypes.BYTES()),
+			createTestItem("DECIMAL", DataTypes.DECIMAL(10, 0)),
+			createTestItem("DEC", DataTypes.DECIMAL(10, 0)),
+			createTestItem("NUMERIC", DataTypes.DECIMAL(10, 0)),
+			createTestItem("DECIMAL(10)", DataTypes.DECIMAL(10, 0)),
+			createTestItem("DEC(10)", DataTypes.DECIMAL(10, 0)),
+			createTestItem("NUMERIC(10)", DataTypes.DECIMAL(10, 0)),
+			createTestItem("DECIMAL(10, 3)", DataTypes.DECIMAL(10, 3)),
+			createTestItem("DEC(10, 3)", DataTypes.DECIMAL(10, 3)),
+			createTestItem("NUMERIC(10, 3)", DataTypes.DECIMAL(10, 3)),
 			createTestItem("TINYINT", DataTypes.TINYINT()),
 			createTestItem("SMALLINT", DataTypes.SMALLINT()),
 			createTestItem("INTEGER", DataTypes.INT()),
@@ -257,48 +227,38 @@ public class SqlToOperationConverterTest {
 			createTestItem("FLOAT", DataTypes.FLOAT()),
 			createTestItem("DOUBLE", DataTypes.DOUBLE()),
 			createTestItem("DOUBLE PRECISION", DataTypes.DOUBLE()),
-			createTestItem("DATE",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_DATE())),
-			createTestItem("TIME",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIME())),
-			createTestItem("TIME WITHOUT TIME ZONE",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIME())),
-			// Expect to be Time(3).
-			createTestItem("TIME(3)",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIME())),
-			// Expect to be Time(3).
-			createTestItem("TIME(3) WITHOUT TIME ZONE",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIME())),
-			createTestItem("TIMESTAMP",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIMESTAMP())),
-			createTestItem("TIMESTAMP WITHOUT TIME ZONE",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIMESTAMP())),
-			// Expect to be timestamp(3).
-			createTestItem("TIMESTAMP(3)",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIMESTAMP())),
-			// Expect to be timestamp(3).
-			createTestItem("TIMESTAMP(3) WITHOUT TIME ZONE",
-				TypeConversions.fromLegacyInfoToDataType(Types.SQL_TIMESTAMP())),
-			// Expect to be ARRAY<INT NOT NULL>.
+			createTestItem("DATE", DataTypes.DATE()),
+			createTestItem("TIME", DataTypes.TIME()),
+			createTestItem("TIME WITHOUT TIME ZONE", DataTypes.TIME()),
+			// Expect to be TIME(3).
+			createTestItem("TIME(3)", DataTypes.TIME()),
+			// Expect to be TIME(3).
+			createTestItem("TIME(3) WITHOUT TIME ZONE", DataTypes.TIME()),
+			createTestItem("TIMESTAMP", DataTypes.TIMESTAMP(3)),
+			createTestItem("TIMESTAMP WITHOUT TIME ZONE", DataTypes.TIMESTAMP(3)),
+			createTestItem("TIMESTAMP(3)", DataTypes.TIMESTAMP(3)),
+			createTestItem("TIMESTAMP(3) WITHOUT TIME ZONE", DataTypes.TIMESTAMP(3)),
+			createTestItem("TIMESTAMP WITH LOCAL TIME ZONE",
+				DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)),
+			createTestItem("TIMESTAMP(3) WITH LOCAL TIME ZONE",
+				DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)),
+			createTestItem("ARRAY<TIMESTAMP(3) WITH LOCAL TIME ZONE>",
+				DataTypes.ARRAY(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))),
 			createTestItem("ARRAY<INT NOT NULL>",
-				DataTypes.ARRAY(DataTypes.INT())),
+				DataTypes.ARRAY(DataTypes.INT().notNull())),
 			createTestItem("INT ARRAY", DataTypes.ARRAY(DataTypes.INT())),
-			// Expect to be ARRAY<INT NOT NULL>.
 			createTestItem("INT NOT NULL ARRAY",
-				DataTypes.ARRAY(DataTypes.INT())),
-			// Expect to be ARRAY<INT> NOT NULL.
+				DataTypes.ARRAY(DataTypes.INT().notNull())),
 			createTestItem("INT ARRAY NOT NULL",
-				DataTypes.ARRAY(DataTypes.INT())),
-			// Expect to be MULTISET<INT NOT NULL>.
+				DataTypes.ARRAY(DataTypes.INT()).notNull()),
 			createTestItem("MULTISET<INT NOT NULL>",
+				DataTypes.MULTISET(DataTypes.INT().notNull())),
+			createTestItem("INT MULTISET",
 				DataTypes.MULTISET(DataTypes.INT())),
-			createTestItem("INT MULTISET", DataTypes.MULTISET(DataTypes.INT())),
-			// Expect to be MULTISET<INT NOT NULL>.
 			createTestItem("INT NOT NULL MULTISET",
-				DataTypes.MULTISET(DataTypes.INT())),
-			// Expect to be MULTISET<INT> NOT NULL.
+				DataTypes.MULTISET(DataTypes.INT().notNull())),
 			createTestItem("INT MULTISET NOT NULL",
-				DataTypes.MULTISET(DataTypes.INT())),
+				DataTypes.MULTISET(DataTypes.INT()).notNull()),
 			createTestItem("MAP<BIGINT, BOOLEAN>",
 				DataTypes.MAP(DataTypes.BIGINT(), DataTypes.BOOLEAN())),
 			// Expect to be ROW<`f0` INT NOT NULL, `f1` BOOLEAN>.
@@ -318,16 +278,11 @@ public class SqlToOperationConverterTest {
 			createTestItem("ROW<>", DataTypes.ROW()),
 			createTestItem("ROW()", DataTypes.ROW()),
 			// Expect to be ROW<`f0` INT NOT NULL '...', `f1` BOOLEAN '...'>.
-			createTestItem("ROW<f0 INT NOT NULL 'This is a comment.', "
-					+ "f1 BOOLEAN 'This as well.'>",
+			createTestItem("ROW<f0 INT NOT NULL 'This is a comment.',"
+				+ " f1 BOOLEAN 'This as well.'>",
 				DataTypes.ROW(
 					DataTypes.FIELD("f0", DataTypes.INT()),
 					DataTypes.FIELD("f1", DataTypes.BOOLEAN()))),
-			createTestItem("ROW<f0 INT, f1 BOOLEAN> ARRAY",
-				DataTypes.ARRAY(
-					DataTypes.ROW(
-						DataTypes.FIELD("f0", DataTypes.INT()),
-						DataTypes.FIELD("f1", DataTypes.BOOLEAN())))),
 			createTestItem("ARRAY<ROW<f0 INT, f1 BOOLEAN>>",
 				DataTypes.ARRAY(
 					DataTypes.ROW(
@@ -375,34 +330,6 @@ public class SqlToOperationConverterTest {
 		assertArrayEquals(expectedDataTypes, schema.getFieldDataTypes());
 	}
 
-	@Test
-	public void testCreateTableWithUnSupportedDataTypes() {
-		final List<TestItem> testItems = Arrays.asList(
-			createTestItem("ARRAY<TIMESTAMP(3) WITH LOCAL TIME ZONE>",
-				"Type is not supported: TIMESTAMP_WITH_LOCAL_TIME_ZONE"),
-			createTestItem("TIMESTAMP(3) WITH LOCAL TIME ZONE",
-				"Type is not supported: TIMESTAMP_WITH_LOCAL_TIME_ZONE"),
-			createTestItem("TIMESTAMP WITH LOCAL TIME ZONE",
-				"Type is not supported: TIMESTAMP_WITH_LOCAL_TIME_ZONE"),
-			createTestItem("BYTES", "Type is not supported: VARBINARY"),
-			createTestItem("VARBINARY(33)", "Type is not supported: VARBINARY"),
-			createTestItem("VARBINARY", "Type is not supported: VARBINARY"),
-			createTestItem("BINARY(33)", "Type is not supported: BINARY"),
-			createTestItem("BINARY", "Type is not supported: BINARY")
-		);
-		final String sqlTemplate = "create table t1(\n" +
-			"  f0 %s)";
-		final FlinkPlannerImpl planner = getPlannerBySqlDialect(SqlDialect.DEFAULT);
-		for (TestItem item : testItems) {
-			String sql = String.format(sqlTemplate, item.testExpr);
-			SqlNode node = planner.parse(sql).get(0);
-			assert node instanceof SqlCreateTable;
-			expectedEx.expect(TableException.class);
-			expectedEx.expectMessage(item.expectedError);
-			SqlToOperationConverter.convert(planner, node);
-		}
-	}
-
 	//~ Tool Methods ----------------------------------------------------------
 
 	private static TestItem createTestItem(Object... args) {
@@ -417,9 +344,17 @@ public class SqlToOperationConverterTest {
 		return testItem;
 	}
 
+	private List<Operation> parse(String sql, FlinkPlannerImpl planner) {
+		SqlNodeList nodeList = planner.parse(sql);
+		return nodeList.getList()
+			.stream()
+			.map(node -> SqlToOperationConverter.convert(planner, node))
+			.collect(Collectors.toList());
+	}
+
 	private FlinkPlannerImpl getPlannerBySqlDialect(SqlDialect sqlDialect) {
 		tableConfig.setSqlDialect(sqlDialect);
-		return planningConfigurationBuilder.createFlinkPlanner(catalogManager.getCurrentCatalog(),
+		return plannerContext.createFlinkPlanner(catalogManager.getCurrentCatalog(),
 			catalogManager.getCurrentDatabase());
 	}
 
@@ -455,4 +390,5 @@ public class SqlToOperationConverterTest {
 			return this.testExpr;
 		}
 	}
+
 }
