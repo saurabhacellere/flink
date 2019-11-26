@@ -63,9 +63,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.flink.runtime.io.network.buffer.BufferBuilderTestUtils.buildSingleBuffer;
 import static org.apache.flink.runtime.io.network.partition.InputChannelTestUtils.createSingleInputGate;
-import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasProperty;
 import static org.hamcrest.Matchers.is;
@@ -732,7 +730,7 @@ public class RemoteInputChannelTest {
 				networkBufferPool.createBufferPool(numFloatingBuffers, numFloatingBuffers);
 			inputGate.setBufferPool(bufferPool);
 
-			buffer = checkNotNull(bufferPool.requestBuffer());
+			buffer = bufferPool.requestBufferBlocking();
 
 			// trigger subscription to buffer pool
 			failingRemoteIC.onSenderBacklog(1);
@@ -956,7 +954,7 @@ public class RemoteInputChannelTest {
 
 			final Callable<Void> bufferPoolInteractionsTask = () -> {
 				for (int i = 0; i < retries; ++i) {
-					Buffer buffer = buildSingleBuffer(bufferPool.requestBufferBuilderBlocking());
+					Buffer buffer = bufferPool.requestBufferBlocking();
 					buffer.recycleBuffer();
 				}
 				return null;
