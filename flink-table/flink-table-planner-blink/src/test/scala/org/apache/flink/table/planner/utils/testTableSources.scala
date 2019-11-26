@@ -27,14 +27,14 @@ import org.apache.flink.api.java.typeutils.RowTypeInfo
 import org.apache.flink.core.io.InputSplit
 import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment
-import org.apache.flink.table.api.{DataTypes, TableEnvironment, TableSchema, Types}
+import org.apache.flink.table.api.{TableEnvironment, TableSchema, Types}
 import org.apache.flink.table.catalog.{CatalogTableImpl, ObjectPath}
-import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.{CONNECTOR, CONNECTOR_TYPE}
-import org.apache.flink.table.descriptors.{DescriptorProperties, Schema}
+import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.CONNECTOR_TYPE
+import org.apache.flink.table.descriptors.DescriptorProperties
 import org.apache.flink.table.expressions.utils.ApiExpressionUtils.unresolvedCall
-import org.apache.flink.table.expressions.{CallExpression, Expression, FieldReferenceExpression, ValueLiteralExpression}
-import org.apache.flink.table.factories.{StreamTableSourceFactory, TableSourceFactory}
-import org.apache.flink.table.functions.BuiltInFunctionDefinitions
+import org.apache.flink.table.expressions.{CallExpression, Expression, FieldReferenceExpression, UnresolvedCallExpression, ValueLiteralExpression}
+import org.apache.flink.table.factories.TableSourceFactory
+import org.apache.flink.table.functions.{BuiltInFunctionDefinition, BuiltInFunctionDefinitions}
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions.AND
 import org.apache.flink.table.planner.runtime.utils.BatchTestBase.row
 import org.apache.flink.table.planner.runtime.utils.TimeTestUtil.EventTimeSourceFunction
@@ -45,10 +45,9 @@ import org.apache.flink.table.sources.wmstrategies.{AscendingTimestamps, Preserv
 import org.apache.flink.table.types.DataType
 import org.apache.flink.table.types.utils.TypeConversions.fromLegacyInfoToDataType
 import org.apache.flink.types.Row
-
 import java.io.{File, FileOutputStream, OutputStreamWriter}
 import java.util
-import java.util.{Collections, function, ArrayList => JArrayList, List => JList, Map => JMap}
+import java.util.{Collections, function, List => JList, Map => JMap}
 
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
@@ -336,37 +335,6 @@ class TestNestedProjectableTableSource(
   }
 }
 
-/** Table source factory to find and create [[TestProjectableTableSource]]. */
-class TestProjectableTableSourceFactory extends StreamTableSourceFactory[Row] {
-  override def createStreamTableSource(properties: JMap[String, String])
-  : StreamTableSource[Row] = {
-    val descriptorProps = new DescriptorProperties()
-    descriptorProps.putProperties(properties)
-    val isBounded = descriptorProps.getBoolean("is-bounded")
-    val tableSchema = descriptorProps.getTableSchema(Schema.SCHEMA)
-    // Build physical row type.
-    val schemaBuilder = TableSchema.builder()
-    tableSchema
-      .getTableColumns
-      .filter(c => !c.isGenerated)
-      .foreach(c => schemaBuilder.field(c.getName, c.getType))
-    val rowTypeInfo = schemaBuilder.build().toRowType
-    new TestProjectableTableSource(isBounded, tableSchema, rowTypeInfo, Seq())
-  }
-
-  override def requiredContext(): JMap[String, String] = {
-    val context = new util.HashMap[String, String]()
-    context.put(CONNECTOR_TYPE, "TestProjectableSource")
-    context
-  }
-
-  override def supportedProperties(): JList[String] = {
-    val supported = new JArrayList[String]()
-    supported.add("*")
-    supported
-  }
-}
-
 /**
   * A data source that implements some very basic filtering in-memory in order to test
   * expression push-down logic.
@@ -384,6 +352,7 @@ class TestFilterableTableSource(
     data: Seq[Row],
     filterableFields: Set[String] = Set(),
     filterPredicates: Seq[Expression] = Seq(),
+    filterBuiltInFunctions: Set[String] = Set(),
     val filterPushedDown: Boolean = false)
   extends StreamTableSource[Row]
   with FilterableTableSource[Row] {
@@ -425,7 +394,8 @@ class TestFilterableTableSource(
       data,
       filterableFields,
       predicatesToUse,
-      filterPushedDown = true)
+      filterPushedDown = true,
+      filterBuiltInFunctions = filterBuiltInFunctions)
   }
 
   override def isFilterPushedDown: Boolean = filterPushedDown
@@ -445,6 +415,12 @@ class TestFilterableTableSource(
     (children.head, children.last) match {
       case (f: FieldReferenceExpression, _: ValueLiteralExpression) =>
         filterableFields.contains(f.getName)
+      case (f: UnresolvedCallExpression, _: ValueLiteralExpression) =>
+        f.getFunctionDefinition match {
+          case b: BuiltInFunctionDefinition =>
+            filterBuiltInFunctions.contains(b.getName)
+          case _ => false
+        }
       case (_: ValueLiteralExpression, f: FieldReferenceExpression) =>
         filterableFields.contains(f.getName)
       case (f1: FieldReferenceExpression, f2: FieldReferenceExpression) =>
@@ -552,6 +528,31 @@ object TestFilterableTableSource {
     new TestFilterableTableSource(isBounded, rowTypeInfo, rows, filterableFields)
   }
 
+  /**
+    * A filterable data source with custom data.
+    *
+    * @param isBounded whether this is a bounded source
+    * @param rowTypeInfo The type of the data. Its expected that both types and field
+    *                    names are provided.
+    * @param rows The data as a sequence of rows.
+    * @param filterableFields The fields that are allowed to be filtered on.
+    * @param filterableBuiltInFunctions Allow pushdown for
+    *                                   BuiltInFunctionDefinition names
+    * @return The table source.
+    */
+  def apply(isBounded: Boolean,
+            rowTypeInfo: RowTypeInfo,
+            rows: Seq[Row],
+            filterableFields: Set[String],
+            filterableBuiltInFunctions: Set[String]): TestFilterableTableSource =
+    new TestFilterableTableSource(
+      isBounded,
+      rowTypeInfo,
+      rows,
+      filterableFields,
+      filterBuiltInFunctions = filterableBuiltInFunctions
+    )
+
   private lazy val defaultFilterableFields = Set("amount")
 
   private lazy val defaultTypeInfo: RowTypeInfo = {
@@ -571,29 +572,6 @@ object TestFilterableTableSource {
         cnt.toInt.asInstanceOf[AnyRef],
         cnt.toDouble.asInstanceOf[AnyRef])
     }
-  }
-}
-
-/** Table source factory to find and create [[TestFilterableTableSource]]. */
-class TestFilterableTableSourceFactory extends StreamTableSourceFactory[Row] {
-  override def createStreamTableSource(properties: JMap[String, String])
-    : StreamTableSource[Row] = {
-    val descriptorProps = new DescriptorProperties()
-    descriptorProps.putProperties(properties)
-    val isBounded = descriptorProps.getBoolean("is-bounded")
-    TestFilterableTableSource.apply(isBounded)
-  }
-
-  override def requiredContext(): JMap[String, String] = {
-    val context = new util.HashMap[String, String]()
-    context.put(CONNECTOR_TYPE, "TestFilterableSource")
-    context
-  }
-
-  override def supportedProperties(): JList[String] = {
-    val supported = new JArrayList[String]()
-    supported.add("*")
-    supported
   }
 }
 
@@ -763,18 +741,11 @@ class TestPartitionableSourceFactory extends TableSourceFactory[Row] {
 }
 
 object TestPartitionableSourceFactory {
-  private val tableSchema: TableSchema = TableSchema.builder()
-    .field("id", DataTypes.INT())
-    .field("name", DataTypes.STRING())
-    .field("part1", DataTypes.STRING())
-    .field("part2", DataTypes.INT())
-    .build()
 
   def registerTableSource(
       tEnv: TableEnvironment,
       tableName: String,
       isBounded: Boolean,
-      tableSchema: TableSchema = tableSchema,
       remainingPartitions: JList[JMap[String, String]] = null): Unit = {
     val properties = new DescriptorProperties()
     properties.putString("is-bounded", isBounded.toString)
@@ -790,8 +761,15 @@ object TestPartitionableSourceFactory {
       }
     }
 
+    val fieldTypes: Array[TypeInformation[_]] = Array(
+      BasicTypeInfo.INT_TYPE_INFO,
+      BasicTypeInfo.STRING_TYPE_INFO,
+      BasicTypeInfo.STRING_TYPE_INFO,
+      BasicTypeInfo.INT_TYPE_INFO)
+    val fieldNames = Array("id", "name", "part1", "part2")
+
     val table = new CatalogTableImpl(
-      tableSchema,
+      new TableSchema(fieldNames, fieldTypes),
       util.Arrays.asList[String]("part1", "part2"),
       properties.asMap(),
       ""
