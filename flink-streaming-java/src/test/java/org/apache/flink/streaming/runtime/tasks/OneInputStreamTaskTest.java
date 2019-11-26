@@ -80,6 +80,8 @@ import scala.concurrent.duration.Deadline;
 import scala.concurrent.duration.FiniteDuration;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -109,20 +111,20 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.setupOutputForSingletonOperatorChain();
 
 		StreamConfig streamConfig = testHarness.getStreamConfig();
-		StreamMap<String, String> mapOperator = new StreamMap<>(new TestOpenCloseMapFunction());
+		StreamMap<String, String> mapOperator = new StreamMap<String, String>(new TestOpenCloseMapFunction());
 		streamConfig.setStreamOperator(mapOperator);
 		streamConfig.setOperatorID(new OperatorID());
 
 		long initialTime = 0L;
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<Object>();
 
 		testHarness.invoke();
 		testHarness.waitForTaskRunning();
 
-		testHarness.processElement(new StreamRecord<>("Hello", initialTime + 1));
-		testHarness.processElement(new StreamRecord<>("Ciao", initialTime + 2));
-		expectedOutput.add(new StreamRecord<>("Hello", initialTime + 1));
-		expectedOutput.add(new StreamRecord<>("Ciao", initialTime + 2));
+		testHarness.processElement(new StreamRecord<String>("Hello", initialTime + 1));
+		testHarness.processElement(new StreamRecord<String>("Ciao", initialTime + 2));
+		expectedOutput.add(new StreamRecord<String>("Hello", initialTime + 1));
+		expectedOutput.add(new StreamRecord<String>("Ciao", initialTime + 2));
 
 		testHarness.waitForInputProcessing();
 
@@ -143,6 +145,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 	 * forwarded watermark must be the minimum of the watermarks of all active inputs.
 	 */
 	@Test
+	@SuppressWarnings("unchecked")
 	public void testWatermarkAndStreamStatusForwarding() throws Exception {
 
 		final OneInputStreamTaskTestHarness<String, String> testHarness =
@@ -154,11 +157,11 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.setupOutputForSingletonOperatorChain();
 
 		StreamConfig streamConfig = testHarness.getStreamConfig();
-		StreamMap<String, String> mapOperator = new StreamMap<>(new IdentityMap());
+		StreamMap<String, String> mapOperator = new StreamMap<String, String>(new IdentityMap());
 		streamConfig.setStreamOperator(mapOperator);
 		streamConfig.setOperatorID(new OperatorID());
 
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<Object>();
 		long initialTime = 0L;
 
 		testHarness.invoke();
@@ -182,10 +185,10 @@ public class OneInputStreamTaskTest extends TestLogger {
 			testHarness.getOutput());
 
 		// contrary to checkpoint barriers these elements are not blocked by watermarks
-		testHarness.processElement(new StreamRecord<>("Hello", initialTime));
-		testHarness.processElement(new StreamRecord<>("Ciao", initialTime));
-		expectedOutput.add(new StreamRecord<>("Hello", initialTime));
-		expectedOutput.add(new StreamRecord<>("Ciao", initialTime));
+		testHarness.processElement(new StreamRecord<String>("Hello", initialTime));
+		testHarness.processElement(new StreamRecord<String>("Ciao", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Hello", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Ciao", initialTime));
 
 		testHarness.processElement(new Watermark(initialTime + 4), 0, 0);
 		testHarness.processElement(new Watermark(initialTime + 3), 0, 1);
@@ -244,6 +247,8 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 		List<String> resultElements = TestHarnessUtil.getRawElementsFromOutput(testHarness.getOutput());
 		assertEquals(2, resultElements.size());
+		TestingStreamOperator.numberRestoreCalls = 0;
+		TestingStreamOperator.numberSnapshotCalls = 0;
 	}
 
 	/**
@@ -276,7 +281,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 		// --------------------- begin test ---------------------
 
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<Object>();
 
 		testHarness.invoke();
 		testHarness.waitForTaskRunning();
@@ -366,11 +371,11 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.setupOutputForSingletonOperatorChain();
 
 		StreamConfig streamConfig = testHarness.getStreamConfig();
-		StreamMap<String, String> mapOperator = new StreamMap<>(new IdentityMap());
+		StreamMap<String, String> mapOperator = new StreamMap<String, String>(new IdentityMap());
 		streamConfig.setStreamOperator(mapOperator);
 		streamConfig.setOperatorID(new OperatorID());
 
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<Object>();
 		long initialTime = 0L;
 
 		testHarness.invoke();
@@ -380,16 +385,16 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 		// These elements should be buffered until we receive barriers from
 		// all inputs
-		testHarness.processElement(new StreamRecord<>("Hello-0-0", initialTime), 0, 0);
-		testHarness.processElement(new StreamRecord<>("Ciao-0-0", initialTime), 0, 0);
+		testHarness.processElement(new StreamRecord<String>("Hello-0-0", initialTime), 0, 0);
+		testHarness.processElement(new StreamRecord<String>("Ciao-0-0", initialTime), 0, 0);
 
 		// These elements should be forwarded, since we did not yet receive a checkpoint barrier
 		// on that input, only add to same input, otherwise we would not know the ordering
 		// of the output since the Task might read the inputs in any order
-		testHarness.processElement(new StreamRecord<>("Hello-1-1", initialTime), 1, 1);
-		testHarness.processElement(new StreamRecord<>("Ciao-1-1", initialTime), 1, 1);
-		expectedOutput.add(new StreamRecord<>("Hello-1-1", initialTime));
-		expectedOutput.add(new StreamRecord<>("Ciao-1-1", initialTime));
+		testHarness.processElement(new StreamRecord<String>("Hello-1-1", initialTime), 1, 1);
+		testHarness.processElement(new StreamRecord<String>("Ciao-1-1", initialTime), 1, 1);
+		expectedOutput.add(new StreamRecord<String>("Hello-1-1", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Ciao-1-1", initialTime));
 
 		testHarness.waitForInputProcessing();
 		// we should not yet see the barrier, only the two elements from non-blocked input
@@ -403,14 +408,16 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 		// now we should see the barrier and after that the buffered elements
 		expectedOutput.add(new CheckpointBarrier(0, 0, CheckpointOptions.forCheckpointWithDefaultLocation()));
-		expectedOutput.add(new StreamRecord<>("Hello-0-0", initialTime));
-		expectedOutput.add(new StreamRecord<>("Ciao-0-0", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Hello-0-0", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Ciao-0-0", initialTime));
 
 		testHarness.endInput();
 
 		testHarness.waitForTaskCompletion();
 
 		TestHarnessUtil.assertOutputEquals("Output was not correct.", expectedOutput, testHarness.getOutput());
+		TestingStreamOperator.numberRestoreCalls = 0;
+		TestingStreamOperator.numberSnapshotCalls = 0;
 	}
 
 	/**
@@ -429,11 +436,11 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.setupOutputForSingletonOperatorChain();
 
 		StreamConfig streamConfig = testHarness.getStreamConfig();
-		StreamMap<String, String> mapOperator = new StreamMap<>(new IdentityMap());
+		StreamMap<String, String> mapOperator = new StreamMap<String, String>(new IdentityMap());
 		streamConfig.setStreamOperator(mapOperator);
 		streamConfig.setOperatorID(new OperatorID());
 
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<Object>();
 		long initialTime = 0L;
 
 		testHarness.invoke();
@@ -443,16 +450,16 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 		// These elements should be buffered until we receive barriers from
 		// all inputs
-		testHarness.processElement(new StreamRecord<>("Hello-0-0", initialTime), 0, 0);
-		testHarness.processElement(new StreamRecord<>("Ciao-0-0", initialTime), 0, 0);
+		testHarness.processElement(new StreamRecord<String>("Hello-0-0", initialTime), 0, 0);
+		testHarness.processElement(new StreamRecord<String>("Ciao-0-0", initialTime), 0, 0);
 
 		// These elements should be forwarded, since we did not yet receive a checkpoint barrier
 		// on that input, only add to same input, otherwise we would not know the ordering
 		// of the output since the Task might read the inputs in any order
-		testHarness.processElement(new StreamRecord<>("Hello-1-1", initialTime), 1, 1);
-		testHarness.processElement(new StreamRecord<>("Ciao-1-1", initialTime), 1, 1);
-		expectedOutput.add(new StreamRecord<>("Hello-1-1", initialTime));
-		expectedOutput.add(new StreamRecord<>("Ciao-1-1", initialTime));
+		testHarness.processElement(new StreamRecord<String>("Hello-1-1", initialTime), 1, 1);
+		testHarness.processElement(new StreamRecord<String>("Ciao-1-1", initialTime), 1, 1);
+		expectedOutput.add(new StreamRecord<String>("Hello-1-1", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Ciao-1-1", initialTime));
 
 		testHarness.waitForInputProcessing();
 		// we should not yet see the barrier, only the two elements from non-blocked input
@@ -466,8 +473,8 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.processEvent(new CheckpointBarrier(1, 1, CheckpointOptions.forCheckpointWithDefaultLocation()), 1, 1);
 
 		expectedOutput.add(new CancelCheckpointMarker(0));
-		expectedOutput.add(new StreamRecord<>("Hello-0-0", initialTime));
-		expectedOutput.add(new StreamRecord<>("Ciao-0-0", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Hello-0-0", initialTime));
+		expectedOutput.add(new StreamRecord<String>("Ciao-0-0", initialTime));
 		expectedOutput.add(new CheckpointBarrier(1, 1, CheckpointOptions.forCheckpointWithDefaultLocation()));
 
 		testHarness.waitForInputProcessing();
@@ -520,7 +527,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 		TestingStreamOperator.numberRestoreCalls = 0;
 
 		testHarness.invoke();
-		testHarness.waitForTaskRunning();
+		testHarness.waitForTaskRunning(deadline.timeLeft().toMillis());
 
 		final OneInputStreamTask<String, String> streamTask = testHarness.getTask();
 
@@ -569,6 +576,91 @@ public class OneInputStreamTaskTest extends TestLogger {
 		TestingStreamOperator.numberSnapshotCalls = 0;
 	}
 
+	/**
+	 * Tests that the stream task can cancel pending async checkpoint when that checkpoint is aborted.
+	 */
+	@Test
+	public void testAbortPendingAsyncCheckpoints() throws Exception {
+		final Deadline deadline = new FiniteDuration(2, TimeUnit.MINUTES).fromNow();
+		final OneInputStreamTaskTestHarness<String, String> testHarness = new OneInputStreamTaskTestHarness<>(
+			OneInputStreamTask::new, BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.STRING_TYPE_INFO);
+
+		int numberChainedTasks = 11;
+
+		configureChainedTestingStreamOperator(testHarness.getStreamConfig(), numberChainedTasks);
+		testHarness.invoke();
+		testHarness.waitForTaskRunning(deadline.timeLeft().toMillis());
+
+		final OneInputStreamTask<String, String> streamTask = testHarness.getTask();
+
+		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(1L, 1L);
+		streamTask.triggerCheckpointAsync(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false).get();
+		Map<Long, StreamTask.AsyncCheckpointRunnable> asyncCheckpointOperations = streamTask.getAsyncCheckpointOperations();
+		assertEquals(1, asyncCheckpointOperations.size());
+		assertEquals(1L, (long) asyncCheckpointOperations.keySet().iterator().next());
+		StreamTask.AsyncCheckpointRunnable chk1Runnable = streamTask.getAsyncCheckpointOperations().get(checkpointMetaData.getCheckpointId());
+		assertNotNull(chk1Runnable);
+		assertFalse(chk1Runnable.isCancelled());
+
+		checkpointMetaData = new CheckpointMetaData(2L, 2L);
+		streamTask.triggerCheckpointAsync(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false).get();
+		streamTask.notifyCheckpointAbortAsync(1L).get();
+		asyncCheckpointOperations = streamTask.getAsyncCheckpointOperations();
+		assertEquals(1, asyncCheckpointOperations.size());
+		assertEquals(2L, (long) asyncCheckpointOperations.keySet().iterator().next());
+		assertTrue(chk1Runnable.isCancelled());
+
+		StreamTask.AsyncCheckpointRunnable chk2Runnable = streamTask.getAsyncCheckpointOperations().get(checkpointMetaData.getCheckpointId());
+		assertNotNull(chk2Runnable);
+		assertFalse(chk2Runnable.isCancelled());
+
+		checkpointMetaData = new CheckpointMetaData(3L, 3L);
+		streamTask.triggerCheckpointAsync(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false).get();
+		StreamTask.AsyncCheckpointRunnable chk3Runnable = streamTask.getAsyncCheckpointOperations().get(checkpointMetaData.getCheckpointId());
+		streamTask.notifyCheckpointAbortAsync(3L).get();
+		asyncCheckpointOperations = streamTask.getAsyncCheckpointOperations();
+		assertEquals(1, asyncCheckpointOperations.size());
+		assertEquals(2L, (long) asyncCheckpointOperations.keySet().iterator().next());
+		assertNotNull(chk3Runnable);
+		assertTrue(chk3Runnable.isCancelled());
+		assertFalse(chk2Runnable.isCancelled());
+
+		testHarness.endInput();
+		testHarness.waitForTaskCompletion(deadline.timeLeft().toMillis());
+	}
+
+	/**
+	 * Tests that the stream task would not execute sync checkpoint when that checkpoint is aborted.
+	 */
+	@Test
+	public void testAbortSyncCheckpoint() throws Exception {
+		final Deadline deadline = new FiniteDuration(2, TimeUnit.MINUTES).fromNow();
+		final OneInputStreamTaskTestHarness<String, String> testHarness = new OneInputStreamTaskTestHarness<>(
+			OneInputStreamTask::new, BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.STRING_TYPE_INFO);
+
+		int numberChainedTasks = 11;
+
+		configureChainedTestingStreamOperator(testHarness.getStreamConfig(), numberChainedTasks);
+
+		testHarness.invoke();
+		testHarness.waitForTaskRunning(deadline.timeLeft().toMillis());
+
+		final OneInputStreamTask<String, String> streamTask = testHarness.getTask();
+		streamTask.notifyCheckpointAbortAsync(1L).get();
+		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(1L, 1L);
+		streamTask.triggerCheckpointAsync(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false).get();
+		Map<Long, StreamTask.AsyncCheckpointRunnable> asyncCheckpointOperations = streamTask.getAsyncCheckpointOperations();
+		assertTrue(asyncCheckpointOperations.isEmpty());
+
+		checkpointMetaData = new CheckpointMetaData(2L, 2L);
+		streamTask.triggerCheckpointAsync(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation(), false).get();
+		asyncCheckpointOperations = streamTask.getAsyncCheckpointOperations();
+		assertFalse(asyncCheckpointOperations.isEmpty());
+		assertEquals(2L, (long) asyncCheckpointOperations.keySet().iterator().next());
+		testHarness.endInput();
+		testHarness.waitForTaskCompletion(deadline.timeLeft().toMillis());
+	}
+
 	@Test
 	public void testQuiesceTimerServiceAfterOpClose() throws Exception {
 
@@ -586,7 +678,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.waitForTaskRunning();
 
 		SystemProcessingTimeService timeService = (SystemProcessingTimeService)
-				testHarness.getTimerService();
+				testHarness.getTask().getProcessingTimeService();
 
 		// verify that the timer service is running
 		Assert.assertTrue(timeService.isAlive());
@@ -622,9 +714,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 		testHarness.waitForTaskCompletion();
 
 		expectedOutput.add(new StreamRecord<>("Hello"));
-		expectedOutput.add(new StreamRecord<>("[Operator0]: EndOfInput"));
 		expectedOutput.add(new StreamRecord<>("[Operator0]: Bye"));
-		expectedOutput.add(new StreamRecord<>("[Operator1]: EndOfInput"));
 		expectedOutput.add(new StreamRecord<>("[Operator1]: Bye"));
 
 		TestHarnessUtil.assertOutputEquals("Output was not correct.",
@@ -648,7 +738,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 
 			// verify that the timer service is still running
 			Assert.assertTrue(
-					((SystemProcessingTimeService) getContainingTask().getTimerService())
+					((SystemProcessingTimeService) getContainingTask().getProcessingTimeService())
 					.isAlive());
 			super.close();
 		}
@@ -707,7 +797,6 @@ public class OneInputStreamTaskTest extends TestLogger {
 	}
 
 	@Test
-	@SuppressWarnings("unchecked")
 	public void testWatermarkMetrics() throws Exception {
 		final OneInputStreamTaskTestHarness<String, String> testHarness = new OneInputStreamTaskTestHarness<>(OneInputStreamTask::new, BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.STRING_TYPE_INFO);
 
@@ -797,7 +886,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 		}
 
 		@Override
-		public void processWatermark(Watermark mark) {
+		public void processWatermark(Watermark mark) throws Exception {
 			output.emitWatermark(new Watermark(mark.getTimestamp() * 2));
 		}
 	}
@@ -848,7 +937,7 @@ public class OneInputStreamTaskTest extends TestLogger {
 					null
 				),
 				0,
-				Collections.emptyList(),
+				Collections.<String>emptyList(),
 				null,
 				null
 			);
@@ -921,10 +1010,9 @@ public class OneInputStreamTaskTest extends TestLogger {
 		}
 	}
 
-	/**
-	 * This must only be used in one test, otherwise the static fields will be changed
-	 * by several tests concurrently.
-	 */
+
+	// This must only be used in one test, otherwise the static fields will be changed
+	// by several tests concurrently
 	private static class TestOpenCloseMapFunction extends RichMapFunction<String, String> {
 		private static final long serialVersionUID = 1L;
 
