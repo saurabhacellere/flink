@@ -69,18 +69,17 @@ public class Kafka09PartitionDiscoverer extends AbstractPartitionDiscoverer {
 	}
 
 	@Override
-	protected List<KafkaTopicPartition> getAllPartitionsForTopics(List<String> topics) throws WakeupException, RuntimeException {
+	protected List<KafkaTopicPartition> getAllPartitionsForTopics(List<String> topics) throws WakeupException {
 		List<KafkaTopicPartition> partitions = new LinkedList<>();
 
 		try {
 			for (String topic : topics) {
-				final List<PartitionInfo> kafkaPartitions = kafkaConsumer.partitionsFor(topic);
-
-				if (kafkaPartitions == null) {
-					throw new RuntimeException("Could not fetch partitions for %s. Make sure that the topic exists.".format(topic));
+				List<PartitionInfo> topicPartitions = kafkaConsumer.partitionsFor(topic);
+				if (topicPartitions == null) {
+					continue;
 				}
 
-				for (PartitionInfo partitionInfo : kafkaPartitions) {
+				for (PartitionInfo partitionInfo : topicPartitions) {
 					partitions.add(new KafkaTopicPartition(partitionInfo.topic(), partitionInfo.partition()));
 				}
 			}

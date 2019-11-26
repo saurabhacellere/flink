@@ -124,7 +124,7 @@ public abstract class AbstractPartitionDiscoverer {
 	public List<KafkaTopicPartition> discoverPartitions() throws WakeupException, ClosedException {
 		if (!closed && !wakeup) {
 			try {
-				List<KafkaTopicPartition> newDiscoveredPartitions;
+				List<KafkaTopicPartition> newDiscoveredPartitions = null;
 
 				// (1) get all possible partitions, based on whether we are subscribed to fixed topics or a topic pattern
 				if (topicsDescriptor.isFixedTopics()) {
@@ -135,7 +135,7 @@ public abstract class AbstractPartitionDiscoverer {
 					// retain topics that match the pattern
 					Iterator<String> iter = matchedTopics.iterator();
 					while (iter.hasNext()) {
-						if (!topicsDescriptor.isMatchingTopic(iter.next())) {
+						if (!topicsDescriptor.getTopicPattern().matcher(iter.next()).matches()) {
 							iter.remove();
 						}
 					}
@@ -143,22 +143,20 @@ public abstract class AbstractPartitionDiscoverer {
 					if (matchedTopics.size() != 0) {
 						// get partitions only for matched topics
 						newDiscoveredPartitions = getAllPartitionsForTopics(matchedTopics);
-					} else {
-						newDiscoveredPartitions = null;
 					}
 				}
 
-				// (2) eliminate partition that are old partitions or should not be subscribed by this subtask
 				if (newDiscoveredPartitions == null || newDiscoveredPartitions.isEmpty()) {
-					throw new RuntimeException("Unable to retrieve any partitions with KafkaTopicsDescriptor: " + topicsDescriptor);
-				} else {
-					Iterator<KafkaTopicPartition> iter = newDiscoveredPartitions.iterator();
-					KafkaTopicPartition nextPartition;
-					while (iter.hasNext()) {
-						nextPartition = iter.next();
-						if (!setAndCheckDiscoveredPartition(nextPartition)) {
-							iter.remove();
-						}
+					throw new NoPartitionsFoundException("Unable to retrieve any partitions with KafkaTopicsDescriptor: " + topicsDescriptor);
+				}
+
+				// (2) eliminate partition that are old partitions or should not be subscribed by this subtask
+				Iterator<KafkaTopicPartition> iter = newDiscoveredPartitions.iterator();
+				KafkaTopicPartition nextPartition;
+				while (iter.hasNext()) {
+					nextPartition = iter.next();
+					if (!setAndCheckDiscoveredPartition(nextPartition)) {
+						iter.remove();
 					}
 				}
 
