@@ -20,9 +20,10 @@
 package org.apache.flink.runtime.io.disk;
 
 import java.io.EOFException;
+import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.flink.runtime.memory.MemoryManagerBuilder;
+import org.apache.flink.core.memory.MemoryType;
 import org.junit.Assert;
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.runtime.io.disk.iomanager.BlockChannelReader;
@@ -77,17 +78,16 @@ public class ChannelViewsTest
 
 	@Before
 	public void beforeTest() {
-		this.memoryManager = MemoryManagerBuilder
-			.newBuilder()
-			.setMemorySize(MEMORY_SIZE)
-			.setPageSize(MEMORY_PAGE_SIZE)
-			.build();
+		this.memoryManager = new MemoryManager(MEMORY_SIZE, 1, MEMORY_PAGE_SIZE, MemoryType.HEAP, true);
 		this.ioManager = new IOManagerAsync();
 	}
 
 	@After
-	public void afterTest() throws Exception {
-		this.ioManager.close();
+	public void afterTest() {
+		this.ioManager.shutdown();
+		if (!this.ioManager.isProperlyShutDown()) {
+			Assert.fail("I/O Manager was not properly shut down.");
+		}
 		
 		if (memoryManager != null) {
 			Assert.assertTrue("Memory leak: not all segments have been returned to the memory manager.", 
@@ -368,6 +368,46 @@ public class ChannelViewsTest
 			Assert.assertTrue("The re-generated and the read record do not match.", k1 == k2 && v1.equals(v2));
 		}
 		
+		this.memoryManager.release(inView.close());
+		reader.deleteChannel();
+	}
+
+	@Test
+	public void testReadLines() throws Exception
+	{
+		final FileIOChannel.ID channel = this.ioManager.createChannel();
+
+		// create the writer output view
+		List<MemorySegment> memory = this.memoryManager.allocatePages(this.parentTask, NUM_MEMORY_SEGMENTS);
+		final BlockChannelWriter<MemorySegment> writer = this.ioManager.createBlockChannelWriter(channel);
+		final ChannelWriterOutputView outView = new ChannelWriterOutputView(writer, memory, MEMORY_PAGE_SIZE);
+
+		// write string content
+		String testString = "hello world\r\nglad to see you\ngood\rbye";
+		outView.writeBytes(testString);
+		this.memoryManager.release(outView.close());
+
+		// create the reader input view
+		memory = this.memoryManager.allocatePages(this.parentTask, NUM_MEMORY_SEGMENTS);
+		final BlockChannelReader<MemorySegment> reader = this.ioManager.createBlockChannelReader(channel);
+		final ChannelReaderInputView inView = new ChannelReaderInputView(reader, memory, outView.getBlockCount(), true);
+
+		// read string content
+		List<String> content = new ArrayList<>();
+		while (true) {
+			String line = inView.readLine();
+			if (line == null) {
+				break;
+			}
+			content.add(line);
+		}
+
+		// verify results
+		Assert.assertEquals(3, content.size());
+		Assert.assertEquals("hello world", content.get(0));
+		Assert.assertEquals("glad to see you", content.get(1));
+		Assert.assertEquals("good\rbye", content.get(2));
+
 		this.memoryManager.release(inView.close());
 		reader.deleteChannel();
 	}
