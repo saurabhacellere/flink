@@ -20,10 +20,9 @@ package org.apache.flink.connectors.hive;
 
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.internal.TableImpl;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
 import org.apache.flink.table.catalog.hive.HiveTestUtils;
-import org.apache.flink.table.planner.runtime.utils.TableUtil;
+import org.apache.flink.table.planner.utils.CollectResultUtil;
 import org.apache.flink.types.Row;
 
 import com.klarna.hiverunner.HiveShell;
@@ -40,8 +39,6 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import scala.collection.JavaConverters;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -84,17 +81,18 @@ public class HiveTableSourceTest {
 		final String dbName = "source_db";
 		final String tblName = "test";
 		hiveShell.execute("CREATE TABLE source_db.test ( a INT, b INT, c STRING, d BIGINT, e DOUBLE)");
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{1, 1, "a", 1000L, 1.11})
-				.addRow(new Object[]{2, 2, "b", 2000L, 2.22})
-				.addRow(new Object[]{3, 3, "c", 3000L, 3.33})
-				.addRow(new Object[]{4, 4, "d", 4000L, 4.44})
+		hiveShell.insertInto(dbName, tblName)
+				.withAllColumns()
+				.addRow(1, 1, "a", 1000L, 1.11)
+				.addRow(2, 2, "b", 2000L, 2.22)
+				.addRow(3, 3, "c", 3000L, 3.33)
+				.addRow(4, 4, "d", 4000L, 4.44)
 				.commit();
 
 		TableEnvironment tEnv = HiveTestUtils.createTableEnv();
 		tEnv.registerCatalog(catalogName, hiveCatalog);
 		Table src = tEnv.sqlQuery("select * from hive.source_db.test");
-		List<Row> rows = JavaConverters.seqAsJavaListConverter(TableUtil.collect((TableImpl) src)).asJava();
+		List<Row> rows = CollectResultUtil.collect(src);
 
 		Assert.assertEquals(4, rows.size());
 		Assert.assertEquals("1,1,a,1000,1.11", rows.get(0).toString());
@@ -115,13 +113,14 @@ public class HiveTableSourceTest {
 		map.put(1, "a");
 		map.put(2, "b");
 		Object[] struct = new Object[]{3, 3L};
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{array, map, struct})
+		hiveShell.insertInto(dbName, tblName)
+				.withAllColumns()
+				.addRow(array, map, struct)
 				.commit();
 		TableEnvironment tEnv = HiveTestUtils.createTableEnv();
 		tEnv.registerCatalog(catalogName, hiveCatalog);
 		Table src = tEnv.sqlQuery("select * from hive.source_db.complex_test");
-		List<Row> rows = JavaConverters.seqAsJavaListConverter(TableUtil.collect((TableImpl) src)).asJava();
+		List<Row> rows = CollectResultUtil.collect(src);
 		Assert.assertEquals(1, rows.size());
 		assertArrayEquals(array, (Integer[]) rows.get(0).getField(0));
 		assertEquals(map, rows.get(0).getField(1));
@@ -139,18 +138,17 @@ public class HiveTableSourceTest {
 		final String tblName = "test_table_pt";
 		hiveShell.execute("CREATE TABLE source_db.test_table_pt " +
 						"(year STRING, value INT) partitioned by (pt int);");
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{"2014", 3})
-				.addRow(new Object[]{"2014", 4})
-				.commit("pt=0");
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{"2015", 2})
-				.addRow(new Object[]{"2015", 5})
-				.commit("pt=1");
+		hiveShell.insertInto(dbName, tblName)
+				.withColumns("year", "value", "pt")
+				.addRow("2014", 3, 0)
+				.addRow("2014", 4, 0)
+				.addRow("2015", 2, 1)
+				.addRow("2015", 5, 1)
+				.commit();
 		TableEnvironment tEnv = HiveTestUtils.createTableEnv();
 		tEnv.registerCatalog(catalogName, hiveCatalog);
 		Table src = tEnv.sqlQuery("select * from hive.source_db.test_table_pt");
-		List<Row> rows = JavaConverters.seqAsJavaListConverter(TableUtil.collect((TableImpl) src)).asJava();
+		List<Row> rows = CollectResultUtil.collect(src);
 
 		assertEquals(4, rows.size());
 		Object[] rowStrings = rows.stream().map(Row::toString).sorted().toArray();
@@ -164,14 +162,13 @@ public class HiveTableSourceTest {
 		final String tblName = "test_table_pt_1";
 		hiveShell.execute("CREATE TABLE source_db.test_table_pt_1 " +
 						"(year STRING, value INT) partitioned by (pt int);");
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{"2014", 3})
-				.addRow(new Object[]{"2014", 4})
-				.commit("pt=0");
-		HiveTestUtils.createTextTableInserter(hiveShell, dbName, tblName)
-				.addRow(new Object[]{"2015", 2})
-				.addRow(new Object[]{"2015", 5})
-				.commit("pt=1");
+		hiveShell.insertInto(dbName, tblName)
+				.withColumns("year", "value", "pt")
+				.addRow("2014", 3, 0)
+				.addRow("2014", 4, 0)
+				.addRow("2015", 2, 1)
+				.addRow("2015", 5, 1)
+				.commit();
 		TableEnvironment tEnv = HiveTestUtils.createTableEnv();
 		tEnv.registerCatalog(catalogName, hiveCatalog);
 		Table src = tEnv.sqlQuery("select * from hive.source_db.test_table_pt_1 where pt = 0");
@@ -185,7 +182,7 @@ public class HiveTableSourceTest {
 		assertTrue(optimizedLogicalPlan.contains("HiveTableSource(year, value, pt) TablePath: source_db.test_table_pt_1, PartitionPruned: true, PartitionNums: 1"));
 		assertTrue(physicalExecutionPlan.contains("HiveTableSource(year, value, pt) TablePath: source_db.test_table_pt_1, PartitionPruned: true, PartitionNums: 1"));
 		// second check execute results
-		List<Row> rows = JavaConverters.seqAsJavaListConverter(TableUtil.collect((TableImpl) src)).asJava();
+		List<Row> rows = CollectResultUtil.collect(src);
 		assertEquals(2, rows.size());
 		Object[] rowStrings = rows.stream().map(Row::toString).sorted().toArray();
 		assertArrayEquals(new String[]{"2014,3,0", "2014,4,0"}, rowStrings);
@@ -196,13 +193,11 @@ public class HiveTableSourceTest {
 		hiveShell.execute("create table src(x int,y string) partitioned by (p1 bigint, p2 string)");
 		final String catalogName = "hive";
 		try {
-			HiveTestUtils.createTextTableInserter(hiveShell, "default", "src")
-					.addRow(new Object[]{1, "a"})
-					.addRow(new Object[]{2, "b"})
-					.commit("p1=2013, p2='2013'");
-			HiveTestUtils.createTextTableInserter(hiveShell, "default", "src")
-					.addRow(new Object[]{3, "c"})
-					.commit("p1=2014, p2='2014'");
+			hiveShell.insertInto("default", "src")
+					.addRow(1, "a", 2013, "2013")
+					.addRow(2, "b", 2013, "2013")
+					.addRow(3, "c", 2014, "2014")
+					.commit();
 			TableEnvironment tableEnv = HiveTestUtils.createTableEnv();
 			tableEnv.registerCatalog(catalogName, hiveCatalog);
 			Table table = tableEnv.sqlQuery("select p1, count(y) from hive.`default`.src group by p1");
@@ -215,7 +210,7 @@ public class HiveTableSourceTest {
 			assertTrue(logicalPlan.contains(expectedExplain));
 			assertTrue(physicalPlan.contains(expectedExplain));
 
-			List<Row> rows = JavaConverters.seqAsJavaListConverter(TableUtil.collect((TableImpl) table)).asJava();
+			List<Row> rows = CollectResultUtil.collect(table);
 			assertEquals(2, rows.size());
 			Object[] rowStrings = rows.stream().map(Row::toString).sorted().toArray();
 			assertArrayEquals(new String[]{"2013,2", "2014,1"}, rowStrings);
