@@ -19,6 +19,7 @@
 package org.apache.flink.dropwizard;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MetricOptions;
 import org.apache.flink.dropwizard.metrics.DropwizardMeterWrapper;
@@ -35,7 +36,6 @@ import org.apache.flink.metrics.reporter.MetricReporter;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.metrics.MetricRegistryConfiguration;
 import org.apache.flink.runtime.metrics.MetricRegistryImpl;
-import org.apache.flink.runtime.metrics.ReporterSetup;
 import org.apache.flink.runtime.metrics.groups.TaskManagerJobMetricGroup;
 import org.apache.flink.runtime.metrics.groups.TaskManagerMetricGroup;
 import org.apache.flink.runtime.metrics.groups.TaskMetricGroup;
@@ -44,8 +44,6 @@ import org.apache.flink.util.AbstractID;
 import com.codahale.metrics.ScheduledReporter;
 import org.junit.Test;
 
-import java.lang.reflect.InvocationTargetException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -58,7 +56,28 @@ import static org.junit.Assert.assertTrue;
 public class ScheduledDropwizardReporterTest {
 
 	@Test
-	public void testInvalidCharacterReplacement() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+	public void testNameTruncating() {
+		final MetricConfig config = new MetricConfig();
+		config.setProperty(ScheduledDropwizardReporter.ARG_MAX_COMPONENT_LENGTH, "10");
+
+		final ScheduledDropwizardReporter reporter = new ScheduledDropwizardReporter() {
+			@Override
+			public ScheduledReporter getReporter(MetricConfig config) {
+				return null;
+			}
+		};
+
+		try {
+			reporter.open(config);
+
+			assertEquals("0123456789", reporter.filterCharacters("0123456789DEADBEEF"));
+		} finally {
+			reporter.close();
+		}
+	}
+
+	@Test
+	public void testInvalidCharacterReplacement() {
 		ScheduledDropwizardReporter reporter = new ScheduledDropwizardReporter() {
 			@Override
 			public ScheduledReporter getReporter(MetricConfig config) {
@@ -83,14 +102,16 @@ public class ScheduledDropwizardReporterTest {
 		String taskManagerId = "tas:kMana::ger";
 		String counterName = "testCounter";
 
+		configuration.setString(
+				ConfigConstants.METRICS_REPORTER_PREFIX + "test." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX,
+				"org.apache.flink.dropwizard.ScheduledDropwizardReporterTest$TestingScheduledDropwizardReporter");
+
 		configuration.setString(MetricOptions.SCOPE_NAMING_TASK, "<host>.<tm_id>.<job_name>");
 		configuration.setString(MetricOptions.SCOPE_DELIMITER, "_");
 
 		MetricRegistryConfiguration metricRegistryConfiguration = MetricRegistryConfiguration.fromConfiguration(configuration);
 
-		MetricRegistryImpl metricRegistry = new MetricRegistryImpl(
-			metricRegistryConfiguration,
-			Collections.singletonList(ReporterSetup.forReporter("test", new TestingScheduledDropwizardReporter())));
+		MetricRegistryImpl metricRegistry = new MetricRegistryImpl(metricRegistryConfiguration);
 
 		char delimiter = metricRegistry.getDelimiter();
 
