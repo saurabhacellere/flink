@@ -21,7 +21,9 @@ package org.apache.flink.api.java.io.jdbc;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.util.Preconditions;
 
-import static org.apache.flink.api.java.io.jdbc.AbstractJDBCOutputFormat.DEFAULT_FLUSH_MAX_SIZE;
+import static org.apache.flink.api.java.io.jdbc.JDBCOutputFormat.DEFAULT_BATCH_INTERVAL;
+import static org.apache.flink.api.java.io.jdbc.JDBCOutputFormat.DEFAULT_IDLE_CONNECTION_CHECK_INTERVAL;
+import static org.apache.flink.api.java.io.jdbc.JDBCOutputFormat.DEFAULT_IDLE_CONNECTION_CHECK_TIMEOUT;
 
 /**
  * A builder to configure and build the JDBCAppendTableSink.
@@ -32,8 +34,10 @@ public class JDBCAppendTableSinkBuilder {
 	private String driverName;
 	private String dbURL;
 	private String query;
-	private int batchSize = DEFAULT_FLUSH_MAX_SIZE;
+	private int batchSize = DEFAULT_BATCH_INTERVAL;
 	private int[] parameterTypes;
+	private int idleConnectionCheckInterval = DEFAULT_IDLE_CONNECTION_CHECK_INTERVAL;
+	private int idleConnectionCheckTimeout = DEFAULT_IDLE_CONNECTION_CHECK_TIMEOUT;
 
 	/**
 	 * Specify the username of the JDBC connection.
@@ -116,6 +120,27 @@ public class JDBCAppendTableSinkBuilder {
 	}
 
 	/**
+	 * Specify the interval that the idle connection will be checked.
+	 * @param idleConnectionCheckInterval the interval in seconds that the
+	 *                                    idle connection will be checked.
+	 */
+	public JDBCAppendTableSinkBuilder setIdleConnectionCheckInterval(int idleConnectionCheckInterval) {
+		this.idleConnectionCheckInterval = idleConnectionCheckInterval;
+		return this;
+	}
+
+	/**
+	 * Specify the time in seconds to wait for the database operation used to
+	 * validate the connection to complete.
+	 * @param idleConnectionCheckTimeout time in seconds to wait while validating
+	 *                                   the connection.
+	 */
+	public JDBCAppendTableSinkBuilder setIdleConnectionCheckTimeout(int idleConnectionCheckTimeout) {
+		this.idleConnectionCheckTimeout = idleConnectionCheckTimeout;
+		return this;
+	}
+
+	/**
 	 * Finalizes the configuration and checks validity.
 	 *
 	 * @return Configured JDBCOutputFormat
@@ -133,6 +158,8 @@ public class JDBCAppendTableSinkBuilder {
 			.setDrivername(driverName)
 			.setBatchInterval(batchSize)
 			.setSqlTypes(parameterTypes)
+			.setIdleConnectionCheckInterval(idleConnectionCheckInterval)
+			.setIdleConnectionCheckTimeout(idleConnectionCheckTimeout)
 			.finish();
 
 		return new JDBCAppendTableSink(format);
