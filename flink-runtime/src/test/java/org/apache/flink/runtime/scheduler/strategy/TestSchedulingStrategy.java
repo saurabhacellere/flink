@@ -42,7 +42,7 @@ public class TestSchedulingStrategy implements SchedulingStrategy {
 
 	private final DeploymentOption deploymentOption = new DeploymentOption(false);
 
-	private Set<ExecutionVertexID> receivedVerticesToRestart;
+	private List<ExecutionVertexID> receivedVerticesToRestart;
 
 	public TestSchedulingStrategy(
 			final SchedulerOperations schedulerOperations,
@@ -57,7 +57,7 @@ public class TestSchedulingStrategy implements SchedulingStrategy {
 	}
 
 	@Override
-	public void restartTasks(final Set<ExecutionVertexID> verticesToRestart) {
+	public void restartTasks(final List<ExecutionVertexID> verticesToRestart) {
 		this.receivedVerticesToRestart = verticesToRestart;
 	}
 
@@ -77,7 +77,7 @@ public class TestSchedulingStrategy implements SchedulingStrategy {
 		return schedulingTopology;
 	}
 
-	public Set<ExecutionVertexID> getReceivedVerticesToRestart() {
+	public List<ExecutionVertexID> getReceivedVerticesToRestart() {
 		return receivedVerticesToRestart;
 	}
 

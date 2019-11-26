@@ -23,13 +23,10 @@ import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.scheduler.DeploymentOption;
 import org.apache.flink.runtime.scheduler.ExecutionVertexDeploymentOption;
 import org.apache.flink.runtime.scheduler.SchedulerOperations;
+import org.apache.flink.util.IterableUtils;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -53,12 +50,12 @@ public class EagerSchedulingStrategy implements SchedulingStrategy {
 
 	@Override
 	public void startScheduling() {
-		final Set<ExecutionVertexID> allVertices = getAllVerticesFromTopology();
+		final List<ExecutionVertexID> allVertices = getAllVerticesFromTopology();
 		allocateSlotsAndDeploy(allVertices);
 	}
 
 	@Override
-	public void restartTasks(Set<ExecutionVertexID> verticesToRestart) {
+	public void restartTasks(List<ExecutionVertexID> verticesToRestart) {
 		allocateSlotsAndDeploy(verticesToRestart);
 	}
 
@@ -72,27 +69,24 @@ public class EagerSchedulingStrategy implements SchedulingStrategy {
 		// Will not react to these notifications.
 	}
 
-	private void allocateSlotsAndDeploy(final Set<ExecutionVertexID> verticesToDeploy) {
+	private void allocateSlotsAndDeploy(final List<ExecutionVertexID> verticesToDeploy) {
 		final List<ExecutionVertexDeploymentOption> executionVertexDeploymentOptions =
 				createExecutionVertexDeploymentOptions(verticesToDeploy);
 		schedulerOperations.allocateSlotsAndDeploy(executionVertexDeploymentOptions);
 	}
 
-	private Set<ExecutionVertexID> getAllVerticesFromTopology() {
-		return StreamSupport
-				.stream(schedulingTopology.getVertices().spliterator(), false)
+	private List<ExecutionVertexID> getAllVerticesFromTopology() {
+		return IterableUtils.toStream(schedulingTopology.getVertices())
 				.map(SchedulingExecutionVertex::getId)
-				.collect(Collectors.toSet());
+				.collect(Collectors.toList());
 	}
 
 	private List<ExecutionVertexDeploymentOption> createExecutionVertexDeploymentOptions(
-			final Collection<ExecutionVertexID> vertices) {
-		List<ExecutionVertexDeploymentOption> executionVertexDeploymentOptions = new ArrayList<>(vertices.size());
-		for (ExecutionVertexID executionVertexID : vertices) {
-			executionVertexDeploymentOptions.add(
-					new ExecutionVertexDeploymentOption(executionVertexID, deploymentOption));
-		}
-		return executionVertexDeploymentOptions;
+			final List<ExecutionVertexID> vertices) {
+
+		return vertices.stream()
+			.map(executionVertexID -> new ExecutionVertexDeploymentOption(executionVertexID, deploymentOption))
+			.collect(Collectors.toList());
 	}
 
 	/**

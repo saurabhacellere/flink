@@ -91,8 +91,8 @@ import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -286,7 +286,7 @@ public abstract class SchedulerBase implements SchedulerNG {
 		}
 	}
 
-	protected void resetForNewExecutions(final Collection<ExecutionVertexID> vertices) {
+	protected void resetForNewExecutions(final List<ExecutionVertexID> vertices) {
 		vertices.forEach(executionVertexId -> getExecutionVertex(executionVertexId)
 			.resetForNewExecution());
 	}
@@ -318,7 +318,7 @@ public abstract class SchedulerBase implements SchedulerNG {
 		return tasks;
 	}
 
-	protected void transitionToScheduled(final Collection<ExecutionVertexID> verticesToDeploy) {
+	protected void transitionToScheduled(final List<ExecutionVertexID> verticesToDeploy) {
 		verticesToDeploy.forEach(executionVertexId -> getExecutionVertex(executionVertexId)
 			.getCurrentExecutionAttempt()
 			.transitionState(ExecutionState.SCHEDULED));
