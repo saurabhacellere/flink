@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -56,6 +57,7 @@ public class TableSchemaTest {
 			.field("f2", DataTypes.STRING())
 			.field("f3", DataTypes.BIGINT(), "f0 + 1")
 			.watermark("f1.q2", WATERMARK_EXPRESSION, WATERMARK_DATATYPE)
+			.primaryKey("f0", "f2")
 			.build();
 
 		// test toString()
@@ -64,7 +66,8 @@ public class TableSchemaTest {
 			" |-- f1: ROW<`q1` STRING, `q2` TIMESTAMP(3)>\n" +
 			" |-- f2: STRING\n" +
 			" |-- f3: BIGINT AS f0 + 1\n" +
-			" |-- WATERMARK FOR f1.q2 AS now()";
+			" |-- WATERMARK FOR f1.q2 AS now()\n" +
+			" |-- PRIMARY KEY (f0, f2)\n";
 		assertEquals(expected, schema.toString());
 
 		// test getFieldNames and getFieldDataType
@@ -75,6 +78,7 @@ public class TableSchemaTest {
 		assertEquals(Optional.of(DataTypes.STRING()), schema.getFieldDataType("f2"));
 		assertEquals(Optional.of(DataTypes.STRING()), schema.getFieldDataType("f1")
 			.map(r -> ((FieldsDataType) r).getFieldDataTypes().get("q1")));
+		assertEquals(Arrays.asList("f0", "f2"), schema.getPrimaryKey());
 		assertFalse(schema.getFieldName(4).isPresent());
 		assertFalse(schema.getFieldType(-1).isPresent());
 		assertFalse(schema.getFieldType("c").isPresent());
@@ -192,4 +196,41 @@ public class TableSchemaTest {
 		});
 	}
 
+	@Test
+	public void testInvalidPrimaryKeyFieldName() {
+		thrown.expectMessage("The primary key field 'd' is not existed in the schema");
+		TableSchema.builder()
+			.field("a", DataTypes.INT())
+			.field("b", DataTypes.STRING())
+			.field("c", DataTypes.BIGINT())
+			.primaryKey("a", "d")
+			.build();
+	}
+
+	@Test
+	public void testInvalidPrimaryKeyNestedFieldName() {
+		thrown.expectMessage(
+			"The primary key field 'c.q1' is not existed in the schema");
+		TableSchema.builder()
+			.field("a", DataTypes.INT())
+			.field("b", DataTypes.STRING())
+			.field("c", DataTypes.ROW(
+				DataTypes.FIELD("q1", DataTypes.STRING()),
+				DataTypes.FIELD("q2", DataTypes.TIMESTAMP(3))))
+			.primaryKey("b", "c.q1")
+			.build();
+	}
+
+	@Test
+	public void testInvalidMultiPrimaryKey() {
+		thrown.expectMessage(
+			"A primary key [a] have been defined, can not define another primary key [b]");
+		TableSchema.builder()
+			.field("a", DataTypes.INT())
+			.field("b", DataTypes.STRING())
+			.field("c", DataTypes.BIGINT())
+			.primaryKey("a")
+			.primaryKey("b")
+			.build();
+	}
 }
