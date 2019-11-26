@@ -19,6 +19,7 @@
 package org.apache.flink.table.client.gateway.local;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.dag.Pipeline;
 import org.apache.flink.api.java.ExecutionEnvironment;
@@ -485,7 +486,7 @@ public class ExecutionContext<ClusterID> {
 					parallelism);
 
 			jobGraph.addJars(executionParameters.getJars());
-			jobGraph.setClasspaths(executionParameters.getClasspaths());
+			jobGraph.addClasspaths(executionParameters.getClasspaths());
 			jobGraph.setSavepointRestoreSettings(executionParameters.getSavepointRestoreSettings());
 
 			return jobGraph;
@@ -496,12 +497,14 @@ public class ExecutionContext<ClusterID> {
 				// special case for Blink planner to apply batch optimizations
 				// note: it also modifies the ExecutionConfig!
 				if (executor instanceof ExecutorBase) {
-					return ((ExecutorBase) executor).getStreamGraph(name);
+					return ((ExecutorBase) executor).generateStreamGraph(name);
 				}
 				return streamExecEnv.getStreamGraph(name);
 			} else {
 				final int parallelism = execEnv.getParallelism();
-				return execEnv.createProgramPlan(name);
+				final Plan unoptimizedPlan = execEnv.createProgramPlan();
+				unoptimizedPlan.setJobName(name);
+				return unoptimizedPlan;
 			}
 		}
 
