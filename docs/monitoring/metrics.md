@@ -433,7 +433,7 @@ You can configure which delimiter to use for the identifier (default: `.`) by se
 
 ### User Scope
 
-You can define a user scope by calling `MetricGroup#addGroup(String name)`, `MetricGroup#addGroup(int name)` or `MetricGroup#addGroup(String key, String value)`.
+You can define a user scope by calling `MetricGroup#addGroup(String name)`, `MetricGroup#addGroup(int name)` or `Metric#addGroup(String key, String value)`.
 These methods affect what `MetricGroup#getMetricIdentifier` and `MetricGroup#getScopeComponents` return.
 
 <div class="codetabs" markdown="1">
@@ -659,7 +659,6 @@ Parameters:
 - `username` - (optional) InfluxDB username used for authentication
 - `password` - (optional) InfluxDB username's password used for authentication
 - `retentionPolicy` - (optional) InfluxDB retention policy, defaults to retention policy defined on the server for the db
-- `consistency` - (optional) InfluxDB consistency level for metrics. Possible values: [ALL, ANY, ONE, QUORUM], default is ONE
 - `connectTimeout` - (optional) the InfluxDB client connect timeout in milliseconds, default is 10000 ms
 - `writeTimeout` - (optional) the InfluxDB client write timeout in milliseconds, default is 10000 ms
 
@@ -674,7 +673,6 @@ metrics.reporter.influxdb.db: flink
 metrics.reporter.influxdb.username: flink-metrics
 metrics.reporter.influxdb.password: qwerty
 metrics.reporter.influxdb.retentionPolicy: one_hour
-metrics.reporter.influxdb.consistency: ANY
 metrics.reporter.influxdb.connectTimeout: 60000
 metrics.reporter.influxdb.writeTimeout: 60000
 
@@ -798,6 +796,21 @@ Example configuration:
 
 metrics.reporter.slf4j.class: org.apache.flink.metrics.slf4j.Slf4jReporter
 metrics.reporter.slf4j.interval: 60 SECONDS
+
+{% endhighlight %}
+
+### SignalFX (org.apache.flink.metrics.signalfx.ScheduledSignalFXReporter)
+
+In order to use this reporter you must copy `/opt/flink-metrics-signalfx-{{site.version}}.jar` into the `/lib` folder
+of your Flink distribution.
+
+Example configuration:
+
+{% highlight yaml %}
+
+metrics.reporter.signalfx.class: org.apache.flink.metrics.signalfx.SignalFXReporterFactory
+metrics.reporter.signalfx.interval: 60 SECONDS
+metrics.reporter.signalfx.token: xxx
 
 {% endhighlight %}
 
@@ -1035,8 +1048,8 @@ Thus, in order to infer the metric identifier:
       <td>Gauge</td>
     </tr>
     <tr>
-      <th rowspan="10">Task</th>
-      <td rowspan="6">buffers</td>
+      <th rowspan="8">Task</th>
+      <td rowspan="4">buffers</td>
       <td>inputQueueLength</td>
       <td>The number of queued input buffers. (ignores LocalInputChannels which are using blocking subpartitions)</td>
       <td>Gauge</td>
@@ -1255,7 +1268,7 @@ Metrics related to data exchange between task executors using netty network comm
   </thead>
   <tbody>
     <tr>
-      <th rowspan="5"><strong>Job (only available on JobManager)</strong></th>
+      <th rowspan="4"><strong>Job (only available on JobManager)</strong></th>
       <td>restartingTime</td>
       <td>The time it took to restart the job, or how long the current restart has been in progress (in milliseconds).</td>
       <td>Gauge</td>
@@ -1278,12 +1291,7 @@ Metrics related to data exchange between task executors using netty network comm
     </tr>
     <tr>
       <td>fullRestarts</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <b>numRestarts</b>.</td>
-      <td>Gauge</td>
-    </tr>
-    <tr>
-      <td>numRestarts</td>
-      <td>The total number of restarts since this job was submitted, including full restarts and fine-grained restarts.</td>
+      <td>The total number of full restarts since this job was submitted.</td>
       <td>Gauge</td>
     </tr>
   </tbody>
