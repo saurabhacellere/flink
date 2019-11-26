@@ -26,6 +26,7 @@ import org.apache.flink.util.Preconditions;
 import java.util.Map;
 
 import static org.apache.flink.table.descriptors.FormatDescriptorValidator.FORMAT_DERIVE_SCHEMA;
+import static org.apache.flink.table.descriptors.JsonValidator.FORMAT_FAILURE_HANDLER;
 import static org.apache.flink.table.descriptors.JsonValidator.FORMAT_FAIL_ON_MISSING_FIELD;
 import static org.apache.flink.table.descriptors.JsonValidator.FORMAT_JSON_SCHEMA;
 import static org.apache.flink.table.descriptors.JsonValidator.FORMAT_SCHEMA;
@@ -37,6 +38,7 @@ import static org.apache.flink.table.descriptors.JsonValidator.FORMAT_TYPE_VALUE
 public class Json extends FormatDescriptor {
 
 	private Boolean failOnMissingField;
+	private String failureHandler;
 	private Boolean deriveSchema;
 	private String jsonSchema;
 	private String schema;
@@ -56,6 +58,15 @@ public class Json extends FormatDescriptor {
 	 */
 	public Json failOnMissingField(boolean failOnMissingField) {
 		this.failOnMissingField = failOnMissingField;
+		return this;
+	}
+
+	/**
+	 * Sets failure handler for deserializing json messages.
+	 * @param failureHandler see failureHandlers in {@link JsonValidator}.
+	 */
+	public Json failureHandler(String failureHandler) {
+		this.failureHandler = failureHandler;
 		return this;
 	}
 
@@ -93,11 +104,11 @@ public class Json extends FormatDescriptor {
 	}
 
 	/**
-	 * Derives the format schema from the table's schema described.
+	 * Derives the format schema from the table's schema described using {@link Schema}.
 	 *
 	 * <p>This allows for defining schema information only once.
 	 *
-	 * <p>The names, types, and fields' order of the format are determined by the table's
+	 * <p>The names, types, and field order of the format are determined by the table's
 	 * schema. Time attributes are ignored if their origin is not a field. A "from" definition
 	 * is interpreted as a field renaming in the format.
 	 */
@@ -126,6 +137,10 @@ public class Json extends FormatDescriptor {
 
 		if (failOnMissingField != null) {
 			properties.putBoolean(FORMAT_FAIL_ON_MISSING_FIELD, failOnMissingField);
+		}
+
+		if (failureHandler != null) {
+			properties.putString(FORMAT_FAILURE_HANDLER, failureHandler);
 		}
 
 		return properties.asMap();
