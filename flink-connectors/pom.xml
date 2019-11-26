@@ -36,6 +36,7 @@ under the License.
 	<packaging>pom</packaging>
 
 	<modules>
+		<module>flink-orc</module>
 		<module>flink-jdbc</module>
 		<module>flink-hadoop-compatibility</module>
 		<module>flink-hbase</module>
@@ -59,6 +60,7 @@ under the License.
 		<module>flink-connector-gcp-pubsub</module>
 		<module>flink-connector-kinesis</module>
 		<module>flink-sql-connector-elasticsearch7</module>
+		<module>flink-sql-connector-hbase</module>
 	</modules>
 
 	<!-- override these root dependencies as 'provided', so they don't end up
@@ -96,6 +98,7 @@ under the License.
 			</activation>
 			<modules>
 				<module>flink-sql-connector-elasticsearch6</module>
+				<module>flink-sql-connector-hbase</module>
 				<module>flink-sql-connector-kafka-0.9</module>
 				<module>flink-sql-connector-kafka-0.10</module>
 				<module>flink-sql-connector-kafka-0.11</module>

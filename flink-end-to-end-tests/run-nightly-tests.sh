@@ -155,6 +155,7 @@ run_test "SQL Client end-to-end test (Blink planner)" "$END_TO_END_DIR/test-scri
 run_test "SQL Client end-to-end test for Kafka 0.10" "$END_TO_END_DIR/test-scripts/test_sql_client_kafka010.sh"
 run_test "SQL Client end-to-end test for Kafka 0.11" "$END_TO_END_DIR/test-scripts/test_sql_client_kafka011.sh"
 run_test "SQL Client end-to-end test for modern Kafka" "$END_TO_END_DIR/test-scripts/test_sql_client_kafka.sh"
+run_test "SQL Client end-to-end test for HBase 1.4.3" "$END_TO_END_DIR/test-scripts/test_sql_client_hbase.sh" "skip_check_exceptions"
 
 run_test "TPC-H end-to-end test (Blink planner)" "$END_TO_END_DIR/test-scripts/test_tpch.sh"
 
@@ -175,6 +176,5 @@ run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR
 run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR/test-scripts/test_local_recovery_and_scheduling.sh 4 10 rocks false true" "skip_check_exceptions"
 run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR/test-scripts/test_local_recovery_and_scheduling.sh 4 10 rocks true true" "skip_check_exceptions"
 
-printf "\n[PASS] All bash e2e-tests passed\n"
-printf "\n Please remember to run java e2e-tests by running mvn verify -Dcategories=\"\" -DdistDir=<path to flink-dist> in flink-end-to-end-tests\n"
+printf "\n[PASS] All tests passed\n"
 exit 0

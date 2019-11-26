@@ -118,7 +118,7 @@ under the License.
 		<!-- TODO implement bulk output format for HBase -->
 		<dependency>
 			<groupId>org.apache.hbase</groupId>
-			<artifactId>hbase-server</artifactId>
+			<artifactId>hbase-shaded-server</artifactId>
 			<version>${hbase.version}</version>
 			<exclusions>
 				<!-- Remove unneeded dependency, which is conflicting with our jetty-util version. -->
@@ -285,13 +285,6 @@ under the License.
 			<groupId>org.apache.flink</groupId>
 			<artifactId>flink-test-utils_${scala.binary.version}</artifactId>
 			<version>${project.version}</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-table-common</artifactId>
-			<version>${project.version}</version>
-			<type>test-jar</type>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
