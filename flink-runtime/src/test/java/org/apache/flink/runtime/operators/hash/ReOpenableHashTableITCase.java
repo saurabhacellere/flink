@@ -25,12 +25,12 @@ import org.apache.flink.api.common.typeutils.TypePairComparator;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.memory.MemorySegment;
+import org.apache.flink.core.memory.MemoryType;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.memory.MemoryAllocationException;
 import org.apache.flink.runtime.memory.MemoryManager;
-import org.apache.flink.runtime.memory.MemoryManagerBuilder;
 import org.apache.flink.runtime.operators.testutils.DummyInvokable;
 import org.apache.flink.runtime.operators.testutils.TestData;
 import org.apache.flink.runtime.operators.testutils.UniformIntTupleGenerator;
@@ -61,8 +61,8 @@ public class ReOpenableHashTableITCase extends TestLogger {
 	private MemoryManager memoryManager;
 
 	private static final AbstractInvokable MEM_OWNER = new DummyInvokable();
-	private TypeSerializer<Tuple2<Integer, Integer>> recordBuildSideAccesssor;
-	private TypeSerializer<Tuple2<Integer, Integer>> recordProbeSideAccesssor;
+	private TypeSerializer<Tuple2<Integer, Integer>> recordBuildSideAccessor;
+	private TypeSerializer<Tuple2<Integer, Integer>> recordProbeSideAccessor;
 	private TypeComparator<Tuple2<Integer, Integer>> recordBuildSideComparator;
 	private TypeComparator<Tuple2<Integer, Integer>> recordProbeSideComparator;
 	private TypePairComparator<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> pactRecordComparator;
@@ -70,17 +70,13 @@ public class ReOpenableHashTableITCase extends TestLogger {
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	@Before
 	public void beforeTest() {
-		this.recordBuildSideAccesssor = TestData.getIntIntTupleSerializer();
-		this.recordProbeSideAccesssor = TestData.getIntIntTupleSerializer();
+		this.recordBuildSideAccessor = TestData.getIntIntTupleSerializer();
+		this.recordProbeSideAccessor = TestData.getIntIntTupleSerializer();
 		this.recordBuildSideComparator = TestData.getIntIntTupleComparator();
 		this.recordProbeSideComparator = TestData.getIntIntTupleComparator();
 		this.pactRecordComparator = new GenericPairComparator(this.recordBuildSideComparator, this.recordProbeSideComparator);
 
-		this.memoryManager = MemoryManagerBuilder
-			.newBuilder()
-			.setMemorySize(MEMORY_SIZE)
-			.setPageSize(PAGE_SIZE)
-			.build();
+		this.memoryManager = new MemoryManager(MEMORY_SIZE, 1, PAGE_SIZE, MemoryType.HEAP, true);
 		this.ioManager = new IOManagerAsync();
 	}
 
@@ -154,7 +150,7 @@ public class ReOpenableHashTableITCase extends TestLogger {
 		// ----------------------------------------------------------------------------------------
 
 		final ReOpenableMutableHashTable<Tuple2<Integer, Integer>, Tuple2<Integer, Integer>> join = new ReOpenableMutableHashTable<>(
-			this.recordBuildSideAccesssor, this.recordProbeSideAccesssor,
+			this.recordBuildSideAccessor, this.recordProbeSideAccessor,
 			this.recordBuildSideComparator, this.recordProbeSideComparator, this.pactRecordComparator,
 			memSegments, ioManager, true);
 

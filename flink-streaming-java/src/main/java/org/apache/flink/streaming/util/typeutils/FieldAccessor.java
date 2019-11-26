@@ -252,7 +252,7 @@ public abstract class FieldAccessor<T, F> implements Serializable {
 				return innerAccessor.get(inner);
 			} catch (IllegalAccessException iaex) {
 				// The Field class is transient and when deserializing its value we also make it accessible
-				throw new RuntimeException("This should not happen since we call setAccesssible(true) in readObject."
+				throw new RuntimeException("This should not happen since we call setAccessible(true) in readObject."
 						+ " fields: " + field + " obj: " + pojo);
 			}
 		}
@@ -266,7 +266,7 @@ public abstract class FieldAccessor<T, F> implements Serializable {
 				return pojo;
 			} catch (IllegalAccessException iaex) {
 				// The Field class is transient and when deserializing its value we also make it accessible
-				throw new RuntimeException("This should not happen since we call setAccesssible(true) in readObject."
+				throw new RuntimeException("This should not happen since we call setAccessible(true) in readObject."
 						+ " fields: " + field + " obj: " + pojo);
 			}
 		}
@@ -352,11 +352,11 @@ public abstract class FieldAccessor<T, F> implements Serializable {
 			checkNotNull(innerAccessor, "innerAccessor must not be null.");
 
 			this.pos = pos;
+			this.fieldType = ((TupleTypeInfoBase<T>) typeInfo).getTypeAt(pos);
 			this.serializer = (TupleSerializerBase<T>) typeInfo.createSerializer(config);
 			this.length = this.serializer.getArity();
 			this.fields = new Object[this.length];
 			this.innerAccessor = innerAccessor;
-			this.fieldType = innerAccessor.getFieldType();
 		}
 
 		@SuppressWarnings("unchecked")
