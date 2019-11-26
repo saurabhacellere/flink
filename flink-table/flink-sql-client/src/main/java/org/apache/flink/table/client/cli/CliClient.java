@@ -49,7 +49,7 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -197,8 +197,8 @@ public class CliClient {
 			if (line == null) {
 				continue;
 			}
-			final Optional<SqlCommandCall> cmdCall = parseCommand(line);
-			cmdCall.ifPresent(this::callCommand);
+
+			run(line);
 		}
 	}
 
@@ -275,9 +275,6 @@ public class CliClient {
 				break;
 			case SHOW_FUNCTIONS:
 				callShowFunctions();
-				break;
-			case SHOW_MODULES:
-				callShowModules();
 				break;
 			case USE_CATALOG:
 				callUseCatalog(cmdCall);
@@ -410,7 +407,7 @@ public class CliClient {
 	private void callShowFunctions() {
 		final List<String> functions;
 		try {
-			functions = executor.listFunctions(context);
+			functions = executor.listUserDefinedFunctions(context);
 		} catch (SqlExecutionException e) {
 			printExecutionException(e);
 			return;
@@ -418,25 +415,7 @@ public class CliClient {
 		if (functions.isEmpty()) {
 			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
 		} else {
-			Collections.sort(functions);
 			functions.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowModules() {
-		final List<String> modules;
-		try {
-			modules = executor.listModules(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (modules.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			// modules are already in the loaded order
-			modules.forEach((v) -> terminal.writer().println(v));
 		}
 		terminal.flush();
 	}
@@ -594,8 +573,7 @@ public class CliClient {
 		terminal.flush();
 
 		// try to run it
-		final Optional<SqlCommandCall> call = parseCommand(stmt);
-		call.ifPresent(this::callCommand);
+		run(stmt);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -635,6 +613,19 @@ public class CliClient {
 		terminal.flush();
 	}
 
+	private void run(String stmt) {
+		final List<String> statements = splitSemiColon(stmt);
+		for (String statement : statements) {
+			final Optional<SqlCommandCall> call = parseCommand(statement);
+
+			if (!call.isPresent()) {
+				// if we found a invalid command, issue error message and break
+				break;
+			}
+			call.ifPresent(this::callCommand);
+		}
+	}
+
 	// --------------------------------------------------------------------------------------------
 
 	private static Terminal createDefaultTerminal() {
@@ -645,5 +636,57 @@ public class CliClient {
 		} catch (IOException e) {
 			throw new SqlClientException("Error opening command line interface.", e);
 		}
+	}
+
+	/**
+	 * Split a SemiColon-separated String, but ignore SemiColons in quotes.
+	 */
+	static List<String> splitSemiColon(String line) {
+		boolean inSingleQuotes = false;
+		boolean inDoubleQuotes = false;
+		boolean escape = false;
+
+		// normalize
+		line = line.replaceAll("--[^\r\n]*", ""); // remove single-line comments
+		line = line.replaceAll("/\\*[\\w\\W]*?(?=\\*/)\\*/", ""); // remove double-line comments
+		line = line.trim();
+
+		List<String> ret = new ArrayList<>();
+		int beginIdx = 0;
+		for (int idx = 0; idx < line.length(); idx++) {
+			char c = line.charAt(idx);
+			switch (c) {
+				case ';':
+					if (!inSingleQuotes && !inDoubleQuotes) {
+						ret.add(line.substring(beginIdx, idx));
+						beginIdx = idx + 1;
+					}
+					break;
+				case '"':
+					if (!escape) {
+						inDoubleQuotes = !inDoubleQuotes;
+					}
+					break;
+				case '\'':
+					if (!escape) {
+						inSingleQuotes = !inSingleQuotes;
+					}
+					break;
+				default:
+					break;
+			}
+
+			if (escape) {
+				escape = false;
+			} else if (c == '\\') {
+				escape = true;
+			}
+		}
+
+		if (beginIdx < line.length()) {
+			ret.add(line.substring(beginIdx));
+		}
+
+		return ret;
 	}
 }
