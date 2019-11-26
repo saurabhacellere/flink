@@ -38,9 +38,8 @@ import org.apache.flink.runtime.heartbeat.HeartbeatListener;
 import org.apache.flink.runtime.heartbeat.HeartbeatManager;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.HeartbeatTarget;
-import org.apache.flink.runtime.heartbeat.NoOpHeartbeatManager;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.io.network.partition.JobMasterPartitionTracker;
+import org.apache.flink.runtime.io.network.partition.PartitionTracker;
 import org.apache.flink.runtime.io.network.partition.PartitionTrackerFactory;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
@@ -198,7 +197,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 
 	private Map<String, Object> accumulators;
 
-	private final JobMasterPartitionTracker partitionTracker;
+	private final PartitionTracker partitionTracker;
 
 	// ------------------------------------------------------------------------
 
@@ -239,6 +238,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		final String jobName = jobGraph.getName();
 		final JobID jid = jobGraph.getJobID();
 
+		JobExecutionHistory.getInstance().setJobId(jid.toString());
 		log.info("Initializing job {} ({}).", jobName, jid);
 
 		resourceManagerLeaderRetriever = highAvailabilityServices.getResourceManagerLeaderRetriever();
@@ -270,8 +270,6 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		this.establishedResourceManagerConnection = null;
 
 		this.accumulators = new HashMap<>();
-		this.taskManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
-		this.resourceManagerHeartbeatManager = NoOpHeartbeatManager.getInstance();
 	}
 
 	private SchedulerNG createScheduler(final JobManagerJobMetricGroup jobManagerJobMetricGroup) throws Exception {
@@ -573,6 +571,11 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 						slotPool.registerTaskManager(taskManagerId);
 						registeredTaskManagers.put(taskManagerId, Tuple2.of(taskManagerLocation, taskExecutorGateway));
 
+						// register taskmanager location -> taskmanager id mapping in job execution history
+						JobExecutionHistory.getInstance().addTaskManagerLocationToContainerInfo(
+							taskManagerLocation.getHostname() + ":" + taskManagerLocation.dataPort(),
+							taskManagerId.toString());
+
 						// monitor the task manager as heartbeat target
 						taskManagerHeartbeatManager.monitorTarget(taskManagerId, new HeartbeatTarget<AllocatedSlotReport>() {
 							@Override
@@ -788,8 +791,15 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	}
 
 	private void stopHeartbeatServices() {
-		taskManagerHeartbeatManager.stop();
-		resourceManagerHeartbeatManager.stop();
+		if (taskManagerHeartbeatManager != null) {
+			taskManagerHeartbeatManager.stop();
+			taskManagerHeartbeatManager = null;
+		}
+
+		if (resourceManagerHeartbeatManager != null) {
+			resourceManagerHeartbeatManager.stop();
+			resourceManagerHeartbeatManager = null;
+		}
 	}
 
 	private void startHeartbeatServices() {
@@ -893,9 +903,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 
 		if (newJobStatus.isGloballyTerminalState()) {
 			runAsync(() -> registeredTaskManagers.keySet()
-				.forEach(newJobStatus == JobStatus.FINISHED
-					? partitionTracker::stopTrackingAndReleaseOrPromotePartitionsFor
-					: partitionTracker::stopTrackingAndReleasePartitionsFor));
+				.forEach(partitionTracker::stopTrackingAndReleasePartitionsFor));
 
 			final ArchivedExecutionGraph archivedExecutionGraph = schedulerNG.requestJob();
 			scheduledExecutorService.execute(() -> jobCompletionActions.jobReachedGloballyTerminalState(archivedExecutionGraph));
@@ -1008,6 +1016,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 			log.info("Close ResourceManager connection {}: {}.", resourceManagerResourceID, cause.getMessage());
 		}
 
+		JobExecutionHistory.getInstance().saveToArchiveDir();
 		resourceManagerHeartbeatManager.unmonitorTarget(resourceManagerResourceID);
 
 		ResourceManagerGateway resourceManagerGateway = establishedResourceManagerConnection.getResourceManagerGateway();

@@ -107,10 +107,14 @@ public class JobManagerOptions {
 	/**
 	 * This option specifies the failover strategy, i.e. how the job computation recovers from task failures.
 	 *
-	 * <p>The option "individual" is intentionally not included for its known limitations.
-	 * It only works when all tasks are not connected, in which case the "region"
+	 * <p>The options "individual" and "region-legacy" are intentionally not included
+	 * as they have some known limitations or issues:
+	 * <ul>
+	 *     <li>"individual" strategy only works when all tasks are not connected, in which case the "region"
 	 * failover strategy would also restart failed tasks individually.
-	 * The new "region" strategy supersedes "individual" strategy and should always work.
+	 *     <li>"region-legacy" strategy is not able to backtrack missing input result partitions.
+	 * </ul>
+	 * The new "region" strategy supersedes "individual" and "region-legacy" strategies and should always work.
 	 */
 	public static final ConfigOption<String> EXECUTION_FAILOVER_STRATEGY =
 		key("jobmanager.execution.failover-strategy")
@@ -176,6 +180,22 @@ public class JobManagerOptions {
 			// default matches heartbeat.timeout so that sticky allocation is not lost on timeouts for local recovery
 			.defaultValue(HeartbeatManagerOptions.HEARTBEAT_TIMEOUT.defaultValue())
 			.withDescription("The timeout in milliseconds for a idle slot in Slot Pool.");
+
+	/**
+	 * Hadoop job history server URL.
+	 */
+	public static final ConfigOption<String> JOB_MANAGER_HADOOP_HISTORYSERVER_URL =
+		key("jobmanager.hadoop.historyserver.url")
+			.noDefaultValue()
+			.withDescription("Hadoop history server url.");
+
+	/**
+	 * Hosts FQDN suffix. this information is needed in composing the hadoop history server url for job logs.
+	 */
+	public static final ConfigOption<String> JOB_MANAGER_HOST_FQDN_SUFFIX =
+		key("jobmanager.host.fqdn.suffix")
+			.noDefaultValue()
+			.withDescription("Hosts fqdn suffix");
 	/**
 	 * Config parameter determining the scheduler implementation.
 	 */
