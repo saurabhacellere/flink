@@ -53,37 +53,44 @@ class FlinkTypeFactory(typeSystem: RelDataTypeSystem) extends JavaTypeFactoryImp
   // NOTE: for future data types it might be necessary to
   // override more methods of RelDataTypeFactoryImpl
 
+  private val seenTypes = mutable.HashMap[(TypeInformation[_], Boolean), RelDataType]()
+
   def createTypeFromTypeInfo(
       typeInfo: TypeInformation[_],
       isNullable: Boolean)
     : RelDataType = {
 
-    val relType = if (isSimple(typeInfo)) {
-      // simple types can be converted to SQL types and vice versa
-      val sqlType = typeInfoToSqlTypeName(typeInfo)
-      sqlType match {
+      // we cannot use seenTypes for simple types,
+      // because time indicators and timestamps would be the same
 
-        case INTERVAL_YEAR_MONTH =>
-          createSqlIntervalType(
-            new SqlIntervalQualifier(TimeUnit.YEAR, TimeUnit.MONTH, SqlParserPos.ZERO))
+      val relType = if (isSimple(typeInfo)) {
+        // simple types can be converted to SQL types and vice versa
+        val sqlType = typeInfoToSqlTypeName(typeInfo)
+        sqlType match {
 
-        case INTERVAL_DAY_SECOND =>
-          createSqlIntervalType(
-            new SqlIntervalQualifier(TimeUnit.DAY, TimeUnit.SECOND, SqlParserPos.ZERO))
+          case INTERVAL_YEAR_MONTH =>
+            createSqlIntervalType(
+              new SqlIntervalQualifier(TimeUnit.YEAR, TimeUnit.MONTH, SqlParserPos.ZERO))
 
-        case TIMESTAMP if typeInfo.isInstanceOf[TimeIndicatorTypeInfo] =>
-          if (typeInfo.asInstanceOf[TimeIndicatorTypeInfo].isEventTime) {
-            createRowtimeIndicatorType()
-          } else {
-            createProctimeIndicatorType()
-          }
+          case INTERVAL_DAY_SECOND =>
+            createSqlIntervalType(
+              new SqlIntervalQualifier(TimeUnit.DAY, TimeUnit.SECOND, SqlParserPos.ZERO))
 
-        case _ =>
-          createSqlType(sqlType)
+          case TIMESTAMP if typeInfo.isInstanceOf[TimeIndicatorTypeInfo] =>
+            if (typeInfo.asInstanceOf[TimeIndicatorTypeInfo].isEventTime) {
+              createRowtimeIndicatorType()
+            } else {
+              createProctimeIndicatorType()
+            }
+
+          case _ =>
+            createSqlType(sqlType)
+        }
+      } else {
+        // advanced types require specific RelDataType
+        // for storing the original TypeInformation
+        seenTypes.getOrElseUpdate((typeInfo, isNullable), createAdvancedType(typeInfo, isNullable))
       }
-    } else {
-      createAdvancedType(typeInfo, isNullable)
-    }
 
     createTypeWithNullability(relType, isNullable)
   }
@@ -403,7 +410,14 @@ object FlinkTypeFactory {
     case FLOAT => FLOAT_TYPE_INFO
     case DOUBLE => DOUBLE_TYPE_INFO
     case VARCHAR | CHAR => STRING_TYPE_INFO
-    case DECIMAL => BIG_DEC_TYPE_INFO
+    case DECIMAL =>
+      val precision = relDataType.getPrecision
+      val scale = relDataType.getScale
+      if (precision < scale) {
+        throw new TableException(
+          "scale of DECIMAL type should between 0 to precision(included).")
+      }
+      BIG_DEC_TYPE_INFO
 
     // time indicators
     case TIMESTAMP if relDataType.isInstanceOf[TimeIndicatorRelDataType] =>
