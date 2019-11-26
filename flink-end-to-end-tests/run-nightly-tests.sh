@@ -164,6 +164,8 @@ run_test "ConnectedComponents iterations with high parallelism end-to-end test" 
 
 run_test "Dependency shading of table modules test" "$END_TO_END_DIR/test-scripts/test_table_shaded_dependencies.sh"
 
+run_test "End-to-end test for hive connector with Docker" "$END_TO_END_DIR/test-scripts/test_connectors_hive.sh"
+
 ################################################################################
 # Sticky Scheduling
 ################################################################################
@@ -175,6 +177,5 @@ run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR
 run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR/test-scripts/test_local_recovery_and_scheduling.sh 4 10 rocks false true" "skip_check_exceptions"
 run_test "Local recovery and sticky scheduling end-to-end test" "$END_TO_END_DIR/test-scripts/test_local_recovery_and_scheduling.sh 4 10 rocks true true" "skip_check_exceptions"
 
-printf "\n[PASS] All bash e2e-tests passed\n"
-printf "\n Please remember to run java e2e-tests by running mvn verify -Dcategories=\"\" -DdistDir=<path to flink-dist> in flink-end-to-end-tests\n"
+printf "\n[PASS] All tests passed\n"
 exit 0
