@@ -18,42 +18,35 @@
 
 package org.apache.flink.table.planner.operations;
 
+import org.apache.flink.sql.parser.SqlProperty;
 import org.apache.flink.sql.parser.ddl.SqlCreateTable;
 import org.apache.flink.sql.parser.ddl.SqlDropTable;
 import org.apache.flink.sql.parser.ddl.SqlTableColumn;
-import org.apache.flink.sql.parser.ddl.SqlTableOption;
-import org.apache.flink.sql.parser.ddl.SqlUseCatalog;
 import org.apache.flink.sql.parser.dml.RichSqlInsert;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.catalog.CatalogManager;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
-import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.catalog.UnresolvedIdentifier;
 import org.apache.flink.table.operations.CatalogSinkModifyOperation;
 import org.apache.flink.table.operations.Operation;
-import org.apache.flink.table.operations.UseCatalogOperation;
 import org.apache.flink.table.operations.ddl.CreateTableOperation;
 import org.apache.flink.table.operations.ddl.DropTableOperation;
 import org.apache.flink.table.planner.calcite.FlinkPlannerImpl;
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.utils.TypeConversions;
+import org.apache.flink.table.planner.calcite.FlinkTypeSystem;
+import org.apache.flink.table.runtime.types.LogicalTypeDataTypeConverter;
 
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.validate.SqlValidator;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -69,15 +62,11 @@ import java.util.stream.Collectors;
  */
 public class SqlToOperationConverter {
 	private FlinkPlannerImpl flinkPlanner;
-	private CatalogManager catalogManager;
 
 	//~ Constructors -----------------------------------------------------------
 
-	private SqlToOperationConverter(
-			FlinkPlannerImpl flinkPlanner,
-			CatalogManager catalogManager) {
+	private SqlToOperationConverter(FlinkPlannerImpl flinkPlanner) {
 		this.flinkPlanner = flinkPlanner;
-		this.catalogManager = catalogManager;
 	}
 
 	/**
@@ -85,29 +74,24 @@ public class SqlToOperationConverter {
 	 * SqlNode will have it's implementation in the #convert(type) method whose 'type' argument
 	 * is subclass of {@code SqlNode}.
 	 *
-	 * @param flinkPlanner FlinkPlannerImpl to convertCreateTable sql node to rel node
-	 * @param catalogManager CatalogManager to resolve full path for operations
-	 * @param sqlNode SqlNode to execute on
+	 * @param flinkPlanner     FlinkPlannerImpl to convertCreateTable sql node to rel node
+	 * @param sqlNode          SqlNode to execute on
 	 */
-	public static Optional<Operation> convert(
-			FlinkPlannerImpl flinkPlanner,
-			CatalogManager catalogManager,
-			SqlNode sqlNode) {
+	public static Operation convert(FlinkPlannerImpl flinkPlanner, SqlNode sqlNode) {
 		// validate the query
 		final SqlNode validated = flinkPlanner.validate(sqlNode);
-		SqlToOperationConverter converter = new SqlToOperationConverter(flinkPlanner, catalogManager);
+		SqlToOperationConverter converter = new SqlToOperationConverter(flinkPlanner);
 		if (validated instanceof SqlCreateTable) {
-			return Optional.of(converter.convertCreateTable((SqlCreateTable) validated));
-		} else if (validated instanceof SqlDropTable) {
-			return Optional.of(converter.convertDropTable((SqlDropTable) validated));
+			return converter.convertCreateTable((SqlCreateTable) validated);
+		} if (validated instanceof SqlDropTable) {
+			return converter.convertDropTable((SqlDropTable) validated);
 		} else if (validated instanceof RichSqlInsert) {
-			return Optional.of(converter.convertSqlInsert((RichSqlInsert) validated));
-		} else if (validated instanceof SqlUseCatalog) {
-			return Optional.of(converter.convertUseCatalog((SqlUseCatalog) validated));
+			return converter.convertSqlInsert((RichSqlInsert) validated);
 		} else if (validated.getKind().belongsTo(SqlKind.QUERY)) {
-			return Optional.of(converter.convertSqlQuery(validated));
+			return converter.convertSqlQuery(validated);
 		} else {
-			return Optional.empty();
+			throw new TableException("Unsupported node type "
+				+ validated.getClass().getSimpleName());
 		}
 	}
 
@@ -116,74 +100,60 @@ public class SqlToOperationConverter {
 	 */
 	private Operation convertCreateTable(SqlCreateTable sqlCreateTable) {
 		// primary key and unique keys are not supported
-		if ((sqlCreateTable.getPrimaryKeyList().size() > 0)
-			|| (sqlCreateTable.getUniqueKeysList().size() > 0)) {
+		if ((sqlCreateTable.getPrimaryKeyList() != null
+				&& sqlCreateTable.getPrimaryKeyList().size() > 0)
+			|| (sqlCreateTable.getUniqueKeysList() != null
+				&& sqlCreateTable.getUniqueKeysList().size() > 0)) {
 			throw new SqlConversionException("Primary key and unique key are not supported yet.");
 		}
 
 		// set with properties
+		SqlNodeList propertyList = sqlCreateTable.getPropertyList();
 		Map<String, String> properties = new HashMap<>();
-		sqlCreateTable.getPropertyList().getList().forEach(p ->
-			properties.put(((SqlTableOption) p).getKeyString().toLowerCase(),
-				((SqlTableOption) p).getValueString()));
+		if (propertyList != null) {
+			propertyList.getList().forEach(p ->
+				properties.put(((SqlProperty) p).getKeyString().toLowerCase(),
+					((SqlProperty) p).getValueString()));
+		}
 
-		TableSchema tableSchema = createTableSchema(sqlCreateTable);
-		String tableComment = sqlCreateTable.getComment().map(comment ->
-			comment.getNlsString().getValue()).orElse(null);
+		TableSchema tableSchema = createTableSchema(sqlCreateTable,
+			new FlinkTypeFactory(new FlinkTypeSystem())); // need to make type factory singleton ?
+		String tableComment = "";
+		if (sqlCreateTable.getComment() != null) {
+			tableComment = sqlCreateTable.getComment().getNlsString().getValue();
+		}
 		// set partition key
-		List<String> partitionKeys = sqlCreateTable.getPartitionKeyList()
-			.getList()
-			.stream()
-			.map(p -> ((SqlIdentifier) p).getSimple())
-			.collect(Collectors.toList());
-
+		List<String> partitionKeys = new ArrayList<>();
+		SqlNodeList partitionKey = sqlCreateTable.getPartitionKeyList();
+		if (partitionKey != null) {
+			partitionKeys = partitionKey
+				.getList()
+				.stream()
+				.map(p -> ((SqlIdentifier) p).getSimple())
+				.collect(Collectors.toList());
+		}
 		CatalogTable catalogTable = new CatalogTableImpl(tableSchema,
 			partitionKeys,
 			properties,
 			tableComment);
-
-		UnresolvedIdentifier unresolvedIdentifier = UnresolvedIdentifier.of(sqlCreateTable.fullTableName());
-		ObjectIdentifier identifier = catalogManager.qualifyIdentifier(unresolvedIdentifier);
-
-		return new CreateTableOperation(
-			identifier,
-			catalogTable,
+		return new CreateTableOperation(sqlCreateTable.fullTableName(), catalogTable,
 			sqlCreateTable.isIfNotExists());
 	}
 
 	/** Convert DROP TABLE statement. */
 	private Operation convertDropTable(SqlDropTable sqlDropTable) {
-		UnresolvedIdentifier unresolvedIdentifier = UnresolvedIdentifier.of(sqlDropTable.fullTableName());
-		ObjectIdentifier identifier = catalogManager.qualifyIdentifier(unresolvedIdentifier);
-
-		return new DropTableOperation(identifier, sqlDropTable.getIfExists());
+		return new DropTableOperation(sqlDropTable.fullTableName(), sqlDropTable.getIfExists());
 	}
 
 	/** Convert insert into statement. */
 	private Operation convertSqlInsert(RichSqlInsert insert) {
 		// get name of sink table
 		List<String> targetTablePath = ((SqlIdentifier) insert.getTargetTable()).names;
-
-		UnresolvedIdentifier unresolvedIdentifier = UnresolvedIdentifier.of(targetTablePath.toArray(new String[0]));
-		ObjectIdentifier identifier = catalogManager.qualifyIdentifier(unresolvedIdentifier);
-
-		PlannerQueryOperation query = (PlannerQueryOperation) SqlToOperationConverter.convert(
-			flinkPlanner,
-			catalogManager,
-			insert.getSource())
-			.orElseThrow(() -> new TableException(
-				"Unsupported node type " + insert.getSource().getClass().getSimpleName()));
-
 		return new CatalogSinkModifyOperation(
-			identifier,
-			query,
-			insert.getStaticPartitionKVs(),
-			insert.isOverwrite());
-	}
-
-	/** Convert use catalog statement. */
-	private Operation convertUseCatalog(SqlUseCatalog useCatalog) {
-		return new UseCatalogOperation(useCatalog.getCatalogName());
+			targetTablePath,
+			(RelQueryOperation) SqlToOperationConverter.convert(flinkPlanner,
+				insert.getSource()),
+			insert.getStaticPartitionKVs());
 	}
 
 	/** Fallback method for sql query. */
@@ -194,83 +164,52 @@ public class SqlToOperationConverter {
 	//~ Tools ------------------------------------------------------------------
 
 	/**
-	 * Create a table schema from {@link SqlCreateTable}. This schema may contains computed column
-	 * fields and watermark information, say, we have a create table DDL statement:
+	 * Create a table schema from {@link SqlCreateTable}. This schema contains computed column
+	 * fields, say, we have a create table DDL statement:
 	 * <blockquote><pre>
-	 *   CREATE TABLE myTable (
-	 *     a INT,
-	 *     b STRING,
-	 *     c AS TO_TIMESTAMP(b),
-	 *     WATERMARK FOR c AS c - INTERVAL '1' SECOND
-	 *   ) WITH (
-	 *     'connector.type' = 'csv',
-	 *     ...
-	 *   )
+	 *   create table t(
+	 *     a int,
+	 *     b varchar,
+	 *     c as to_timestamp(b))
+	 *   with (
+	 *     connector = 'csv',
+	 *     k1 = 'v1')
 	 * </pre></blockquote>
 	 *
 	 * <p>The returned table schema contains columns (a:int, b:varchar, c:timestamp).
 	 *
-	 * @param sqlCreateTable sql create table node
+	 * @param sqlCreateTable sql create table node.
+	 * @param factory        FlinkTypeFactory instance.
 	 * @return TableSchema
 	 */
-	private TableSchema createTableSchema(SqlCreateTable sqlCreateTable) {
-		// Setup table columns.
+	private TableSchema createTableSchema(SqlCreateTable sqlCreateTable,
+			FlinkTypeFactory factory) {
+		// setup table columns
 		SqlNodeList columnList = sqlCreateTable.getColumnList();
-		// Collect the physical fields info first.
-		Map<String, RelDataType> nameToType = new HashMap<>();
-		final SqlValidator validator = flinkPlanner.getOrCreateSqlValidator();
-		for (SqlNode node : columnList.getList()) {
-			if (node instanceof SqlTableColumn) {
-				SqlTableColumn column = (SqlTableColumn) node;
-				RelDataType relType = column.getType()
-					.deriveType(validator, column.getType().getNullable());
-				String name = column.getName().getSimple();
-				nameToType.put(name, relType);
-			}
+		TableSchema physicalSchema = null;
+		TableSchema.Builder builder = new TableSchema.Builder();
+		// collect the physical table schema first.
+		final List<SqlNode> physicalColumns = columnList.getList().stream()
+			.filter(n -> n instanceof SqlTableColumn).collect(Collectors.toList());
+		for (SqlNode node : physicalColumns) {
+			SqlTableColumn column = (SqlTableColumn) node;
+			final RelDataType relType = column.getType().deriveType(factory,
+				column.getType().getNullable());
+			builder.field(column.getName().getSimple(),
+				LogicalTypeDataTypeConverter.fromLogicalTypeToDataType(
+					FlinkTypeFactory.toLogicalType(relType)));
+			physicalSchema = builder.build();
 		}
-		final TableSchema.Builder builder = new TableSchema.Builder();
-		// Build the table schema.
-		for (SqlNode node : columnList) {
-			if (node instanceof SqlTableColumn) {
-				SqlTableColumn column = (SqlTableColumn) node;
-				final String fieldName = column.getName().getSimple();
-				assert nameToType.containsKey(fieldName);
-				builder.field(fieldName,
-					TypeConversions.fromLogicalToDataType(
-						FlinkTypeFactory.toLogicalType(nameToType.get(fieldName))));
-			} else if (node instanceof SqlBasicCall) {
-				SqlBasicCall call = (SqlBasicCall) node;
-				SqlNode validatedExpr = validator
-					.validateParameterizedExpression(call.operand(0), nameToType);
-				final RelDataType validatedType = validator.getValidatedNodeType(validatedExpr);
-				builder.field(call.operand(1).toString(),
-					TypeConversions.fromLogicalToDataType(
-						FlinkTypeFactory.toLogicalType(validatedType)),
-					validatedExpr.toString());
-			} else {
-				throw new TableException("Unexpected table column type!");
-			}
+		assert physicalSchema != null;
+		if (sqlCreateTable.containsComputedColumn()) {
+			throw new SqlConversionException("Computed columns for DDL is not supported yet!");
 		}
-
-		// put watermark information into TableSchema
-		sqlCreateTable.getWatermark().ifPresent(watermark -> {
-			String rowtimeAttribute = watermark.getEventTimeColumnName().toString();
-			SqlNode expression = watermark.getWatermarkStrategy();
-			// this will validate and expand function identifiers.
-			SqlNode validated = validator.validateParameterizedExpression(expression, nameToType);
-			RelDataType validatedType = validator.getValidatedNodeType(validated);
-			DataType exprDataType = TypeConversions.fromLogicalToDataType(
-				FlinkTypeFactory.toLogicalType(validatedType));
-			// use the qualified SQL expression string
-			builder.watermark(rowtimeAttribute, validated.toString(), exprDataType);
-		});
-
-		return builder.build();
+		return physicalSchema;
 	}
 
-	private PlannerQueryOperation toQueryOperation(FlinkPlannerImpl planner, SqlNode validated) {
+	private RelQueryOperation toQueryOperation(FlinkPlannerImpl planner, SqlNode validated) {
 		// transform to a relational tree
 		RelRoot relational = planner.rel(validated);
-		return new PlannerQueryOperation(relational.project());
+		return new RelQueryOperation(relational.project());
 	}
 }

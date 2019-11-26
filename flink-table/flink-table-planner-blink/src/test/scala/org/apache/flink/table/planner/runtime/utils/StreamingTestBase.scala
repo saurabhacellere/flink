@@ -22,7 +22,7 @@ import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
 import org.apache.flink.table.api.scala.StreamTableEnvironment
 import org.apache.flink.table.api.{EnvironmentSettings, Table, TableException}
-import org.apache.flink.table.planner.operations.PlannerQueryOperation
+import org.apache.flink.table.planner.operations.RelQueryOperation
 import org.apache.flink.table.planner.plan.nodes.calcite.LogicalWatermarkAssigner
 import org.apache.flink.table.planner.utils.TableTestUtil
 import org.apache.flink.test.util.AbstractTestBase
@@ -75,7 +75,7 @@ class StreamingTestBase extends AbstractTestBase {
       Some(rowtimeFieldIdx),
       Option(offset)
     )
-    val queryOperation = new PlannerQueryOperation(watermarkAssigner)
+    val queryOperation = new RelQueryOperation(watermarkAssigner)
     tEnv.registerTable(tableName, TableTestUtil.createTable(tEnv, queryOperation))
   }
 }
