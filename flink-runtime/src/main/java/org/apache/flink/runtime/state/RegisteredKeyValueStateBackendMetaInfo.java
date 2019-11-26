@@ -28,7 +28,6 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -144,11 +143,6 @@ public class RegisteredKeyValueStateBackendMetaInfo<N, S> extends RegisteredStat
 	@Nullable
 	public TypeSerializer<S> getPreviousStateSerializer() {
 		return stateSerializerProvider.previousSchemaSerializer();
-	}
-
-	@Nullable
-	public TypeSerializerSnapshot<S> getPreviousStateSerializerSnapshot() {
-		return stateSerializerProvider.previousSerializerSnapshot;
 	}
 
 	@Nonnull

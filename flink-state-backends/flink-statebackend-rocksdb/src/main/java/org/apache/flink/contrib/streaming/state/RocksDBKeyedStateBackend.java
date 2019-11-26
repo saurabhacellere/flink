@@ -29,9 +29,6 @@ import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.api.common.typeutils.base.MapSerializer;
-import org.apache.flink.api.common.typeutils.base.MapSerializerSnapshot;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.contrib.streaming.state.iterator.RocksStateKeysIterator;
 import org.apache.flink.contrib.streaming.state.snapshot.RocksDBSnapshotStrategyBase;
@@ -40,6 +37,7 @@ import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.CheckpointType;
 import org.apache.flink.runtime.query.TaskKvStateRegistry;
 import org.apache.flink.runtime.state.AbstractKeyedStateBackend;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
@@ -91,7 +89,6 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static org.apache.flink.contrib.streaming.state.RocksDBSnapshotTransformFactoryAdaptor.wrapStateSnapshotTransformFactory;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * An {@link AbstractKeyedStateBackend} that stores its state in {@code RocksDB} and serializes state to
@@ -433,7 +430,8 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 		writeBatchWrapper.flush();
 
 		RocksDBSnapshotStrategyBase<K> chosenSnapshotStrategy =
-				checkpointOptions.getCheckpointType().isSavepoint() ? savepointSnapshotStrategy : checkpointSnapshotStrategy;
+			CheckpointType.SAVEPOINT == checkpointOptions.getCheckpointType() ?
+				savepointSnapshotStrategy : checkpointSnapshotStrategy;
 
 		RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshotRunner =
 			chosenSnapshotStrategy.snapshot(checkpointId, timestamp, streamFactory, checkpointOptions);
@@ -530,6 +528,18 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 			restoredKvStateMetaInfo.updateStateSerializer(stateSerializer);
 		if (newStateSerializerCompatibility.isCompatibleAfterMigration()) {
 			migrateStateValues(stateDesc, oldStateInfo);
+		} else if (newStateSerializerCompatibility.isUnknown()) {
+			if (stateDesc.isForceMigrationIfSchemaCompatibilityUnknown()) {
+				TypeSerializer<SV> prevSerializer = restoredKvStateMetaInfo.getPreviousStateSerializer();
+				Preconditions.checkNotNull(prevSerializer);
+				String prevSerializerClassName = prevSerializer.getClass().getName();
+				String newSerializerClassName = restoredKvStateMetaInfo.getStateSerializer().getClass().getName();
+				LOG.warn("Unknown compatibility but choose to do force migration. Old serializer type: {"
+					+ prevSerializerClassName + "}, new serializer type: {" + newSerializerClassName + "}");
+				migrateStateValues(stateDesc, oldStateInfo);
+			} else {
+				throw new StateMigrationException("The compatibility of new state serializer is unknown.");
+			}
 		} else if (newStateSerializerCompatibility.isIncompatible()) {
 			throw new StateMigrationException("The new state serializer cannot be incompatible.");
 		}
@@ -542,25 +552,13 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 	 * the key here, which is made up of key group, key, namespace and map key
 	 * (in case of MapState).
 	 */
-	@SuppressWarnings("unchecked")
 	private <N, S extends State, SV> void migrateStateValues(
 		StateDescriptor<S, SV> stateDesc,
 		Tuple2<ColumnFamilyHandle, RegisteredKeyValueStateBackendMetaInfo<N, SV>> stateMetaInfo) throws Exception {
 
 		if (stateDesc.getType() == StateDescriptor.Type.MAP) {
-			TypeSerializerSnapshot<SV> previousSerializerSnapshot = stateMetaInfo.f1.getPreviousStateSerializerSnapshot();
-			checkState(previousSerializerSnapshot != null, "the previous serializer snapshot should exist.");
-			checkState(previousSerializerSnapshot instanceof MapSerializerSnapshot, "previous serializer snapshot should be a MapSerializerSnapshot.");
-
-			TypeSerializer<SV> newSerializer = stateMetaInfo.f1.getStateSerializer();
-			checkState(newSerializer instanceof MapSerializer, "new serializer should be a MapSerializer.");
-
-			MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) newSerializer;
-			MapSerializerSnapshot<?, ?> mapSerializerSnapshot = (MapSerializerSnapshot<?, ?>) previousSerializerSnapshot;
-			if (!checkMapStateKeySchemaCompatibility(mapSerializerSnapshot, mapSerializer)) {
-				throw new StateMigrationException(
-					"The new serializer for a MapState requires state migration in order for the job to proceed, since the key schema has changed. However, migration for MapState currently only allows value schema evolutions.");
-			}
+			throw new StateMigrationException("The new serializer for a MapState requires state migration in order for the job to proceed." +
+				" However, migration for MapState currently isn't supported.");
 		}
 
 		LOG.info(
@@ -617,17 +615,6 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
-	private static <UK> boolean checkMapStateKeySchemaCompatibility(
-		MapSerializerSnapshot<?, ?> mapStateSerializerSnapshot,
-		MapSerializer<?, ?> newMapStateSerializer) {
-		TypeSerializerSnapshot<UK> previousKeySerializerSnapshot = (TypeSerializerSnapshot<UK>) mapStateSerializerSnapshot.getKeySerializerSnapshot();
-		TypeSerializer<UK> newUserKeySerializer = (TypeSerializer<UK>) newMapStateSerializer.getKeySerializer();
-
-		TypeSerializerSchemaCompatibility<UK> keyCompatibility = previousKeySerializerSnapshot.resolveSchemaCompatibility(newUserKeySerializer);
-		return keyCompatibility.isCompatibleAsIs();
-	}
-
 	@Override
 	@Nonnull
 	public <N, SV, SEV, S extends State, IS extends S> IS createInternalState(
@@ -681,6 +668,12 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 	@Override
 	public boolean requiresLegacySynchronousTimerSnapshots() {
 		return priorityQueueFactory instanceof HeapPriorityQueueSetFactory;
+	}
+
+	@Override
+	public RegisteredKeyValueStateBackendMetaInfo getRegisteredStateMetaInfo(String stateName) {
+		RocksDbKvStateInfo stateInfo = kvStateInformation.get(stateName);
+		return stateInfo == null ? null : (RegisteredKeyValueStateBackendMetaInfo) stateInfo.metaInfo;
 	}
 
 	/** Rocks DB specific information about the k/v states. */
