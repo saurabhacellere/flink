@@ -22,6 +22,7 @@ import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.ExecutionEnvironmentFactory;
+import org.apache.flink.api.java.operators.DataSink;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.examples.java.clustering.KMeans;
 import org.apache.flink.examples.java.graph.ConnectedComponents;
@@ -334,8 +335,12 @@ public class JsonJobGraphGenerationTest {
 		}
 
 		@Override
-		public JobExecutionResult execute(String jobName) throws Exception {
-			Plan plan = createProgramPlan(jobName);
+		public void startNewSession() throws Exception {
+		}
+
+		@Override
+		public JobExecutionResult execute(String jobName, DataSink<?>... sinks) throws Exception {
+			Plan plan = createProgramPlan(jobName, sinks);
 
 			Optimizer pc = new Optimizer(new Configuration());
 			OptimizedPlan op = pc.compile(plan);
@@ -352,6 +357,11 @@ public class JsonJobGraphGenerationTest {
 			validator.validateJson(jsonPlan);
 
 			throw new AbortError();
+		}
+
+		@Override
+		public String getExecutionPlan() throws Exception {
+			throw new UnsupportedOperationException();
 		}
 
 		public static void setAsNext(final JsonValidator validator, final int defaultParallelism) {

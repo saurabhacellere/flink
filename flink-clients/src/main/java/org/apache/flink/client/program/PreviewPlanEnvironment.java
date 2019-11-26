@@ -16,58 +16,70 @@
  * limitations under the License.
  */
 
-package org.apache.flink.test.util;
+package org.apache.flink.client.program;
 
 import org.apache.flink.api.common.JobExecutionResult;
-import org.apache.flink.api.java.CollectionEnvironment;
+import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.ExecutionEnvironmentFactory;
 import org.apache.flink.api.java.operators.DataSink;
+import org.apache.flink.optimizer.Optimizer;
+import org.apache.flink.optimizer.dag.DataSinkNode;
+
+import java.util.List;
 
 /**
- * A {@link CollectionEnvironment} to be used in tests. The predominant feature of this class is that it allows setting
- * it as a context environment, causing it to be returned by {@link ExecutionEnvironment#getExecutionEnvironment()}.
- * This also allows retrieving the {@link JobExecutionResult} outside the actual program.
+ * Environment to extract the pre-optimized plan.
  */
-public class CollectionTestEnvironment extends CollectionEnvironment {
+public final class PreviewPlanEnvironment extends ExecutionEnvironment {
 
-	private CollectionTestEnvironment lastEnv = null;
+	List<DataSinkNode> previewPlan;
 
-	@Override
-	public JobExecutionResult getLastJobExecutionResult() {
-		if (lastEnv == null) {
-			return this.lastJobExecutionResult;
-		}
-		else {
-			return lastEnv.getLastJobExecutionResult();
-		}
-	}
+	String preview;
 
-	@Override
-	public JobExecutionResult execute(DataSink<?>... sinks) throws Exception {
-		return execute("test job", sinks);
-	}
+	Plan plan;
 
 	@Override
 	public JobExecutionResult execute(String jobName, DataSink<?>... sinks) throws Exception {
-		JobExecutionResult result = super.execute(jobName, sinks);
-		this.lastJobExecutionResult = result;
-		return result;
+		this.plan = createProgramPlan(jobName, sinks);
+		this.previewPlan = Optimizer.createPreOptimizedPlan(plan);
+
+		// do not go on with anything now!
+		throw new OptimizerPlanEnvironment.ProgramAbortException();
 	}
 
-	protected void setAsContext() {
+	@Override
+	public String getExecutionPlan() throws Exception {
+		Plan plan = createProgramPlan("unused");
+		this.previewPlan = Optimizer.createPreOptimizedPlan(plan);
+
+		// do not go on with anything now!
+		throw new OptimizerPlanEnvironment.ProgramAbortException();
+	}
+
+	@Override
+	public void startNewSession() {
+	}
+
+	public void setAsContext() {
 		ExecutionEnvironmentFactory factory = new ExecutionEnvironmentFactory() {
 			@Override
 			public ExecutionEnvironment createExecutionEnvironment() {
-				lastEnv = new CollectionTestEnvironment();
-				return lastEnv;
+				return PreviewPlanEnvironment.this;
 			}
 		};
-
 		initializeContextEnvironment(factory);
 	}
 
-	protected static void unsetAsContext() {
+	public void unsetAsContext() {
 		resetContextEnvironment();
+	}
+
+	public void setPreview(String preview) {
+		this.preview = preview;
+	}
+
+	public Plan getPlan() {
+		return plan;
 	}
 }

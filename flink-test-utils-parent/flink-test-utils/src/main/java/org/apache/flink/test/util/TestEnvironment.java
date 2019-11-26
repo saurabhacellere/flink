@@ -18,15 +18,18 @@
 
 package org.apache.flink.test.util;
 
+import org.apache.flink.api.common.CodeAnalysisMode;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.ExecutionEnvironmentFactory;
+import org.apache.flink.api.java.operators.DataSink;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.optimizer.DataStatistics;
 import org.apache.flink.optimizer.Optimizer;
 import org.apache.flink.optimizer.plan.OptimizedPlan;
+import org.apache.flink.optimizer.plandump.PlanJSONDumpGenerator;
 import org.apache.flink.optimizer.plantranslate.JobGraphGenerator;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.minicluster.JobExecutor;
@@ -64,6 +67,9 @@ public class TestEnvironment extends ExecutionEnvironment {
 
 		setParallelism(parallelism);
 
+		// disabled to improve build time
+		getConfig().setCodeAnalysisMode(CodeAnalysisMode.DISABLE);
+
 		if (isObjectReuseEnabled) {
 			getConfig().enableObjectReuse();
 		} else {
@@ -96,8 +102,12 @@ public class TestEnvironment extends ExecutionEnvironment {
 	}
 
 	@Override
-	public JobExecutionResult execute(String jobName) throws Exception {
-		OptimizedPlan op = compileProgram(jobName);
+	public void startNewSession() throws Exception {
+	}
+
+	@Override
+	public JobExecutionResult execute(String jobName, DataSink<?>... sinks) throws Exception {
+		OptimizedPlan op = compileProgram(jobName, sinks);
 
 		JobGraphGenerator jgg = new JobGraphGenerator();
 		JobGraph jobGraph = jgg.compileJobGraph(op);
@@ -112,8 +122,16 @@ public class TestEnvironment extends ExecutionEnvironment {
 		return this.lastJobExecutionResult;
 	}
 
-	private OptimizedPlan compileProgram(String jobName) {
-		Plan p = createProgramPlan(jobName);
+	@Override
+	public String getExecutionPlan() throws Exception {
+		OptimizedPlan op = compileProgram("unused");
+
+		PlanJSONDumpGenerator jsonGen = new PlanJSONDumpGenerator();
+		return jsonGen.getOptimizerPlanAsJSON(op);
+	}
+
+	private OptimizedPlan compileProgram(String jobName, DataSink<?>... sinks) {
+		Plan p = createProgramPlan(jobName, sinks);
 
 		Optimizer pc = new Optimizer(new DataStatistics(), new Configuration());
 		return pc.compile(p);

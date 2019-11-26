@@ -183,7 +183,7 @@ public abstract class DataSet<T> {
 
 	public <F> F clean(F f) {
 		if (getExecutionEnvironment().getConfig().isClosureCleanerEnabled()) {
-			ClosureCleaner.clean(f, getExecutionEnvironment().getConfig().getClosureCleanerLevel(), true);
+			ClosureCleaner.clean(f, true);
 		} else {
 			ClosureCleaner.ensureSerializable(f);
 		}
@@ -409,8 +409,8 @@ public abstract class DataSet<T> {
 		final String id = new AbstractID().toString();
 		final TypeSerializer<T> serializer = getType().createSerializer(getExecutionEnvironment().getConfig());
 
-		this.output(new Utils.CollectHelper<>(id, serializer)).name("collect()");
-		JobExecutionResult res = getExecutionEnvironment().execute();
+		DataSink sink = this.output(new Utils.CollectHelper<>(id, serializer)).name("collect()");
+		JobExecutionResult res = getExecutionEnvironment().execute(sink);
 
 		ArrayList<byte[]> accResult = res.getAccumulatorResult(id);
 		if (accResult != null) {
