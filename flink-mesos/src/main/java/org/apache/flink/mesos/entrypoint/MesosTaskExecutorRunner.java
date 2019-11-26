@@ -21,13 +21,11 @@ package org.apache.flink.mesos.entrypoint;
 import org.apache.flink.configuration.AkkaOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.mesos.runtime.clusterframework.MesosConfigKeys;
-import org.apache.flink.mesos.util.MesosUtils;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.security.SecurityConfiguration;
-import org.apache.flink.runtime.security.SecurityUtils;
+import org.apache.flink.runtime.security.SecurityEnvironment;
 import org.apache.flink.runtime.taskexecutor.TaskManagerRunner;
 import org.apache.flink.runtime.util.EnvironmentInformation;
 import org.apache.flink.runtime.util.JvmShutdownSafeguard;
@@ -42,6 +40,7 @@ import org.apache.commons.cli.PosixParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.util.Map;
 
@@ -76,7 +75,7 @@ public class MesosTaskExecutorRunner {
 			Configuration dynamicProperties = BootstrapTools.parseDynamicProperties(cmd);
 			LOG.debug("Mesos dynamic properties: {}", dynamicProperties);
 
-			configuration = MesosUtils.loadConfiguration(dynamicProperties, LOG);
+			configuration = MesosEntrypointUtils.loadConfiguration(dynamicProperties, LOG);
 		}
 		catch (Throwable t) {
 			LOG.error("Failed to load the TaskManager configuration and dynamic properties.", t);
@@ -87,7 +86,11 @@ public class MesosTaskExecutorRunner {
 		final Map<String, String> envs = System.getenv();
 
 		// configure the filesystems
-		FileSystem.initialize(configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
+		try {
+			FileSystem.initialize(configuration);
+		} catch (IOException e) {
+			throw new IOException("Error while configuring the filesystems.", e);
+		}
 
 		// tell akka to die in case of an error
 		configuration.setBoolean(AkkaOptions.JVM_EXIT_ON_FATAL_ERROR, true);
@@ -99,10 +102,10 @@ public class MesosTaskExecutorRunner {
 
 		// Run the TM in the security context
 		SecurityConfiguration sc = new SecurityConfiguration(configuration);
-		SecurityUtils.install(sc);
+		SecurityEnvironment.install(sc);
 
 		try {
-			SecurityUtils.getInstalledContext().runSecured(() -> {
+			SecurityEnvironment.getInstalledContext().runSecured(() -> {
 				TaskManagerRunner.runTaskManager(configuration, resourceId);
 
 				return 0;
