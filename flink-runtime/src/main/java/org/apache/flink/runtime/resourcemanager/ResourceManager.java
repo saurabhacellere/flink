@@ -27,6 +27,8 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.runtime.blob.TransientBlobKey;
 import org.apache.flink.runtime.clusterframework.ApplicationStatus;
+import org.apache.flink.runtime.clusterframework.TaskExecutorResourceSpec;
+import org.apache.flink.runtime.clusterframework.TaskExecutorResourceUtils;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceIDRetrievable;
@@ -1205,10 +1207,14 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	public static Collection<ResourceProfile> createWorkerSlotProfiles(Configuration config) {
 		final int numSlots = config.getInteger(TaskManagerOptions.NUM_TASK_SLOTS);
-		final long managedMemoryBytes = MemorySize.parse(config.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE)).getBytes();
+		final long managedMemoryBytes = MemorySize.parse(config.getString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "0b")).getBytes();
 
 		final ResourceProfile resourceProfile = TaskManagerServices.computeSlotResourceProfile(numSlots, managedMemoryBytes);
 		return Collections.nCopies(numSlots, resourceProfile);
+	}
+
+	public static TaskExecutorResourceSpec createTaskExecutorResourceSpec(Configuration config) {
+		return TaskExecutorResourceUtils.resourceSpecFromConfig(config);
 	}
 }
 

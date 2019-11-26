@@ -116,6 +116,7 @@ public class ProcessFailureCancelingITCase extends TestLogger {
 		config.setString(HighAvailabilityOptions.HA_ZOOKEEPER_QUORUM, zooKeeperResource.getConnectString());
 		config.setString(HighAvailabilityOptions.HA_STORAGE_PATH, temporaryFolder.newFolder().getAbsolutePath());
 		config.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, 2);
+		config.setString(TaskManagerOptions.TOTAL_FLINK_MEMORY, "256m");
 		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "4m");
 		config.setInteger(NettyShuffleEnvironmentOptions.NETWORK_NUM_BUFFERS, 100);
 		config.setInteger(RestOptions.PORT, 0);
@@ -217,7 +218,7 @@ public class ProcessFailureCancelingITCase extends TestLogger {
 			taskManagerProcess = null;
 
 			// try to cancel the job
-			clusterClient.cancel(jobId).get();
+			clusterClient.cancel(jobId);
 
 			// we should see a failure within reasonable time (10s is the ask timeout).
 			// since the CI environment is often slow, we conservatively give it up to 2 minutes,

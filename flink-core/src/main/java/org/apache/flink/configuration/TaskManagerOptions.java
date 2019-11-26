@@ -76,7 +76,6 @@ public class TaskManagerOptions {
 	 * shuts down the actor system if it detects that it has quarantined another actor system
 	 * or if it has been quarantined by another actor system.
 	 */
-	@Deprecated
 	public static final ConfigOption<Boolean> EXIT_ON_FATAL_AKKA_ERROR =
 			key("taskmanager.exit-on-fatal-akka-error")
 			.defaultValue(false)
@@ -254,6 +253,7 @@ public class TaskManagerOptions {
 	public static final ConfigOption<String> TOTAL_PROCESS_MEMORY =
 		key("taskmanager.memory.total-process.size")
 			.noDefaultValue()
+			.withDeprecatedKeys(TASK_MANAGER_HEAP_MEMORY.key())
 			.withDescription("Total Process Memory size for the TaskExecutors. This includes all the memory that a"
 				+ " TaskExecutor consumes, consisting of Total Flink Memory, JVM Metaspace, and JVM Overhead. On"
 				+ " containerized setups, this should be set to the container memory.");
@@ -265,7 +265,6 @@ public class TaskManagerOptions {
 	public static final ConfigOption<String> TOTAL_FLINK_MEMORY =
 		key("taskmanager.memory.total-flink.size")
 		.noDefaultValue()
-		.withDeprecatedKeys(TASK_MANAGER_HEAP_MEMORY.key())
 		.withDescription("Total Flink Memory size for the TaskExecutors. This includes all the memory that a"
 			+ " TaskExecutor consumes, except for JVM Metaspace and JVM Overhead. It consists of Framework Heap Memory,"
 			+ " Task Heap Memory, Task Off-Heap Memory, Managed Memory, and Shuffle Memory.");
@@ -278,16 +277,6 @@ public class TaskManagerOptions {
 			.defaultValue("128m")
 			.withDescription("Framework Heap Memory size for TaskExecutors. This is the size of JVM heap memory reserved"
 				+ " for TaskExecutor framework, which will not be allocated to task slots.");
-
-	/**
-	 * Framework Off-Heap Memory size for TaskExecutors.
-	 */
-	public static final ConfigOption<String> FRAMEWORK_OFF_HEAP_MEMORY =
-		key("taskmanager.memory.framework.off-heap.size")
-			.defaultValue("64m")
-			.withDescription("Framework Off-Heap Memory size for TaskExecutors. This is the size of off-heap memory"
-				+ " (JVM direct memory or native memory) reserved for TaskExecutor framework, which will not be"
-				+ " allocated to task slots. It will be accounted as part of the JVM max direct memory size limit.");
 
 	/**
 	 * Task Heap Memory size for TaskExecutors.
@@ -304,7 +293,7 @@ public class TaskManagerOptions {
 	 */
 	public static final ConfigOption<String> TASK_OFF_HEAP_MEMORY =
 		key("taskmanager.memory.task.off-heap.size")
-			.defaultValue("0b")
+			.defaultValue("1m")
 			.withDescription("Task Heap Memory size for TaskExecutors. This is the size of off heap memory (JVM direct"
 				+ " memory or native memory) reserved for user code.");
 
@@ -488,15 +477,6 @@ public class TaskManagerOptions {
 				" A value of -1 indicates that there is no limit.");
 
 	// ------------------------------------------------------------------------
-
-	/**
-	 * Toggle to switch between FLIP-49 and current task manager memory configurations.
-	 */
-	@Documentation.ExcludeFromDocumentation("FLIP-49 is still in development.")
-	public static final ConfigOption<Boolean> ENABLE_FLIP_49_CONFIG =
-			key("taskmanager.enable-flip-49")
-			.defaultValue(false)
-			.withDescription("Toggle to switch between FLIP-49 and current task manager memory configurations.");
 
 	/** Not intended to be instantiated. */
 	private TaskManagerOptions() {}
