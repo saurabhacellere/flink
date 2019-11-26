@@ -29,7 +29,9 @@ import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.RunningJobsRegistry;
 import org.apache.flink.runtime.jobmanager.JobGraphStore;
 import org.apache.flink.runtime.leaderelection.LeaderElectionService;
+import org.apache.flink.runtime.leaderelection.ZooKeeperLeaderElectionService;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
+import org.apache.flink.runtime.leaderretrieval.ZooKeeperLeaderRetrievalService;
 import org.apache.flink.runtime.util.ZooKeeperUtils;
 import org.apache.flink.util.ExceptionUtils;
 
@@ -51,29 +53,24 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * The services store data in ZooKeeper's nodes as illustrated by the following tree structure:
  *
  * <pre>
- * /flink
- *      +/cluster_id_1/resource_manager_lock
- *      |            |
- *      |            +/job-id-1/job_manager_lock
- *      |            |         /checkpoints/latest
- *      |            |                     /latest-1
- *      |            |                     /latest-2
- *      |            |
- *      |            +/job-id-2/job_manager_lock
- *      |
- *      +/cluster_id_2/resource_manager_lock
- *                   |
- *                   +/job-id-1/job_manager_lock
- *                            |/checkpoints/latest
- *                            |            /latest-1
- *                            |/persisted_job_graph
+ * /flink/cluster-id-1/dispatcher/registry/latch-1
+ * 	    |            |          |         /latch-2
+ * 	    |            |          |         /latch-3
+ * 	    |            |          +/info
+ * 	    |            |          +/store/
+ * 	    |            +/resource-manager/registry/latch-1
+ * 	    |            |                          /latch-2
+ * 	    |            +/job-id-1/job-manager/registry/latch-1
+ * 	    |                                  /info
+ * 	    |                                  /store/
+ * 	    +/cluster-id-2/
  * </pre>
  *
  * <p>The root path "/flink" is configurable via the option {@link HighAvailabilityOptions#HA_ZOOKEEPER_ROOT}.
  * This makes sure Flink stores its data under specific subtrees in ZooKeeper, for example to
  * accommodate specific permission.
  *
- * <p>The "cluster_id" part identifies the data stored for a specific Flink "cluster".
+ * <p>The "cluster-id" part identifies the data stored for a specific Flink "cluster".
  * This "cluster" can be either a standalone or containerized Flink cluster, or it can be job
  * on a framework like YARN or Mesos (in a "per-job-cluster" mode).
  *
@@ -88,13 +85,13 @@ public class ZooKeeperHaServices implements HighAvailabilityServices {
 
 	private static final Logger LOG = LoggerFactory.getLogger(ZooKeeperHaServices.class);
 
-	private static final String RESOURCE_MANAGER_LEADER_PATH = "/resource_manager_lock";
+	private static final String RESOURCE_MANAGER_BASE_PATH = "/resource-manager";
 
-	private static final String DISPATCHER_LEADER_PATH = "/dispatcher_lock";
+	private static final String DISPATCHER_BASE_PATH = "/dispatcher";
 
-	private static final String JOB_MANAGER_LEADER_PATH = "/job_manager_lock";
+	private static final String JOB_MANAGER_BASE_PATH = "/job-manager";
 
-	private static final String REST_SERVER_LEADER_PATH = "/rest_server_lock";
+	private static final String REST_SERVER_BASE_PATH = "/rest-server";
 
 	// ------------------------------------------------------------------------
 
@@ -132,17 +129,17 @@ public class ZooKeeperHaServices implements HighAvailabilityServices {
 
 	@Override
 	public LeaderRetrievalService getResourceManagerLeaderRetriever() {
-		return ZooKeeperUtils.createLeaderRetrievalService(client, configuration, RESOURCE_MANAGER_LEADER_PATH);
+		return new ZooKeeperLeaderRetrievalService(client, RESOURCE_MANAGER_BASE_PATH);
 	}
 
 	@Override
 	public LeaderRetrievalService getDispatcherLeaderRetriever() {
-		return ZooKeeperUtils.createLeaderRetrievalService(client, configuration, DISPATCHER_LEADER_PATH);
+		return new ZooKeeperLeaderRetrievalService(client, DISPATCHER_BASE_PATH);
 	}
 
 	@Override
 	public LeaderRetrievalService getJobManagerLeaderRetriever(JobID jobID) {
-		return ZooKeeperUtils.createLeaderRetrievalService(client, configuration, getPathForJobManager(jobID));
+		return new ZooKeeperLeaderRetrievalService(client, getPathForJobManager(jobID));
 	}
 
 	@Override
@@ -152,27 +149,27 @@ public class ZooKeeperHaServices implements HighAvailabilityServices {
 
 	@Override
 	public LeaderRetrievalService getClusterRestEndpointLeaderRetriever() {
-		return ZooKeeperUtils.createLeaderRetrievalService(client, configuration, REST_SERVER_LEADER_PATH);
+		return new ZooKeeperLeaderRetrievalService(client, REST_SERVER_BASE_PATH);
 	}
 
 	@Override
 	public LeaderElectionService getResourceManagerLeaderElectionService() {
-		return ZooKeeperUtils.createLeaderElectionService(client, configuration, RESOURCE_MANAGER_LEADER_PATH);
+		return new ZooKeeperLeaderElectionService(client, RESOURCE_MANAGER_BASE_PATH);
 	}
 
 	@Override
 	public LeaderElectionService getDispatcherLeaderElectionService() {
-		return ZooKeeperUtils.createLeaderElectionService(client, configuration, DISPATCHER_LEADER_PATH);
+		return new ZooKeeperLeaderElectionService(client, DISPATCHER_BASE_PATH);
 	}
 
 	@Override
 	public LeaderElectionService getJobManagerLeaderElectionService(JobID jobID) {
-		return ZooKeeperUtils.createLeaderElectionService(client, configuration, getPathForJobManager(jobID));
+		return new ZooKeeperLeaderElectionService(client, getPathForJobManager(jobID));
 	}
 
 	@Override
 	public LeaderElectionService getClusterRestEndpointLeaderElectionService() {
-		return ZooKeeperUtils.createLeaderElectionService(client, configuration, REST_SERVER_LEADER_PATH);
+		return new ZooKeeperLeaderElectionService(client, REST_SERVER_BASE_PATH);
 	}
 
 	@Override
@@ -319,6 +316,6 @@ public class ZooKeeperHaServices implements HighAvailabilityServices {
 	// ------------------------------------------------------------------------
 
 	private static String getPathForJobManager(final JobID jobID) {
-		return "/" + jobID + JOB_MANAGER_LEADER_PATH;
+		return "/" + jobID + JOB_MANAGER_BASE_PATH;
 	}
 }
