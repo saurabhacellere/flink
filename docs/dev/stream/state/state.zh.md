@@ -345,8 +345,9 @@ val ttlConfig = StateTtlConfig
 
 #### Cleanup in background
 
-Besides cleanup in full snapshot, you can also activate the cleanup in background. The following option
-will activate a default background cleanup in StateTtlConfig if it is supported for the used backend:
+Besides cleanup in full snapshot, there is also a cleanup in background which is enabled by default.
+If the default cleanup in background is supported for the used backend, it will be used.
+The default cleanup can always be disabled or enabled in StateTtlConfig:
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -354,7 +355,8 @@ will activate a default background cleanup in StateTtlConfig if it is supported 
 import org.apache.flink.api.common.state.StateTtlConfig;
 StateTtlConfig ttlConfig = StateTtlConfig
     .newBuilder(Time.seconds(1))
-    .cleanupInBackground()
+    .disableCleanupInBackground() // disable default cleanup in background
+    .cleanupInBackground() // enable default cleanup in background
     .build();
 {% endhighlight %}
 </div>
@@ -363,7 +365,8 @@ StateTtlConfig ttlConfig = StateTtlConfig
 import org.apache.flink.api.common.state.StateTtlConfig
 val ttlConfig = StateTtlConfig
     .newBuilder(Time.seconds(1))
-    .cleanupInBackground
+    .disableCleanupInBackground // disable default cleanup in background
+    .cleanupInBackground // enable default cleanup in background
     .build
 {% endhighlight %}
 </div>
