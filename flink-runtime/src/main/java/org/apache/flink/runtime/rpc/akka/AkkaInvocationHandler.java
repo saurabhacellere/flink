@@ -59,7 +59,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * Invocation handler to be used with an {@link AkkaRpcActor}. The invocation handler wraps the
- * rpc in a {@link LocalRpcInvocation} message and then sends it to the {@link AkkaRpcActor} where it is
+ * rpc in a {@link RpcInvocation} message and then sends it to the {@link AkkaRpcActor} where it is
  * executed.
  */
 class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, RpcServer {
@@ -267,10 +267,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 					args);
 
 				if (remoteRpcInvocation.getSize() > maximumFramesize) {
-					throw new IOException(
-						String.format(
-							"The rpc invocation size %d exceeds the maximum akka framesize.",
-							remoteRpcInvocation.getSize()));
+					throw new IOException("The rpc invocation size exceeds the maximum akka framesize.");
 				} else {
 					rpcInvocation = remoteRpcInvocation;
 				}

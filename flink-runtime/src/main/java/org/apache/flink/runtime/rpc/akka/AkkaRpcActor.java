@@ -29,7 +29,6 @@ import org.apache.flink.runtime.rpc.akka.exceptions.AkkaUnknownMessageException;
 import org.apache.flink.runtime.rpc.exceptions.RpcConnectionException;
 import org.apache.flink.runtime.rpc.messages.CallAsync;
 import org.apache.flink.runtime.rpc.messages.HandshakeSuccessMessage;
-import org.apache.flink.runtime.rpc.messages.LocalRpcInvocation;
 import org.apache.flink.runtime.rpc.messages.RemoteHandshakeMessage;
 import org.apache.flink.runtime.rpc.messages.RpcInvocation;
 import org.apache.flink.runtime.rpc.messages.RunAsync;
@@ -38,10 +37,9 @@ import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedValue;
 
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Status;
-import akka.japi.pf.ReceiveBuilder;
+import akka.actor.UntypedActor;
 import akka.pattern.Patterns;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,10 +62,10 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
- * Akka rpc actor which receives {@link LocalRpcInvocation}, {@link RunAsync} and {@link CallAsync}
+ * Akka rpc actor which receives {@link RpcInvocation}, {@link RunAsync} and {@link CallAsync}
  * {@link ControlMessages} messages.
  *
- * <p>The {@link LocalRpcInvocation} designates a rpc and is dispatched to the given {@link RpcEndpoint}
+ * <p>The {@link RpcInvocation} designates a rpc and is dispatched to the given {@link RpcEndpoint}
  * instance.
  *
  * <p>The {@link RunAsync} and {@link CallAsync} messages contain executable code which is executed
@@ -80,7 +78,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  *
  * @param <T> Type of the {@link RpcEndpoint}
  */
-class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
+class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends UntypedActor {
 
 	protected final Logger log = LoggerFactory.getLogger(getClass());
 
@@ -136,16 +134,12 @@ class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
 	}
 
 	@Override
-	public Receive createReceive() {
-		return ReceiveBuilder.create()
-			.match(RemoteHandshakeMessage.class, this::handleHandshakeMessage)
-			.match(ControlMessages.class, this::handleControlMessage)
-			.matchAny(this::handleMessage)
-			.build();
-	}
-
-	private void handleMessage(final Object message) {
-		if (state.isRunning()) {
+	public void onReceive(final Object message) {
+		if (message instanceof RemoteHandshakeMessage) {
+			handleHandshakeMessage((RemoteHandshakeMessage) message);
+		} else if (message instanceof ControlMessages) {
+			handleControlMessage(((ControlMessages) message));
+		} else if (state.isRunning()) {
 			mainThreadValidator.enterMainThread();
 
 			try {
@@ -279,7 +273,7 @@ class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
 						result = rpcMethod.invoke(rpcEndpoint, rpcInvocation.getArgs());
 					}
 					catch (InvocationTargetException e) {
-						log.debug("Reporting back error thrown in remote procedure {}", rpcMethod, e);
+						log.trace("Reporting back error thrown in remote procedure {}", rpcMethod, e);
 
 						// tell the sender about the failure
 						getSender().tell(new Status.Failure(e.getTargetException()), getSelf());
@@ -506,7 +500,7 @@ class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
 
 			CompletableFuture<Void> terminationFuture;
 			try {
-				terminationFuture = akkaRpcActor.rpcEndpoint.internalCallOnStop();
+				terminationFuture = akkaRpcActor.rpcEndpoint.onStop();
 			} catch (Throwable t) {
 				terminationFuture = FutureUtils.completedExceptionally(
 					new AkkaRpcException(
@@ -541,7 +535,7 @@ class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
 			akkaRpcActor.mainThreadValidator.enterMainThread();
 
 			try {
-				akkaRpcActor.rpcEndpoint.internalCallOnStart();
+				akkaRpcActor.rpcEndpoint.onStart();
 			} catch (Throwable throwable) {
 				akkaRpcActor.stop(
 					RpcEndpointTerminationResult.failure(
