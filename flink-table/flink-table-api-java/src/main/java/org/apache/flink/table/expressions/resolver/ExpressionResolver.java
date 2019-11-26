@@ -160,6 +160,27 @@ public class ExpressionResolver {
 	}
 
 	/**
+	 * Resolves given expressions with configured set of rules for aggregate expressions. All expressions
+	 * of an operation should be given at once as some rules might assume the order of expressions.
+	 *
+	 * <p>After this method is applied the returned expressions should be ready to be converted to planner specific
+	 * expressions.
+	 *
+	 * @param hasGrouping If this aggregation query with grouping.
+	 * @param expressions list of expressions to resolve.
+	 * @return resolved list of expression
+	 */
+	public List<ResolvedExpression> resolveAggregates(boolean hasGrouping, List<Expression> expressions) {
+		ExpressionResolverContext context = new ExpressionResolverContext(hasGrouping);
+		final Function<List<Expression>, List<Expression>> resolveFunction =
+			concatenateRules(getAllResolverRules(), context);
+		final List<Expression> resolvedExpressions = resolveFunction.apply(expressions);
+		return resolvedExpressions.stream()
+			.map(e -> e.accept(VERIFY_RESOLUTION_VISITOR))
+			.collect(Collectors.toList());
+	}
+
+	/**
 	 * Resolves given expressions with configured set of rules. All expressions of an operation should be
 	 * given at once as some rules might assume the order of expressions.
 	 *
@@ -183,11 +204,15 @@ public class ExpressionResolver {
 	}
 
 	private Function<List<Expression>, List<Expression>> concatenateRules(List<ResolverRule> rules) {
+		return concatenateRules(rules, new ExpressionResolverContext());
+	}
+
+	private Function<List<Expression>, List<Expression>> concatenateRules(
+		List<ResolverRule> rules, ExpressionResolverContext context) {
 		return rules.stream()
 			.reduce(
 				Function.identity(),
-				(function, resolverRule) -> function.andThen(exprs -> resolverRule.apply(exprs,
-					new ExpressionResolverContext())),
+				(function, resolverRule) -> function.andThen(exprs -> resolverRule.apply(exprs, context)),
 				Function::andThen
 			);
 	}
@@ -240,6 +265,21 @@ public class ExpressionResolver {
 	}
 
 	private class ExpressionResolverContext implements ResolverRule.ResolutionContext {
+
+		private final boolean hasGrouping;
+
+		private ExpressionResolverContext() {
+			this(false);
+		}
+
+		private ExpressionResolverContext(boolean hasGrouping) {
+			this.hasGrouping = hasGrouping;
+		}
+
+		@Override
+		public boolean hasGrouping() {
+			return hasGrouping;
+		}
 
 		@Override
 		public FieldReferenceLookup referenceLookup() {
@@ -296,7 +336,7 @@ public class ExpressionResolver {
 				.lookupBuiltInFunction(BuiltInFunctionDefinitions.AS);
 
 			return new CallExpression(
-				lookupOfAs.getFunctionIdentifier(),
+				lookupOfAs.getObjectIdentifier(),
 				lookupOfAs.getFunctionDefinition(),
 				Arrays.asList(expression, valueLiteral(alias)),
 				expression.getOutputDataType());
@@ -307,7 +347,7 @@ public class ExpressionResolver {
 				.lookupBuiltInFunction(BuiltInFunctionDefinitions.CAST);
 
 			return new CallExpression(
-				lookupOfCast.getFunctionIdentifier(),
+				lookupOfCast.getObjectIdentifier(),
 				lookupOfCast.getFunctionDefinition(),
 				Arrays.asList(expression, typeLiteral(dataType)),
 				dataType);
@@ -318,7 +358,7 @@ public class ExpressionResolver {
 				.lookupBuiltInFunction(definition);
 
 			return new CallExpression(
-				lookupOfDefinition.getFunctionIdentifier(),
+				lookupOfDefinition.getObjectIdentifier(),
 				lookupOfDefinition.getFunctionDefinition(),
 				Collections.singletonList(expression),
 				expression.getOutputDataType()); // the output type is equal to the input type
@@ -329,7 +369,7 @@ public class ExpressionResolver {
 				.lookupBuiltInFunction(BuiltInFunctionDefinitions.GET);
 
 			return new CallExpression(
-				lookupOfGet.getFunctionIdentifier(),
+				lookupOfGet.getObjectIdentifier(),
 				lookupOfGet.getFunctionDefinition(),
 				Arrays.asList(composite, key),
 				dataType);
