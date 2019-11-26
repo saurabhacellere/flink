@@ -30,9 +30,11 @@ import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.ConfigUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.DeploymentOptions;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.configuration.JobManagerOptions;
+import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ResourceManagerOptions;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.configuration.SecurityOptions;
@@ -40,11 +42,10 @@ import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.core.plugin.PluginConfig;
 import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
-import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
+import org.apache.flink.runtime.clusterframework.TaskExecutorResourceSpecBuilder;
 import org.apache.flink.runtime.entrypoint.ClusterEntrypoint;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobmanager.HighAvailabilityMode;
-import org.apache.flink.runtime.taskexecutor.TaskManagerServices;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.ShutdownHookUtil;
@@ -144,6 +145,8 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 
 	private final Configuration flinkConfiguration;
 
+	private final boolean detached;
+
 	private final String customName;
 
 	private final String nodeLabel;
@@ -170,6 +173,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		getLocalFlinkDistPath(flinkConfiguration).ifPresent(this::setLocalJarPath);
 		decodeDirsToShipToCluster(flinkConfiguration).ifPresent(this::addShipFiles);
 
+		this.detached = !flinkConfiguration.getBoolean(DeploymentOptions.ATTACHED);
 		this.yarnQueue = flinkConfiguration.getString(YarnConfigOptions.APPLICATION_QUEUE);
 		this.dynamicPropertiesEncoded = flinkConfiguration.getString(YarnConfigOptionsInternal.DYNAMIC_PROPERTIES);
 		this.customName = flinkConfiguration.getString(YarnConfigOptions.APPLICATION_NAME);
@@ -334,6 +338,14 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		return false;
 	}
 
+	/**
+	 * @deprecated The cluster descriptor should not know about this option.
+	 */
+	@Deprecated
+	public boolean isDetachedMode() {
+		return detached;
+	}
+
 	public String getZookeeperNamespace() {
 		return zookeeperNamespace;
 	}
@@ -454,16 +466,14 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 	 * @throws FlinkException if the cluster cannot be started with the provided {@link ClusterSpecification}
 	 */
 	private void validateClusterSpecification(ClusterSpecification clusterSpecification) throws FlinkException {
+		MemorySize totalProcessMemory = MemorySize.parse(clusterSpecification.getTaskManagerMemoryMB() + "m");
 		try {
-			final long taskManagerMemorySize = clusterSpecification.getTaskManagerMemoryMB();
-			// We do the validation by calling the calculation methods here
-			// Internally these methods will check whether the cluster can be started with the provided
-			// ClusterSpecification and the configured memory requirements
-			final long cutoff = ContaineredTaskManagerParameters.calculateCutoffMB(flinkConfiguration, taskManagerMemorySize);
-			TaskManagerServices.calculateHeapSizeMB(taskManagerMemorySize - cutoff, flinkConfiguration);
+			TaskExecutorResourceSpecBuilder
+				.newBuilder(flinkConfiguration)
+				.withTotalProcessMemory(totalProcessMemory)
+				.build();
 		} catch (IllegalArgumentException iae) {
-			throw new FlinkException("Cannot fulfill the minimum memory requirements with the provided " +
-					"cluster specification. Please increase the memory of the cluster.", iae);
+			throw new FlinkException("Inconsistent cluster specification.", iae);
 		}
 	}
 
@@ -559,14 +569,6 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 				yarnClient,
 				yarnApplication,
 				validClusterSpecification);
-
-		// print the application id for user to cancel themselves.
-		if (detached) {
-			LOG.info("The Flink YARN client has been started in detached mode. In order to stop " +
-				"Flink on YARN, use the following command or a YARN web interface to stop " +
-				"it:\nyarn application -kill " + report.getApplicationId() + "\nPlease also note that the " +
-				"temporary files of the YARN session in the home directory will not be removed.");
-		}
 
 		final String host = report.getHost();
 		final int port = report.getRpcPort();
@@ -859,7 +861,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 				clusterSpecification.getSlotsPerTaskManager());
 
 		configuration.setString(
-				TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY,
+				TaskManagerOptions.TOTAL_PROCESS_MEMORY,
 				clusterSpecification.getTaskManagerMemoryMB() + "m");
 
 		// Upload the flink configuration
@@ -1010,6 +1012,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 		appMasterEnv.put(YarnConfigKeys.ENV_CLIENT_HOME_DIR, homeDir.toString());
 		appMasterEnv.put(YarnConfigKeys.ENV_CLIENT_SHIP_FILES, envShipFileList.toString());
 		appMasterEnv.put(YarnConfigKeys.ENV_SLOTS, String.valueOf(clusterSpecification.getSlotsPerTaskManager()));
+		appMasterEnv.put(YarnConfigKeys.ENV_DETACHED, String.valueOf(detached));
 		appMasterEnv.put(YarnConfigKeys.ENV_ZOOKEEPER_NAMESPACE, getZookeeperNamespace());
 		appMasterEnv.put(YarnConfigKeys.FLINK_YARN_FILES, yarnFilesDir.toUri().toString());
 
@@ -1109,7 +1112,13 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 			lastAppState = appState;
 			Thread.sleep(250);
 		}
-
+		// print the application id for user to cancel themselves.
+		if (isDetachedMode()) {
+			LOG.info("The Flink YARN client has been started in detached mode. In order to stop " +
+					"Flink on YARN, use the following command or a YARN web interface to stop " +
+					"it:\nyarn application -kill " + appId + "\nPlease also note that the " +
+					"temporary files of the YARN session in the home directory will not be removed.");
+		}
 		// since deployment was successful, remove the hook
 		ShutdownHookUtil.removeShutdownHook(deploymentFailureHook, getClass().getSimpleName(), LOG);
 		return report;

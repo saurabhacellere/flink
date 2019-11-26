@@ -169,6 +169,7 @@ public class ResourceManagerTest extends TestLogger {
 			taskExecutorId,
 			dataPort,
 			hardwareDescription,
+			ResourceProfile.ZERO,
 			TestingUtils.TIMEOUT());
 
 		assertThat(registrationFuture.get(), instanceOf(RegistrationResponse.Success.class));
@@ -280,7 +281,7 @@ public class ResourceManagerTest extends TestLogger {
 	@Test
 	public void testCreateWorkerSlotProfiles() {
 		final Configuration config = new Configuration();
-		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "100m");
+		config.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "100m");
 		config.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, 5);
 
 		final ResourceProfile rmCalculatedResourceProfile =
@@ -289,7 +290,7 @@ public class ResourceManagerTest extends TestLogger {
 		final ResourceProfile tmCalculatedResourceProfile =
 			TaskManagerServices.computeSlotResourceProfile(
 				config.getInteger(TaskManagerOptions.NUM_TASK_SLOTS),
-				MemorySize.parse(config.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE)).getBytes());
+				MemorySize.parse(config.getString(TaskManagerOptions.MANAGED_MEMORY_SIZE)).getBytes());
 
 		assertEquals(rmCalculatedResourceProfile, tmCalculatedResourceProfile);
 	}
