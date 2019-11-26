@@ -18,7 +18,6 @@
 
 package org.apache.flink.streaming.api.scala
 
-import org.apache.flink.api.scala.typeutils.CaseClassTypeInfo
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.co.ProcessJoinFunction
 import org.apache.flink.streaming.api.functions.sink.SinkFunction
@@ -26,8 +25,7 @@ import org.apache.flink.streaming.api.functions.timestamps.AscendingTimestampExt
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.test.util.AbstractTestBase
 import org.apache.flink.util.Collector
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import org.junit.{Assert, Test}
 
 import scala.collection.mutable.ListBuffer
 
@@ -49,25 +47,22 @@ class IntervalJoinITCase extends AbstractTestBase {
 
     val sink = new ResultSink()
 
-    val join = dataStream1.intervalJoin(dataStream2)
+    dataStream1.intervalJoin(dataStream2)
       .between(Time.milliseconds(0), Time.milliseconds(2))
-      .process(new CombineJoinFunction())
-
-    assertTrue(join.dataType.isInstanceOf[CaseClassTypeInfo[_]])
-
-    join.addSink(sink)
+      .process(new CombineToStringJoinFunction())
+      .addSink(sink)
 
     env.execute()
 
     sink.expectInAnyOrder(
-      "(key:key,0)",
-      "(key:key,1)",
-      "(key:key,2)",
+      "(key,0):(key,0)",
+      "(key,0):(key,1)",
+      "(key,0):(key,2)",
 
-      "(key:key,2)",
-      "(key:key,3)",
+      "(key,1):(key,1)",
+      "(key,1):(key,2)",
 
-      "(key:key,4)"
+      "(key,2):(key,2)"
     )
   }
 
@@ -87,22 +82,157 @@ class IntervalJoinITCase extends AbstractTestBase {
 
     val sink = new ResultSink()
 
-    val join = dataStream1.intervalJoin(dataStream2)
+    dataStream1.intervalJoin(dataStream2)
       .between(Time.milliseconds(0), Time.milliseconds(2))
       .lowerBoundExclusive()
       .upperBoundExclusive()
-      .process(new CombineJoinFunction())
-
-    assertTrue(join.dataType.isInstanceOf[CaseClassTypeInfo[_]])
-
-    join.addSink(sink)
+      .process(new CombineToStringJoinFunction())
+      .addSink(sink)
 
     env.execute()
 
     sink.expectInAnyOrder(
-      "(key:key,1)",
-      "(key:key,3)"
+      "(key,0):(key,1)",
+      "(key,1):(key,2)"
     )
+  }
+
+  @Test
+  @throws[Exception]
+  def testUseLeftTimestamp(): Unit = {
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setParallelism(1)
+
+    val streamOne = env.fromElements(("key", 0L), ("key", 1L), ("key", 2L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    val streamTwo = env.fromElements(("key", 0L), ("key", 1L), ("key", 2L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+
+    streamOne.intervalJoin(streamTwo)
+      .between(Time.milliseconds(0L), Time.milliseconds(2L))
+      .assignLeftTimestamp()
+      .process(new ProcessJoinFunction[(String, Long), (String, Long), String]() {
+        @throws[Exception]
+        override def processElement(
+            left: (String, Long),
+            right: (String, Long),
+            ctx: ProcessJoinFunction[(String, Long), (String, Long), String]#Context,
+            out: Collector[String]): Unit = {
+
+          Assert.assertEquals(ctx.getTimestamp, ctx.getLeftTimestamp)
+
+        }
+      })
+
+    env.execute()
+  }
+
+  @Test
+  @throws[Exception]
+  def testUseRightTimestamp(): Unit = {
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setParallelism(1)
+
+    val streamOne = env.fromElements(("key", 1L), ("key", 2L), ("key", 3L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    val streamTwo = env.fromElements(("key", 2L), ("key", 3L), ("key", 4L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    streamOne.intervalJoin(streamTwo)
+      .between(Time.milliseconds(-2L), Time.milliseconds(0L))
+      .assignRightTimestamp()
+      .process(new ProcessJoinFunction[(String, Long), (String, Long), String]() {
+        @throws[Exception]
+        override def processElement(
+            left: (String, Long),
+            right: (String, Long),
+            ctx: ProcessJoinFunction[(String, Long), (String, Long), String]#Context,
+            out: Collector[String]): Unit = {
+
+          Assert.assertEquals(ctx.getTimestamp, ctx.getRightTimestamp)
+
+        }
+      })
+
+    env.execute()
+  }
+
+  @Test
+  @throws[Exception]
+  def testUseMaxTimestamp(): Unit = {
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setParallelism(1)
+
+    val streamOne = env.fromElements(("key", 1L), ("key", 2L), ("key", 3L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    val streamTwo = env.fromElements(("key", 2L), ("key", 3L), ("key", 4L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    streamOne.intervalJoin(streamTwo)
+      .between(Time.milliseconds(-2L), Time.milliseconds(0L))
+      .assignMaxTimestamp()
+      .process(new ProcessJoinFunction[(String, Long), (String, Long), String]() {
+        @throws[Exception]
+        override def processElement(
+            left: (String, Long),
+            right: (String, Long),
+            ctx: ProcessJoinFunction[(String, Long), (String, Long), String]#Context,
+            out: Collector[String]): Unit = {
+
+          val expected = Math.max(ctx.getRightTimestamp, ctx.getLeftTimestamp)
+          Assert.assertEquals(ctx.getTimestamp, expected)
+
+        }
+      })
+
+    env.execute()
+  }
+
+  @Test
+  @throws[Exception]
+  def testUseMinTimestamp(): Unit = {
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setParallelism(1)
+
+    val streamOne = env.fromElements(("key", 0L), ("key", 1L), ("key", 2L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+    val streamTwo = env.fromElements(("key", 0L), ("key", 1L), ("key", 2L))
+      .assignTimestampsAndWatermarks(new TimestampExtractor())
+      .keyBy(elem => elem._1)
+
+    streamOne.intervalJoin(streamTwo)
+      .between(Time.milliseconds(-2L), Time.milliseconds(0L))
+      .assignRightTimestamp()
+      .process(new ProcessJoinFunction[(String, Long), (String, Long), String]() {
+        @throws[Exception]
+        override def processElement(
+            left: (String, Long),
+            right: (String, Long),
+            ctx: ProcessJoinFunction[(String, Long), (String, Long), String]#Context,
+            out: Collector[String]): Unit = {
+
+          val expected = Math.min(ctx.getRightTimestamp, ctx.getLeftTimestamp)
+          Assert.assertEquals(ctx.getTimestamp, expected)
+
+        }
+      })
+
+    env.execute()
   }
 }
 
@@ -110,14 +240,14 @@ object Companion {
   val results: ListBuffer[String] = new ListBuffer()
 }
 
-class ResultSink extends SinkFunction[(String, Long)] {
+class ResultSink extends SinkFunction[String] {
 
-  override def invoke(value: (String, Long), context: SinkFunction.Context[_]): Unit = {
-    Companion.results.append(value.toString())
+  override def invoke(value: String, context: SinkFunction.Context[_]): Unit = {
+    Companion.results.append(value)
   }
 
   def expectInAnyOrder(expected: String*): Unit = {
-    assertTrue(expected.toSet.equals(Companion.results.toSet))
+    Assert.assertTrue(expected.toSet.equals(Companion.results.toSet))
   }
 }
 
@@ -125,14 +255,14 @@ class TimestampExtractor extends AscendingTimestampExtractor[(String, Long)] {
   override def extractAscendingTimestamp(element: (String, Long)): Long = element._2
 }
 
-class CombineJoinFunction
-  extends ProcessJoinFunction[(String, Long), (String, Long), (String, Long)] {
+class CombineToStringJoinFunction
+  extends ProcessJoinFunction[(String, Long), (String, Long), String] {
 
   override def processElement(
-      left: (String, Long),
-      right: (String, Long),
-      ctx: ProcessJoinFunction[(String, Long), (String, Long), (String, Long)]#Context,
-      out: Collector[(String, Long)]): Unit = {
-    out.collect((left._1 + ":" + right._1, left._2 + right._2))
+                        left: (String, Long),
+                        right: (String, Long),
+                        ctx: ProcessJoinFunction[(String, Long), (String, Long), String]#Context,
+                        out: Collector[String]): Unit = {
+    out.collect(left + ":" + right)
   }
 }
