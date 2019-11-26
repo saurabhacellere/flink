@@ -381,8 +381,7 @@ public class BootstrapTools {
 			boolean hasLogback,
 			boolean hasLog4j,
 			boolean hasKrb5,
-			Class<?> mainClass,
-			String mainArgs) {
+			Class<?> mainClass) {
 
 		final Map<String, String> startCommandValues = new HashMap<>();
 		startCommandValues.put("java", "$JAVA_HOME/bin/java");
@@ -396,7 +395,12 @@ public class BootstrapTools {
 				tmParams.taskManagerDirectMemoryLimitMB()));
 		}
 
-		startCommandValues.put("jvmmem", StringUtils.join(params, ' '));
+		final TaskExecutorResourceSpec taskExecutorResourceSpec = tmParams.getTaskExecutorResourceSpec();
+		if (taskExecutorResourceSpec == null) { // FLIP-49 disabled
+			startCommandValues.put("jvmmem", StringUtils.join(params, ' '));
+		} else { // FLIP-49 enabled
+			startCommandValues.put("jvmmem", TaskExecutorResourceUtils.generateJvmParametersStr(taskExecutorResourceSpec));
+		}
 
 		String javaOpts = flinkConfig.getString(CoreOptions.FLINK_JVM_OPTIONS);
 		if (flinkConfig.getString(CoreOptions.FLINK_TM_JVM_OPTIONS).length() > 0) {
@@ -428,11 +432,10 @@ public class BootstrapTools {
 		startCommandValues.put("redirects",
 			"1> " + logDirectory + "/taskmanager.out " +
 			"2> " + logDirectory + "/taskmanager.err");
-		String args = "--configDir " + configDirectory;
-		if (!mainArgs.isEmpty()) {
-			args += " " + mainArgs;
-		}
-		startCommandValues.put("args",  args);
+
+		String argsStr = taskExecutorResourceSpec == null ? "" :
+			TaskExecutorResourceUtils.generateDynamicConfigsStr(taskExecutorResourceSpec) + " ";
+		startCommandValues.put("args", argsStr + "--configDir " + configDirectory);
 
 		final String commandTemplate = flinkConfig
 			.getString(ConfigConstants.YARN_CONTAINER_START_COMMAND_TEMPLATE,
@@ -477,7 +480,9 @@ public class BootstrapTools {
 		for (Map.Entry<String, String> variable : startCommandValues
 			.entrySet()) {
 			template = template
-				.replace("%" + variable.getKey() + "%", variable.getValue());
+				.replace("%" + variable.getKey() + "%", variable.getValue())
+				.replace("  ", " ")
+				.trim();
 		}
 		return template;
 	}

@@ -187,7 +187,7 @@ public class UtilsTest extends TestLogger {
 			hdfsDelegationTokenKind, service));
 		amCredentials.writeTokenStorageFile(new org.apache.hadoop.fs.Path(credentialFile.getAbsolutePath()), yarnConf);
 
-		ContaineredTaskManagerParameters tmParams = new ContaineredTaskManagerParameters(64,
+		ContaineredTaskManagerParameters tmParams = new ContaineredTaskManagerParameters(null, 64,
 			64, 16, 1, new HashMap<>(1));
 		Configuration taskManagerConf = new Configuration();
 
@@ -201,7 +201,7 @@ public class UtilsTest extends TestLogger {
 			systemEnv.put("HADOOP_TOKEN_FILE_LOCATION", credentialFile.getAbsolutePath());
 			CommonTestUtils.setEnv(systemEnv);
 			ctx = Utils.createTaskExecutorContext(flinkConf, yarnConf, env, tmParams,
-				"", workingDirectory, taskManagerMainClass, LOG);
+				taskManagerConf, workingDirectory, taskManagerMainClass, LOG);
 		} finally {
 			CommonTestUtils.setEnv(originalEnv);
 		}
