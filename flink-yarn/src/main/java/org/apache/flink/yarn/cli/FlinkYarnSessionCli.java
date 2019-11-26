@@ -382,7 +382,7 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 			if (!MemorySize.MemoryUnit.hasUnit(tmMemoryVal)) {
 				tmMemoryVal += "m";
 			}
-			effectiveConfiguration.setString(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY, tmMemoryVal);
+			effectiveConfiguration.setString(TaskManagerOptions.TOTAL_PROCESS_MEMORY, tmMemoryVal);
 		}
 
 		if (commandLine.hasOption(slots.getOpt())) {
@@ -598,7 +598,7 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 					}
 				}
 
-				if (!configuration.getBoolean(DeploymentOptions.ATTACHED)) {
+				if (yarnClusterDescriptor.isDetachedMode()) {
 					LOG.info("The Flink YARN client has been started in detached mode. In order to stop " +
 						"Flink on YARN, use the following command or a YARN web interface to stop it:\n" +
 						"yarn application -kill " + yarnApplicationId);

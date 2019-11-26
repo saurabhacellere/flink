@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.taskexecutor;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
@@ -307,8 +306,7 @@ public class TaskManagerRunner implements FatalErrorHandler, AutoCloseableAsync 
 		}
 	}
 
-	@VisibleForTesting
-	static Configuration loadConfiguration(String[] args) throws FlinkParseException {
+	public static Configuration loadConfiguration(String[] args) throws FlinkParseException {
 		final CommandLineParser<ClusterConfiguration> commandLineParser = new CommandLineParser<>(new ClusterConfigurationParserFactory());
 
 		final ClusterConfiguration clusterConfiguration;
@@ -360,8 +358,6 @@ public class TaskManagerRunner implements FatalErrorHandler, AutoCloseableAsync 
 				configuration,
 				resourceID,
 				remoteAddress,
-				EnvironmentInformation.getSizeOfFreeHeapMemoryWithDefrag(),
-				EnvironmentInformation.getMaxJvmHeapMemory(),
 				localCommunicationOnly);
 
 		Tuple2<TaskManagerMetricGroup, MetricGroup> taskManagerMetricGroup = MetricUtils.instantiateTaskManagerMetricGroup(
