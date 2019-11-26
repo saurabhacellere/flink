@@ -82,7 +82,7 @@ import org.apache.flink.runtime.util.TestingTaskManagerRuntimeInfo;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.StreamFilter;
 import org.apache.flink.streaming.api.operators.StreamOperator;
-import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxDefaultAction;
+import org.apache.flink.streaming.runtime.tasks.mailbox.execution.DefaultActionContext;
 import org.apache.flink.util.SerializedValue;
 import org.apache.flink.util.TestLogger;
 
@@ -314,7 +314,7 @@ public class TaskCheckpointingBehaviourTest extends TestLogger {
 		}
 
 		@Override
-		public SyncFailureInducingStateBackend configure(Configuration config, ClassLoader classLoader) {
+		public SyncFailureInducingStateBackend configure(Configuration config, ClassLoader classLoader, int maxConcurrentCheckpoints) {
 			// retain this instance, no re-configuration!
 			return this;
 		}
@@ -366,7 +366,7 @@ public class TaskCheckpointingBehaviourTest extends TestLogger {
 		}
 
 		@Override
-		public AsyncFailureInducingStateBackend configure(Configuration config, ClassLoader classLoader) {
+		public AsyncFailureInducingStateBackend configure(Configuration config, ClassLoader classLoader, int maxConcurrentCheckpoints) {
 			// retain this instance, no re-configuration!
 			return this;
 		}
@@ -475,7 +475,7 @@ public class TaskCheckpointingBehaviourTest extends TestLogger {
 		public void init() {}
 
 		@Override
-		protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
+		protected void performDefaultAction(DefaultActionContext context) throws Exception {
 			triggerCheckpointOnBarrier(
 				new CheckpointMetaData(
 					11L,
@@ -486,7 +486,7 @@ public class TaskCheckpointingBehaviourTest extends TestLogger {
 			while (isRunning()) {
 				Thread.sleep(1L);
 			}
-			controller.allActionsCompleted();
+			context.allActionsCompleted();
 		}
 
 		@Override

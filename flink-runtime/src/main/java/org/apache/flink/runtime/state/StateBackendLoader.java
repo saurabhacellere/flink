@@ -54,6 +54,9 @@ public class StateBackendLoader {
 	/** The shortcut configuration name for the RocksDB State Backend */
 	public static final String ROCKSDB_STATE_BACKEND_NAME = "rocksdb";
 
+	/** The shortcut configuration name for the RocksDB State Backend use FsSegmentStateBackend for checkpoint. */
+	public static final String ROCKSDB_SEGMENT_STATE_BACKEND_NAME = "rocksdb-segment";
+
 	// ------------------------------------------------------------------------
 	//  Loading the state backend from a configuration 
 	// ------------------------------------------------------------------------
@@ -65,7 +68,7 @@ public class StateBackendLoader {
 	 * <p>The state backends can be specified either via their shortcut name, or via the class name
 	 * of a {@link StateBackendFactory}. If a StateBackendFactory class name is specified, the factory
 	 * is instantiated (via its zero-argument constructor) and its
-	 * {@link StateBackendFactory#createFromConfig(Configuration, ClassLoader)} method is called.
+	 * {@link StateBackendFactory#createFromConfig(Configuration, ClassLoader, int)} method is called.
 	 *
 	 * <p>Recognized shortcut names are '{@value StateBackendLoader#MEMORY_STATE_BACKEND_NAME}',
 	 * '{@value StateBackendLoader#FS_STATE_BACKEND_NAME}', and
@@ -73,6 +76,7 @@ public class StateBackendLoader {
 	 *
 	 * @param config The configuration to load the state backend from
 	 * @param classLoader The class loader that should be used to load the state backend
+	 * @param maxConcurrentCheckpoints Maximum number of checkpoint attempts in progress at the same time
 	 * @param logger Optionally, a logger to log actions to (may be null)
 	 *
 	 * @return The instantiated state backend.
@@ -89,6 +93,7 @@ public class StateBackendLoader {
 	public static StateBackend loadStateBackendFromConfig(
 			Configuration config,
 			ClassLoader classLoader,
+			int maxConcurrentCheckpoints,
 			@Nullable Logger logger) throws IllegalConfigurationException, DynamicCodeLoadingException, IOException {
 
 		checkNotNull(config, "config");
@@ -104,7 +109,7 @@ public class StateBackendLoader {
 
 		switch (backendName.toLowerCase()) {
 			case MEMORY_STATE_BACKEND_NAME:
-				MemoryStateBackend memBackend = new MemoryStateBackendFactory().createFromConfig(config, classLoader);
+				MemoryStateBackend memBackend = new MemoryStateBackendFactory().createFromConfig(config, classLoader, maxConcurrentCheckpoints);
 
 				if (logger != null) {
 					Path memExternalized = memBackend.getCheckpointPath();
@@ -115,7 +120,7 @@ public class StateBackendLoader {
 				return memBackend;
 
 			case FS_STATE_BACKEND_NAME:
-				FsStateBackend fsBackend = new FsStateBackendFactory().createFromConfig(config, classLoader);
+				FsStateBackend fsBackend = new FsStateBackendFactory().createFromConfig(config, classLoader, maxConcurrentCheckpoints);
 				if (logger != null) {
 					logger.info("State backend is set to heap memory (checkpoints to filesystem \"{}\")",
 							fsBackend.getCheckpointPath());
@@ -124,35 +129,38 @@ public class StateBackendLoader {
 
 			case ROCKSDB_STATE_BACKEND_NAME:
 				factoryClassName = "org.apache.flink.contrib.streaming.state.RocksDBStateBackendFactory";
-				// fall through to the 'default' case that uses reflection to load the backend
-				// that way we can keep RocksDB in a separate module
-
+				break;
+			case ROCKSDB_SEGMENT_STATE_BACKEND_NAME:
+				factoryClassName = "org.apache.flink.contrib.streaming.state.RocksDBSegmentStateBackendFactory";
+				break;
 			default:
 				if (logger != null) {
-					logger.info("Loading state backend via factory {}", factoryClassName);
+					logger.info("Use default state backend.");
 				}
-
-				StateBackendFactory<?> factory;
-				try {
-					@SuppressWarnings("rawtypes")
-					Class<? extends StateBackendFactory> clazz =
-							Class.forName(factoryClassName, false, classLoader)
-									.asSubclass(StateBackendFactory.class);
-
-					factory = clazz.newInstance();
-				}
-				catch (ClassNotFoundException e) {
-					throw new DynamicCodeLoadingException(
-							"Cannot find configured state backend factory class: " + backendName, e);
-				}
-				catch (ClassCastException | InstantiationException | IllegalAccessException e) {
-					throw new DynamicCodeLoadingException("The class configured under '" +
-							CheckpointingOptions.STATE_BACKEND.key() + "' is not a valid state backend factory (" +
-							backendName + ')', e);
-				}
-
-				return factory.createFromConfig(config, classLoader);
 		}
+
+		if (logger != null) {
+			logger.info("Loading state backend via factory {}", factoryClassName);
+		}
+
+		StateBackendFactory<?> factory;
+		try {
+			@SuppressWarnings("rawtypes")
+			Class<? extends StateBackendFactory> clazz =
+				Class.forName(factoryClassName, false, classLoader)
+					.asSubclass(StateBackendFactory.class);
+
+			factory = clazz.newInstance();
+		} catch (ClassNotFoundException e) {
+			throw new DynamicCodeLoadingException(
+				"Cannot find configured state backend factory class: " + backendName, e);
+		} catch (ClassCastException | InstantiationException | IllegalAccessException e) {
+			throw new DynamicCodeLoadingException("The class configured under '" +
+				CheckpointingOptions.STATE_BACKEND.key() + "' is not a valid state backend factory (" +
+				backendName + ')', e);
+		}
+
+		return factory.createFromConfig(config, classLoader, maxConcurrentCheckpoints);
 	}
 
 	/**
@@ -162,14 +170,15 @@ public class StateBackendLoader {
 	 * default state backend (the {@link MemoryStateBackend}). 
 	 *
 	 * <p>If an application-defined state backend is found, and the state backend is a
-	 * {@link ConfigurableStateBackend}, this methods calls {@link ConfigurableStateBackend#configure(Configuration, ClassLoader)}
+	 * {@link ConfigurableStateBackend}, this methods calls {@link ConfigurableStateBackend#configure(Configuration, ClassLoader, int)}
 	 * on the state backend.
 	 *
-	 * <p>Refer to {@link #loadStateBackendFromConfig(Configuration, ClassLoader, Logger)} for details on
+	 * <p>Refer to {@link #loadStateBackendFromConfig(Configuration, ClassLoader, int, Logger)} for details on
 	 * how the state backend is loaded from the configuration.
 	 *
 	 * @param config The configuration to load the state backend from
 	 * @param classLoader The class loader that should be used to load the state backend
+	 * @param maxConcurrentCheckpoints Maximum number of checkpoint attempts in progress at the same time
 	 * @param logger Optionally, a logger to log actions to (may be null)
 	 *
 	 * @return The instantiated state backend.
@@ -187,6 +196,7 @@ public class StateBackendLoader {
 			@Nullable StateBackend fromApplication,
 			Configuration config,
 			ClassLoader classLoader,
+			int maxConcurrentCheckpoints,
 			@Nullable Logger logger) throws IllegalConfigurationException, DynamicCodeLoadingException, IOException {
 
 		checkNotNull(config, "config");
@@ -207,7 +217,7 @@ public class StateBackendLoader {
 					logger.info("Configuring application-defined state backend with job/cluster config");
 				}
 
-				backend = ((ConfigurableStateBackend) fromApplication).configure(config, classLoader);
+				backend = ((ConfigurableStateBackend) fromApplication).configure(config, classLoader, maxConcurrentCheckpoints);
 			}
 			else {
 				// keep as is!
@@ -216,13 +226,13 @@ public class StateBackendLoader {
 		}
 		else {
 			// (2) check if the config defines a state backend
-			final StateBackend fromConfig = loadStateBackendFromConfig(config, classLoader, logger);
+			final StateBackend fromConfig = loadStateBackendFromConfig(config, classLoader, maxConcurrentCheckpoints, logger);
 			if (fromConfig != null) {
 				backend = fromConfig;
 			}
 			else {
 				// (3) use the default
-				backend = new MemoryStateBackendFactory().createFromConfig(config, classLoader);
+				backend = new MemoryStateBackendFactory().createFromConfig(config, classLoader, maxConcurrentCheckpoints);
 				if (logger != null) {
 					logger.info("No state backend has been configured, using default (Memory / JobManager) {}", backend);
 				}

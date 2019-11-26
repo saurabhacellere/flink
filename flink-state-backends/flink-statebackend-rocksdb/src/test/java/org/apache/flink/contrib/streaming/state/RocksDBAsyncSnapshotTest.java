@@ -69,6 +69,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.OneInputStreamTask;
 import org.apache.flink.streaming.runtime.tasks.OneInputStreamTaskTestHarness;
 import org.apache.flink.streaming.runtime.tasks.StreamMockEnvironment;
+import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.TestLogger;
 
@@ -84,6 +85,7 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -92,7 +94,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.flink.contrib.streaming.state.snapshot.RocksSnapshotUtil.END_OF_KEY_GROUP_MARK;
 import static org.apache.flink.contrib.streaming.state.snapshot.RocksSnapshotUtil.FIRST_BIT_IN_BYTE_MASK;
@@ -211,15 +212,21 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 			testHarness.bufferSize,
 			taskStateManagerTestMock);
 
-		AtomicReference<Throwable> errorRef = new AtomicReference<>();
-		mockEnv.setExternalExceptionHandler(errorRef::set);
 		testHarness.invoke(mockEnv);
-		testHarness.waitForTaskRunning();
 
 		final OneInputStreamTask<String, String> task = testHarness.getTask();
 
-		task.triggerCheckpointAsync(new CheckpointMetaData(42, 17), CheckpointOptions.forCheckpointWithDefaultLocation(), false)
-			.get();
+		// wait for the task to be running
+		for (Field field: StreamTask.class.getDeclaredFields()) {
+			if (field.getName().equals("isRunning")) {
+				field.setAccessible(true);
+				while (!field.getBoolean(task)) {
+					Thread.sleep(10);
+				}
+			}
+		}
+
+		task.triggerCheckpoint(new CheckpointMetaData(42, 17), CheckpointOptions.forCheckpointWithDefaultLocation(), false);
 
 		testHarness.processElement(new StreamRecord<>("Wohoo", 0));
 
@@ -236,7 +243,7 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 		Assert.assertTrue(threadPool.awaitTermination(60_000, TimeUnit.MILLISECONDS));
 
 		testHarness.waitForTaskCompletion();
-		if (errorRef.get() != null) {
+		if (mockEnv.wasFailedExternally()) {
 			fail("Unexpected exception during execution.");
 		}
 	}
@@ -279,7 +286,7 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 			int count = skipStreams;
 
 			@Override
-			public CheckpointStateOutputStream createCheckpointStateOutputStream(CheckpointedStateScope scope) throws IOException {
+			public CheckpointStateOutputStream createCheckpointStateOutputStream(long checkpointId, CheckpointedStateScope scope) throws IOException {
 				if (count > 0) {
 					--count;
 					return new BlockingCheckpointOutputStream(
@@ -288,7 +295,7 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 						null,
 						Integer.MAX_VALUE);
 				} else {
-					return super.createCheckpointStateOutputStream(scope);
+					return super.createCheckpointStateOutputStream(checkpointId, scope);
 				}
 			}
 		};
@@ -320,15 +327,23 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 		blockerCheckpointStreamFactory.setWaiterLatch(new OneShotLatch());
 
 		testHarness.invoke(mockEnv);
-		testHarness.waitForTaskRunning();
 
 		final OneInputStreamTask<String, String> task = testHarness.getTask();
 
-		task.triggerCheckpointAsync(
+		// wait for the task to be running
+		for (Field field: StreamTask.class.getDeclaredFields()) {
+			if (field.getName().equals("isRunning")) {
+				field.setAccessible(true);
+				while (!field.getBoolean(task)) {
+					Thread.sleep(10);
+				}
+			}
+		}
+
+		task.triggerCheckpoint(
 			new CheckpointMetaData(42, 17),
 			CheckpointOptions.forCheckpointWithDefaultLocation(),
-			false)
-			.get();
+			false);
 
 		testHarness.processElement(new StreamRecord<>("Wohoo", 0));
 		blockerCheckpointStreamFactory.getWaiterLatch().await();
@@ -484,7 +499,7 @@ public class RocksDBAsyncSnapshotTest extends TestLogger {
 
 		@Override
 		public CheckpointStateOutputStream get() throws IOException {
-			return factory.createCheckpointStateOutputStream(CheckpointedStateScope.EXCLUSIVE);
+			return factory.createCheckpointStateOutputStream(1, CheckpointedStateScope.EXCLUSIVE);
 		}
 	}
 
