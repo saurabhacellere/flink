@@ -17,7 +17,6 @@
 
 package org.apache.flink.streaming.connectors.kinesis.util;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisProducer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
@@ -26,13 +25,11 @@ import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConsta
 import org.apache.flink.streaming.connectors.kinesis.config.ConsumerConfigConstants.InitialPosition;
 import org.apache.flink.streaming.connectors.kinesis.config.ProducerConfigConstants;
 
+import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
-import com.amazonaws.services.kinesis.producer.KinesisProducerConfiguration;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Properties;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -41,39 +38,30 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /**
  * Utilities for Flink Kinesis connector configuration.
  */
-@Internal
 public class KinesisConfigUtil {
 
-	/** Maximum number of items to pack into an PutRecords request. **/
-	protected static final String COLLECTION_MAX_COUNT = "CollectionMaxCount";
-
-	/** Maximum number of items to pack into an aggregated record. **/
-	protected static final String AGGREGATION_MAX_COUNT = "AggregationMaxCount";
-
-	/** Limits the maximum allowed put rate for a shard, as a percentage of the backend limits.
-	 * The default value is set as 100% in Flink. KPL's default value is 150% but it makes KPL throw
-	 * RateLimitExceededException too frequently and breaks Flink sink as a result.
-	 **/
-	protected static final String RATE_LIMIT = "RateLimit";
+	/* TODO: Really should be using dependency injection such as Guice, but since we are using statics
+	 * already all over the place, adding test properties as statics too :(
+	 */
+	private static Properties defaultTestProperties;
 
 	/**
-	 * The threading model that KinesisProducer will use.
-	 **/
-	protected static final String THREADING_MODEL = "ThreadingModel";
+	 * Gets the default properties used for testing, such as manually setting the AWS region and creds.
+	 *
+	 * @return
+	 */
+	public static Properties getDefaultTestProperties() {
+		return defaultTestProperties;
+	}
 
 	/**
-	 * The maximum number of threads that the native process' thread pool will be configured with.
-	 **/
-	protected static final String THREAD_POOL_SIZE = "ThreadPoolSize";
-
-	/** Default values for RateLimit. **/
-	protected static final long DEFAULT_RATE_LIMIT = 100L;
-
-	/** Default value for ThreadingModel. **/
-	protected static final KinesisProducerConfiguration.ThreadingModel DEFAULT_THREADING_MODEL = KinesisProducerConfiguration.ThreadingModel.POOLED;
-
-	/** Default values for ThreadPoolSize. **/
-	protected static final int DEFAULT_THREAD_POOL_SIZE = 10;
+	 * Sets the default properties used for testing, such as manually setting the AWS region and creds.
+	 *
+	 * @param defaultTestProperties
+	 */
+	public static void setDefaultTestProperties(Properties defaultTestProperties) {
+		KinesisConfigUtil.defaultTestProperties = defaultTestProperties;
+	}
 
 	/**
 	 * Validate configuration properties for {@link FlinkKinesisConsumer}.
@@ -82,13 +70,6 @@ public class KinesisConfigUtil {
 		checkNotNull(config, "config can not be null");
 
 		validateAwsConfiguration(config);
-
-		//noinspection SimplifiableBooleanExpression - the current logic expression is actually easier to understand
-		if (!(config.containsKey(AWSConfigConstants.AWS_REGION) ^ config.containsKey(ConsumerConfigConstants.AWS_ENDPOINT))) {
-			// per validation in AwsClientBuilder
-			throw new IllegalArgumentException(String.format("For FlinkKinesisConsumer either AWS region ('%s') or AWS endpoint ('%s') must be set in the config.",
-					AWSConfigConstants.AWS_REGION, AWSConfigConstants.AWS_ENDPOINT));
-		}
 
 		if (config.containsKey(ConsumerConfigConstants.STREAM_INITIAL_POSITION)) {
 			String initPosType = config.getProperty(ConsumerConfigConstants.STREAM_INITIAL_POSITION);
@@ -151,14 +132,14 @@ public class KinesisConfigUtil {
 		validateOptionalPositiveLongProperty(config, ConsumerConfigConstants.SHARD_DISCOVERY_INTERVAL_MILLIS,
 			"Invalid value given for shard discovery sleep interval in milliseconds. Must be a valid non-negative long value.");
 
-		validateOptionalPositiveLongProperty(config, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_BASE,
-			"Invalid value given for list shards operation base backoff milliseconds. Must be a valid non-negative long value.");
+		validateOptionalPositiveLongProperty(config, ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_BASE,
+			"Invalid value given for describe stream operation base backoff milliseconds. Must be a valid non-negative long value.");
 
-		validateOptionalPositiveLongProperty(config, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_MAX,
-			"Invalid value given for list shards operation max backoff milliseconds. Must be a valid non-negative long value.");
+		validateOptionalPositiveLongProperty(config, ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_MAX,
+			"Invalid value given for describe stream operation max backoff milliseconds. Must be a valid non-negative long value.");
 
-		validateOptionalPositiveDoubleProperty(config, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_EXPONENTIAL_CONSTANT,
-			"Invalid value given for list shards operation backoff exponential constant. Must be a valid non-negative double value.");
+		validateOptionalPositiveDoubleProperty(config, ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_EXPONENTIAL_CONSTANT,
+			"Invalid value given for describe stream operation backoff exponential constant. Must be a valid non-negative double value.");
 
 		if (config.containsKey(ConsumerConfigConstants.SHARD_GETRECORDS_INTERVAL_MILLIS)) {
 			checkArgument(
@@ -171,93 +152,18 @@ public class KinesisConfigUtil {
 	}
 
 	/**
-	 * Replace deprecated configuration properties for {@link FlinkKinesisProducer}.
-	 * This should be remove along with deprecated keys
+	 * Validate configuration properties for {@link FlinkKinesisProducer}.
 	 */
-	@SuppressWarnings("deprecation")
-	public static Properties replaceDeprecatedProducerKeys(Properties configProps) {
-		// Replace deprecated key
-		if (configProps.containsKey(ProducerConfigConstants.COLLECTION_MAX_COUNT)) {
-			configProps.setProperty(COLLECTION_MAX_COUNT,
-					configProps.getProperty(ProducerConfigConstants.COLLECTION_MAX_COUNT));
-			configProps.remove(ProducerConfigConstants.COLLECTION_MAX_COUNT);
-		}
-		// Replace deprecated key
-		if (configProps.containsKey(ProducerConfigConstants.AGGREGATION_MAX_COUNT)) {
-			configProps.setProperty(AGGREGATION_MAX_COUNT,
-					configProps.getProperty(ProducerConfigConstants.AGGREGATION_MAX_COUNT));
-			configProps.remove(ProducerConfigConstants.AGGREGATION_MAX_COUNT);
-		}
-		return configProps;
-	}
-
-	/**
-	 * <p>
-	 *  A set of configuration paremeters associated with the describeStreams API may be used if:
-	 * 	1) an legacy client wants to consume from Kinesis
-	 * 	2) a current client wants to consumer from DynamoDB streams
-	 *
-	 * In the context of 1), the set of configurations needs to be translated to the corresponding
-	 * configurations in the Kinesis listShards API. In the mean time, keep these configs since
-	 * they are applicable in the context of 2), i.e., polling data from a DynamoDB stream.
-	 * </p>
-	 *
-	 * @param configProps original config properties.
-	 * @return backfilled config properties.
-	 */
-	@SuppressWarnings("UnusedReturnValue")
-	public static Properties backfillConsumerKeys(Properties configProps) {
-		HashMap<String, String> oldKeyToNewKeys = new HashMap<>();
-		oldKeyToNewKeys.put(ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_BASE, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_BASE);
-		oldKeyToNewKeys.put(ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_MAX, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_MAX);
-		oldKeyToNewKeys.put(ConsumerConfigConstants.STREAM_DESCRIBE_BACKOFF_EXPONENTIAL_CONSTANT, ConsumerConfigConstants.LIST_SHARDS_BACKOFF_EXPONENTIAL_CONSTANT);
-		for (Map.Entry<String, String> entry : oldKeyToNewKeys.entrySet()) {
-			String oldKey = entry.getKey();
-			String newKey = entry.getValue();
-			if (configProps.containsKey(oldKey)) {
-				configProps.setProperty(newKey, configProps.getProperty(oldKey));
-				// Do not remove the oldKey since they may be used in the context of talking to DynamoDB streams
-			}
-		}
-		return configProps;
-	}
-
-	/**
-	 * Validate configuration properties for {@link FlinkKinesisProducer},
-	 * and return a constructed KinesisProducerConfiguration.
-	 */
-	public static KinesisProducerConfiguration getValidatedProducerConfiguration(Properties config) {
+	public static void validateProducerConfiguration(Properties config) {
 		checkNotNull(config, "config can not be null");
 
 		validateAwsConfiguration(config);
 
-		if (!config.containsKey(AWSConfigConstants.AWS_REGION)) {
-			// per requirement in Amazon Kinesis Producer Library
-			throw new IllegalArgumentException(String.format("For FlinkKinesisProducer AWS region ('%s') must be set in the config.", AWSConfigConstants.AWS_REGION));
-		}
+		validateOptionalPositiveLongProperty(config, ProducerConfigConstants.COLLECTION_MAX_COUNT,
+			"Invalid value given for maximum number of items to pack into a PutRecords request. Must be a valid non-negative long value.");
 
-		KinesisProducerConfiguration kpc = KinesisProducerConfiguration.fromProperties(config);
-		kpc.setRegion(config.getProperty(AWSConfigConstants.AWS_REGION));
-
-		kpc.setCredentialsProvider(AWSUtil.getCredentialsProvider(config));
-
-		// we explicitly lower the credential refresh delay (default is 5 seconds)
-		// to avoid an ignorable interruption warning that occurs when shutting down the
-		// KPL client. See https://github.com/awslabs/amazon-kinesis-producer/issues/10.
-		kpc.setCredentialsRefreshDelay(100);
-
-		// Override default values if they aren't specified by users
-		if (!config.containsKey(RATE_LIMIT)) {
-			kpc.setRateLimit(DEFAULT_RATE_LIMIT);
-		}
-		if (!config.containsKey(THREADING_MODEL)) {
-			kpc.setThreadingModel(DEFAULT_THREADING_MODEL);
-		}
-		if (!config.containsKey(THREAD_POOL_SIZE)) {
-			kpc.setThreadPoolSize(DEFAULT_THREAD_POOL_SIZE);
-		}
-
-		return kpc;
+		validateOptionalPositiveLongProperty(config, ProducerConfigConstants.AGGREGATION_MAX_COUNT,
+			"Invalid value given for maximum number of items to pack into an aggregated record. Must be a valid non-negative long value.");
 	}
 
 	/**
@@ -289,7 +195,16 @@ public class KinesisConfigUtil {
 			}
 		}
 
-		if (config.containsKey(AWSConfigConstants.AWS_REGION)) {
+		if (!config.containsKey(AWSConfigConstants.AWS_REGION)) {
+			final Region currentRegion = Regions.getCurrentRegion();
+			if (currentRegion != null) {
+				config.setProperty(AWSConfigConstants.AWS_REGION, currentRegion.getName());
+			} else {
+				throw new IllegalArgumentException("The AWS region could not be identified automatically from the AWS API.  " +
+					"The region can be set manually using property ('" + AWSConfigConstants.AWS_REGION + "'), however please " +
+					"avoid setting this property in production due to risk of cross-region network traffic.");
+			}
+		} else {
 			// specified AWS Region name must be recognizable
 			if (!AWSUtil.isValidRegion(config.getProperty(AWSConfigConstants.AWS_REGION))) {
 				StringBuilder sb = new StringBuilder();
