@@ -17,6 +17,7 @@
 ################################################################################
 
 import datetime
+import decimal
 import struct
 from apache_beam.coders.coder_impl import StreamCoderImpl
 
@@ -79,6 +80,101 @@ class RowCoderImpl(StreamCoderImpl):
         return 'RowCoderImpl[%s]' % ', '.join(str(c) for c in self._field_coders)
 
 
+class ArrayCoderImpl(StreamCoderImpl):
+
+    def __init__(self, elem_coder):
+        self._elem_coder = elem_coder
+
+    def encode_to_stream(self, value, out_stream, nested):
+        out_stream.write_bigendian_int32(len(value))
+        for elem in value:
+            if elem is None:
+                out_stream.write_byte(False)
+            else:
+                out_stream.write_byte(True)
+                self._elem_coder.encode_to_stream(elem, out_stream, nested)
+
+    def decode_from_stream(self, in_stream, nested):
+        size = in_stream.read_bigendian_int32()
+        elements = [self._elem_coder.decode_from_stream(in_stream, nested)
+                    if not not in_stream.read_byte() else None for _ in range(size)]
+        return elements
+
+    def __repr__(self):
+        return 'ArrayCoderImpl[%s]' % str(self._elem_coder)
+
+
+class MapCoderImpl(StreamCoderImpl):
+
+    def __init__(self, key_coder, value_coder):
+        self._key_coder = key_coder
+        self._value_coder = value_coder
+
+    def encode_to_stream(self, map_value, out_stream, nested):
+        out_stream.write_bigendian_int32(len(map_value))
+        for key in map_value:
+            self._key_coder.encode_to_stream(key, out_stream, nested)
+            value = map_value[key]
+            if value is None:
+                out_stream.write_byte(True)
+            else:
+                out_stream.write_byte(False)
+                self._value_coder.encode_to_stream(map_value[key], out_stream, nested)
+
+    def decode_from_stream(self, in_stream, nested):
+        size = in_stream.read_bigendian_int32()
+        map_value = {}
+        for _ in range(size):
+            key = self._key_coder.decode_from_stream(in_stream, nested)
+            is_null = not not in_stream.read_byte()
+            if is_null:
+                map_value[key] = None
+            else:
+                value = self._value_coder.decode_from_stream(in_stream, nested)
+                map_value[key] = value
+        return map_value
+
+    def __repr__(self):
+        return 'MapCoderImpl[%s]' % ' : '.join([str(self._key_coder), str(self._value_coder)])
+
+
+class MultisetCoderImpl(StreamCoderImpl):
+
+    def __init__(self, element_coder):
+        self._element_coder = element_coder
+
+    def encode_to_stream(self, value, out_stream, nested):
+        dict_value = self.multiset_to_dict(value)
+        out_stream.write_bigendian_int32(len(dict_value))
+        for key in dict_value:
+            self._element_coder.encode_to_stream(key, out_stream, nested)
+            out_stream.write_byte(False)
+            out_stream.write_bigendian_int32(dict_value[key])
+
+    def decode_from_stream(self, in_stream, nested):
+        size = in_stream.read_bigendian_int32()
+        multiset_value = []
+        for _ in range(size):
+            element = self._element_coder.decode_from_stream(in_stream, nested)
+            in_stream.read_byte()
+            count = in_stream.read_bigendian_int32()
+            for i in range(count):
+                multiset_value.append(element)
+        return multiset_value
+
+    def multiset_to_dict(self, multiset):
+        dict_value = {}
+        for ele in multiset:
+            if ele in dict_value:
+                dict_value[ele] += 1
+            else:
+                dict_value[ele] = 1
+        return dict_value
+
+    def __repr__(self):
+        return 'MultisetCoderImpl[%s]' % str(self._element_coder)
+
+
 class BigIntCoderImpl(StreamCoderImpl):
     def encode_to_stream(self, value, out_stream, nested):
         out_stream.write_bigendian_int64(value)
@@ -90,10 +186,10 @@ class BigIntCoderImpl(StreamCoderImpl):
 class TinyIntCoderImpl(StreamCoderImpl):
 
     def encode_to_stream(self, value, out_stream, nested):
-        out_stream.write_byte(value)
+        out_stream.write(struct.pack('b', value))
 
     def decode_from_stream(self, in_stream, nested):
-        return int(in_stream.read_byte())
+        return struct.unpack('b', in_stream.read(1))[0]
 
 
 class SmallIntImpl(StreamCoderImpl):
@@ -140,6 +236,18 @@ class DoubleCoderImpl(StreamCoderImpl):
         return in_stream.read_bigendian_double()
 
 
+class DecimalCoderImpl(StreamCoderImpl):
+
+    def encode_to_stream(self, value, out_stream, nested):
+        bytes_value = str(value).encode("utf-8")
+        out_stream.write_bigendian_int32(len(bytes_value))
+        out_stream.write(bytes_value, False)
+
+    def decode_from_stream(self, in_stream, nested):
+        size = in_stream.read_bigendian_int32()
+        return decimal.Decimal(in_stream.read(size).decode("utf-8"))
+
+
 class BinaryCoderImpl(StreamCoderImpl):
 
     def encode_to_stream(self, value, out_stream, nested):
@@ -154,8 +262,9 @@ class BinaryCoderImpl(StreamCoderImpl):
 class CharCoderImpl(StreamCoderImpl):
 
     def encode_to_stream(self, value, out_stream, nested):
-        out_stream.write_bigendian_int32(len(value))
-        out_stream.write(value.encode("utf-8"), False)
+        bytes_value = value.encode("utf-8")
+        out_stream.write_bigendian_int32(len(bytes_value))
+        out_stream.write(bytes_value, False)
 
     def decode_from_stream(self, in_stream, nested):
         size = in_stream.read_bigendian_int32()

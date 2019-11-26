@@ -20,6 +20,7 @@ from abc import ABC
 
 
 import datetime
+import decimal
 from apache_beam.coders import Coder
 from apache_beam.coders.coders import FastCoder
 
@@ -31,7 +32,8 @@ FLINK_SCHEMA_CODER_URN = "flink:coder:schema:v1"
 
 __all__ = ['RowCoder', 'BigIntCoder', 'TinyIntCoder', 'BooleanCoder',
            'SmallIntCoder', 'IntCoder', 'FloatCoder', 'DoubleCoder',
-           'BinaryCoder', 'CharCoder', 'DateCoder']
+           'BinaryCoder', 'CharCoder', 'DateCoder', 'ArrayCoder',
+           'MapCoder', 'MultisetCoder', 'DecimalCoder']
 
 
 class RowCoder(FastCoder):
@@ -66,6 +68,98 @@ class RowCoder(FastCoder):
 
     def __hash__(self):
         return hash(self._field_coders)
+
+
+class CollectionCoder(FastCoder):
+    """
+    Base coder for collection.
+    """
+    def __init__(self, elem_coder):
+        self._elem_coder = elem_coder
+
+    def _create_impl(self):
+        return self._impl_coder()(self._elem_coder.get_impl())
+
+    def _impl_coder(self):
+        raise NotImplementedError
+
+    def is_deterministic(self):
+        return self._elem_coder.is_deterministic()
+
+    def to_type_hint(self):
+        return []
+
+    def __eq__(self, other):
+        return (self.__class__ == other.__class__
+                and self._elem_coder == other._elem_coder)
+
+    def __repr__(self):
+        return '%s[%s]' % (self.__class__.__name__, str(self._elem_coder))
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        return hash(self._elem_coder)
+
+
+class ArrayCoder(CollectionCoder):
+    """
+    Coder for Array.
+    """
+
+    def __init__(self, elem_coder):
+        self._elem_coder = elem_coder
+        super(ArrayCoder, self).__init__(elem_coder)
+
+    def _impl_coder(self):
+        return coder_impl.ArrayCoderImpl
+
+
+class MapCoder(FastCoder):
+    """
+    Coder for Map.
+    """
+
+    def __init__(self, key_coder, value_coder):
+        self._key_coder = key_coder
+        self._value_coder = value_coder
+
+    def _create_impl(self):
+        return coder_impl.MapCoderImpl(self._key_coder.get_impl(), self._value_coder.get_impl())
+
+    def is_deterministic(self):
+        return self._key_coder.is_deterministic() and self._value_coder.is_deterministic()
+
+    def to_type_hint(self):
+        return {}
+
+    def __repr__(self):
+        return 'MapCoder[%s]' % ','.join([str(self._key_coder), str(self._value_coder)])
+
+    def __eq__(self, other):
+        return (self.__class__ == other.__class__
+                and self._key_coder == other._key_coder
+                and self._value_coder == other._value_coder)
+
+    def __ne__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        return hash([self._key_coder, self._value_coder])
+
+
+class MultisetCoder(CollectionCoder):
+    """
+    Coder for Multiset.
+    """
+
+    def __init__(self, elem_coder):
+        self._elem_coder = elem_coder
+        super(MultisetCoder, self).__init__(elem_coder)
+
+    def _impl_coder(self):
+        return coder_impl.MultisetCoderImpl
 
 
 class DeterministicCoder(FastCoder, ABC):
@@ -161,6 +255,18 @@ class DoubleCoder(DeterministicCoder):
         return float
 
 
+class DecimalCoder(DeterministicCoder):
+    """
+    Coder for Decimal.
+    """
+
+    def _create_impl(self):
+        return coder_impl.DecimalCoderImpl()
+
+    def to_type_hint(self):
+        return decimal.Decimal
+
+
 class BinaryCoder(DeterministicCoder):
     """
     Coder for Byte Array.
@@ -210,6 +316,7 @@ _type_name_mappings = {
     type_name.BOOLEAN: BooleanCoder(),
     type_name.FLOAT: FloatCoder(),
     type_name.DOUBLE: DoubleCoder(),
+    type_name.DECIMAL: DecimalCoder(),
     type_name.BINARY: BinaryCoder(),
     type_name.VARBINARY: BinaryCoder(),
     type_name.CHAR: CharCoder(),
@@ -231,5 +338,12 @@ def from_proto(field_type):
         return coder
     if field_type_name == type_name.ROW:
         return RowCoder([from_proto(f.type) for f in field_type.row_schema.fields])
+    elif field_type_name == type_name.ARRAY:
+        return ArrayCoder(from_proto(field_type.collection_element_type))
+    elif field_type_name == type_name.MAP:
+        return MapCoder(from_proto(field_type.map_type.key_type),
+                        from_proto(field_type.map_type.value_type))
+    elif field_type_name == type_name.MULTISET:
+        return MultisetCoder(from_proto(field_type.collection_element_type))
     else:
         raise ValueError("field_type %s is not supported." % field_type)

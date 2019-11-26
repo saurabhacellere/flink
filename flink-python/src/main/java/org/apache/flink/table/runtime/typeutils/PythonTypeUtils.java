@@ -24,30 +24,49 @@ import org.apache.flink.api.common.typeutils.base.BooleanSerializer;
 import org.apache.flink.api.common.typeutils.base.ByteSerializer;
 import org.apache.flink.api.common.typeutils.base.DoubleSerializer;
 import org.apache.flink.api.common.typeutils.base.FloatSerializer;
+import org.apache.flink.api.common.typeutils.base.GenericArraySerializer;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.api.common.typeutils.base.MapSerializer;
 import org.apache.flink.api.common.typeutils.base.ShortSerializer;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.java.typeutils.runtime.RowSerializer;
 import org.apache.flink.fnexecution.v1.FlinkFnApi;
 import org.apache.flink.table.runtime.typeutils.serializers.python.BaseRowSerializer;
+import org.apache.flink.table.runtime.typeutils.serializers.python.BigDecSerializer;
+import org.apache.flink.table.runtime.typeutils.serializers.python.BinaryArraySerializer;
+import org.apache.flink.table.runtime.typeutils.serializers.python.BinaryMapSerializer;
 import org.apache.flink.table.runtime.typeutils.serializers.python.DateSerializer;
+import org.apache.flink.table.runtime.typeutils.serializers.python.DecimalSerializer;
 import org.apache.flink.table.runtime.typeutils.serializers.python.StringSerializer;
+import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.BooleanType;
 import org.apache.flink.table.types.logical.CharType;
 import org.apache.flink.table.types.logical.DateType;
+import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.DoubleType;
 import org.apache.flink.table.types.logical.FloatType;
 import org.apache.flink.table.types.logical.IntType;
+import org.apache.flink.table.types.logical.LegacyTypeInformationType;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.SmallIntType;
+import org.apache.flink.table.types.logical.TimeType;
+import org.apache.flink.table.types.logical.TimestampType;
 import org.apache.flink.table.types.logical.TinyIntType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
+
+import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.sql.Date;
+import java.sql.Time;
+import java.sql.Timestamp;
 
 /**
  * Utilities for converting Flink logical types, such as convert it to the related
@@ -68,6 +87,43 @@ public final class PythonTypeUtils {
 
 	public static FlinkFnApi.Schema.FieldType toProtoType(LogicalType logicalType) {
 		return logicalType.accept(new LogicalTypeToProtoTypeConverter());
+	}
+
+	/**
+	 * Convert LogicalType to conversion class.
+	 */
+	public static class LogicalTypeToConversionClassConverter extends LogicalTypeDefaultVisitor<Class> {
+
+		public static final LogicalTypeToConversionClassConverter INSTANCE = new LogicalTypeToConversionClassConverter();
+
+		private LogicalTypeToConversionClassConverter() {
+		}
+
+		@Override
+		public Class visit(DateType dateType) {
+			return Date.class;
+		}
+
+		@Override
+		public Class visit(TimeType timeType) {
+			return Time.class;
+		}
+
+		@Override
+		public Class visit(TimestampType timestampType) {
+			return Timestamp.class;
+		}
+
+		@Override
+		public Class visit(ArrayType arrayType) {
+			Class elementClass = arrayType.getElementType().accept(this);
+			return Array.newInstance(elementClass, 0).getClass();
+		}
+
+		@Override
+		protected Class defaultMethod(LogicalType logicalType) {
+			return logicalType.getDefaultConversion();
+		}
 	}
 
 	private static class LogicalTypeToTypeSerializerConverter extends LogicalTypeDefaultVisitor<TypeSerializer> {
@@ -132,6 +188,29 @@ public final class PythonTypeUtils {
 		}
 
 		@Override
+		@SuppressWarnings("unchecked")
+		public TypeSerializer visit(ArrayType arrayType) {
+			LogicalType elementType = arrayType.getElementType();
+			TypeSerializer<?> elementTypeSerializer = elementType.accept(this);
+			Class<?> elementClass = LogicalTypeToConversionClassConverter.INSTANCE.visit(elementType);
+			return new GenericArraySerializer(elementClass, elementTypeSerializer);
+		}
+
+		@Override
+		public TypeSerializer visit(MapType mapType) {
+			TypeSerializer<?> keyTypeSerializer = mapType.getKeyType().accept(this);
+			TypeSerializer<?> valueTypeSerializer = mapType.getValueType().accept(this);
+			return new MapSerializer<>(keyTypeSerializer, valueTypeSerializer);
+		}
+
+		@Override
+		public TypeSerializer visit(MultisetType multisetType) {
+			LogicalType elementType = multisetType.getElementType();
+			TypeSerializer<?> elementTypeSerializer = elementType.accept(this);
+			return new MapSerializer<>(elementTypeSerializer, IntSerializer.INSTANCE);
+		}
+
+		@Override
 		public TypeSerializer visit(RowType rowType) {
 			final TypeSerializer[] fieldTypeSerializers = rowType.getFields()
 				.stream()
@@ -142,6 +221,12 @@ public final class PythonTypeUtils {
 
 		@Override
 		protected TypeSerializer defaultMethod(LogicalType logicalType) {
+			if (logicalType instanceof LegacyTypeInformationType) {
+				Class<?> typeClass = ((LegacyTypeInformationType) logicalType).getTypeInformation().getTypeClass();
+				if (typeClass == BigDecimal.class) {
+					return BigDecSerializer.INSTANCE;
+				}
+			}
 			throw new UnsupportedOperationException(String.format(
 				"Python UDF doesn't support logical type %s currently.", logicalType.asSummaryString()));
 		}
@@ -171,6 +256,34 @@ public final class PythonTypeUtils {
 		@Override
 		public TypeSerializer visit(DateType dateType) {
 			return IntSerializer.INSTANCE;
+		}
+
+		@Override
+		public TypeSerializer visit(ArrayType arrayType) {
+			LogicalType elementType = arrayType.getElementType();
+			TypeSerializer<?> elementTypeSerializer = elementType.accept(this);
+			return new BinaryArraySerializer<>(elementType, elementTypeSerializer);
+		}
+
+		@Override
+		public TypeSerializer visit(MapType mapType) {
+			LogicalType keyType = mapType.getKeyType();
+			LogicalType valueType = mapType.getValueType();
+			TypeSerializer<?> keyTypeSerializer = keyType.accept(this);
+			TypeSerializer<?> valueTypeSerializer = valueType.accept(this);
+			return new BinaryMapSerializer<>(keyType, valueType, keyTypeSerializer, valueTypeSerializer);
+		}
+
+		@Override
+		public TypeSerializer visit(MultisetType multisetType) {
+			LogicalType elementType = multisetType.getElementType();
+			TypeSerializer<?> elementTypeSerializer = elementType.accept(this);
+			return new BinaryMapSerializer<>(elementType, new IntType(), elementTypeSerializer, IntSerializer.INSTANCE);
+		}
+
+		@Override
+		public TypeSerializer visit(DecimalType decimalType) {
+			return new DecimalSerializer(decimalType.getPrecision(), decimalType.getScale());
 		}
 	}
 
@@ -272,6 +385,53 @@ public final class PythonTypeUtils {
 		}
 
 		@Override
+		public FlinkFnApi.Schema.FieldType visit(DecimalType decimalType) {
+			return FlinkFnApi.Schema.FieldType.newBuilder()
+				.setTypeName(FlinkFnApi.Schema.TypeName.DECIMAL)
+				.setNullable(decimalType.isNullable())
+				.build();
+		}
+
+		@Override
+		public FlinkFnApi.Schema.FieldType visit(ArrayType arrayType) {
+			FlinkFnApi.Schema.FieldType.Builder builder =
+				FlinkFnApi.Schema.FieldType.newBuilder()
+					.setTypeName(FlinkFnApi.Schema.TypeName.ARRAY)
+					.setNullable(arrayType.isNullable());
+
+			FlinkFnApi.Schema.FieldType elementFieldType = arrayType.getElementType().accept(this);
+			builder.setCollectionElementType(elementFieldType);
+			return builder.build();
+		}
+
+		@Override
+		public FlinkFnApi.Schema.FieldType visit(MapType mapType) {
+			FlinkFnApi.Schema.FieldType.Builder builder =
+				FlinkFnApi.Schema.FieldType.newBuilder()
+					.setTypeName(FlinkFnApi.Schema.TypeName.MAP)
+					.setNullable(mapType.isNullable());
+
+			FlinkFnApi.Schema.MapType.Builder mapBuilder =
+				FlinkFnApi.Schema.MapType.newBuilder()
+					.setKeyType(mapType.getKeyType().accept(this))
+					.setValueType(mapType.getValueType().accept(this));
+			builder.setMapType(mapBuilder.build());
+			return builder.build();
+		}
+
+		@Override
+		public FlinkFnApi.Schema.FieldType visit(MultisetType multisetType) {
+			FlinkFnApi.Schema.FieldType.Builder builder =
+				FlinkFnApi.Schema.FieldType.newBuilder()
+					.setTypeName(FlinkFnApi.Schema.TypeName.MULTISET)
+					.setNullable(multisetType.isNullable());
+
+			FlinkFnApi.Schema.FieldType elementFieldType = multisetType.getElementType().accept(this);
+			builder.setCollectionElementType(elementFieldType);
+			return builder.build();
+		}
+
+		@Override
 		public FlinkFnApi.Schema.FieldType visit(RowType rowType) {
 			FlinkFnApi.Schema.FieldType.Builder builder =
 				FlinkFnApi.Schema.FieldType.newBuilder()
@@ -293,6 +453,15 @@ public final class PythonTypeUtils {
 
 		@Override
 		protected FlinkFnApi.Schema.FieldType defaultMethod(LogicalType logicalType) {
+			if (logicalType instanceof LegacyTypeInformationType) {
+				Class<?> typeClass = ((LegacyTypeInformationType) logicalType).getTypeInformation().getTypeClass();
+				if (typeClass == BigDecimal.class) {
+					return FlinkFnApi.Schema.FieldType.newBuilder()
+						.setTypeName(FlinkFnApi.Schema.TypeName.DECIMAL)
+						.setNullable(logicalType.isNullable())
+						.build();
+				}
+			}
 			throw new UnsupportedOperationException(String.format(
 				"Python UDF doesn't support logical type %s currently.", logicalType.asSummaryString()));
 		}
