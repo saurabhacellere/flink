@@ -27,7 +27,6 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.HighAvailabilityOptions;
@@ -38,6 +37,7 @@ import org.apache.flink.runtime.checkpoint.CompletedCheckpoint;
 import org.apache.flink.runtime.checkpoint.StandaloneCheckpointIDCounter;
 import org.apache.flink.runtime.checkpoint.StandaloneCompletedCheckpointStore;
 import org.apache.flink.runtime.checkpoint.TestingCheckpointRecoveryFactory;
+import org.apache.flink.runtime.executiongraph.failover.FailoverStrategyLoader;
 import org.apache.flink.runtime.executiongraph.restart.FailingRestartStrategy;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServicesFactory;
@@ -67,6 +67,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -81,9 +83,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.StreamSupport;
 
-import static org.apache.flink.runtime.dispatcher.SchedulerNGFactoryFactory.SCHEDULER_TYPE_LEGACY;
-import static org.apache.flink.runtime.dispatcher.SchedulerNGFactoryFactory.SCHEDULER_TYPE_NG;
-import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -116,33 +115,26 @@ public class RegionFailoverITCase extends TestLogger {
 	@ClassRule
 	public static final TemporaryFolder TEMPORARY_FOLDER = new TemporaryFolder();
 
-	private final String schedulerType;
+	@Parameter
+	public String failoverStrategyName;
 
-	public RegionFailoverITCase(final String schedulerType) {
-		this.schedulerType = checkNotNull(schedulerType);
-	}
-
-	@Parameterized.Parameters(name = "scheduler = {0}")
-	public static Object[] testParameters() {
-		return new Object[]{SCHEDULER_TYPE_NG, SCHEDULER_TYPE_LEGACY};
+	@Parameters(name = "[{index}] failover strategy: {0}")
+	public static Object[] failoverStrategies() {
+		return new Object[] {
+			FailoverStrategyLoader.PIPELINED_REGION_RESTART_STRATEGY_NAME,
+			FailoverStrategyLoader.FAST_PIPELINED_REGION_RESTART_STRATEGY_NAME
+		};
 	}
 
 	@Before
 	public void setup() throws Exception {
 		Configuration configuration = new Configuration();
-		configuration.setString(JobManagerOptions.EXECUTION_FAILOVER_STRATEGY, "region");
+		configuration.setString(JobManagerOptions.EXECUTION_FAILOVER_STRATEGY, failoverStrategyName);
 		configuration.setString(HighAvailabilityOptions.HA_MODE, TestingHAFactory.class.getName());
 
-		configuration.setString(JobManagerOptions.SCHEDULER, schedulerType);
-
-		// If the LegacyScheduler is configured, we will use a custom RestartStrategy
-		// (FailingRestartStrategy). This is done to test FLINK-13452. DefaultScheduler takes a
-		// different code path, and also cannot be configured with custom RestartStrategies.
-		if (SCHEDULER_TYPE_LEGACY.equals(schedulerType)) {
-			// global failover times: 3, region failover times: NUM_OF_RESTARTS
-			configuration.setInteger(FailingRestartStrategy.NUM_FAILURES_CONFIG_OPTION, 3);
-			configuration.setString(RestartStrategyOptions.RESTART_STRATEGY, FailingRestartStrategy.class.getName());
-		}
+		// global failover times: 3, region failover times: NUM_OF_RESTARTS
+		configuration.setInteger(FailingRestartStrategy.NUM_FAILURES_CONFIG_OPTION, 3);
+		configuration.setString(RestartStrategyOptions.RESTART_STRATEGY, FailingRestartStrategy.class.getName());
 
 		cluster = new MiniClusterWithClientResource(
 			new MiniClusterResourceConfiguration.Builder()
@@ -173,9 +165,10 @@ public class RegionFailoverITCase extends TestLogger {
 		try {
 			JobGraph jobGraph = createJobGraph();
 			ClusterClient<?> client = cluster.getClusterClient();
-			ClientUtils.submitJobAndWaitForResult(client, jobGraph, RegionFailoverITCase.class.getClassLoader());
+			client.submitJob(jobGraph, RegionFailoverITCase.class.getClassLoader());
 			verifyAfterJobExecuted();
-		} catch (Exception e) {
+		}
+		catch (Exception e) {
 			e.printStackTrace();
 			Assert.fail(e.getMessage());
 		}
