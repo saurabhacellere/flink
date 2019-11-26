@@ -26,12 +26,11 @@ import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.container.entrypoint.JarManifestParser.JarFileWithEntryClass;
-import org.apache.flink.runtime.entrypoint.component.AbstractUserClassPathJobGraphRetriever;
 import org.apache.flink.runtime.entrypoint.component.JobGraphRetriever;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.runtime.jobmanager.SubmittedJobGraph;
+import org.apache.flink.runtime.jobmanager.SubmittedJobGraphStore;
 import org.apache.flink.util.FlinkException;
 
 import org.slf4j.Logger;
@@ -42,14 +41,9 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.function.Supplier;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -58,7 +52,7 @@ import static java.util.Objects.requireNonNull;
  * {@link JobGraphRetriever} which creates the {@link JobGraph} from a class
  * on the class path.
  */
-class ClassPathJobGraphRetriever extends AbstractUserClassPathJobGraphRetriever {
+class ClassPathJobGraphRetriever implements JobGraphRetriever {
 
 	private static final Logger LOG = LoggerFactory.getLogger(ClassPathJobGraphRetriever.class);
 
@@ -77,68 +71,83 @@ class ClassPathJobGraphRetriever extends AbstractUserClassPathJobGraphRetriever 
 	@Nonnull
 	private final Supplier<Iterable<File>> jarsOnClassPath;
 
-	@Nullable
-	private final File userLibDirectory;
+	@Nonnull
+	private final SubmittedJobGraphStore submittedJobGraphStore;
 
-	private ClassPathJobGraphRetriever(
-		@Nonnull JobID jobId,
-		@Nonnull SavepointRestoreSettings savepointRestoreSettings,
-		@Nonnull String[] programArguments,
-		@Nullable String jobClassName,
-		@Nonnull Supplier<Iterable<File>> jarsOnClassPath,
-		@Nullable File userLibDirectory) throws IOException {
-		super(userLibDirectory);
-		this.userLibDirectory = userLibDirectory;
+	ClassPathJobGraphRetriever(
+			@Nonnull JobID jobId,
+			@Nonnull SavepointRestoreSettings savepointRestoreSettings,
+			@Nonnull String[] programArguments,
+			@Nullable String jobClassName,
+			@Nonnull SubmittedJobGraphStore submittedJobGraphStore) {
+
+		this(jobId,
+			savepointRestoreSettings,
+			programArguments,
+			jobClassName,
+			JarsOnClassPath.INSTANCE,
+			submittedJobGraphStore);
+	}
+
+	@VisibleForTesting
+	ClassPathJobGraphRetriever(
+			@Nonnull JobID jobId,
+			@Nonnull SavepointRestoreSettings savepointRestoreSettings,
+			@Nonnull String[] programArguments,
+			@Nullable String jobClassName,
+			@Nonnull Supplier<Iterable<File>> jarsOnClassPath,
+			@Nonnull SubmittedJobGraphStore submittedJobGraphStore) {
 		this.jobId = requireNonNull(jobId, "jobId");
 		this.savepointRestoreSettings = requireNonNull(savepointRestoreSettings, "savepointRestoreSettings");
 		this.programArguments = requireNonNull(programArguments, "programArguments");
 		this.jobClassName = jobClassName;
-		this.jarsOnClassPath = requireNonNull(jarsOnClassPath);
+		this.jarsOnClassPath = requireNonNull(jarsOnClassPath, "jarsOnClassPath");
+		this.submittedJobGraphStore = requireNonNull(submittedJobGraphStore, "submittedJobGraphStore");
 	}
 
 	@Override
 	public JobGraph retrieveJobGraph(Configuration configuration) throws FlinkException {
-		final PackagedProgram packagedProgram = createPackagedProgram();
-		final int defaultParallelism = configuration.getInteger(CoreOptions.DEFAULT_PARALLELISM);
+		SubmittedJobGraph submittedJobGraph;
 		try {
-			final JobGraph jobGraph = PackagedProgramUtils.createJobGraph(
-				packagedProgram,
-				configuration,
-				defaultParallelism,
-				jobId);
-			jobGraph.setSavepointRestoreSettings(savepointRestoreSettings);
-
-			return jobGraph;
+			//firstly, fetch job graph from job graph store
+			submittedJobGraph = submittedJobGraphStore.recoverJobGraph(jobId);
 		} catch (Exception e) {
-			throw new FlinkException("Could not create the JobGraph from the provided user code jar.", e);
+			throw new FlinkException("Could not recover job graph from job graph store.", e);
+		}
+
+		if (submittedJobGraph != null) {
+			return submittedJobGraph.getJobGraph();
+		} else {
+			final PackagedProgram packagedProgram = createPackagedProgram();
+			final int defaultParallelism = configuration.getInteger(CoreOptions.DEFAULT_PARALLELISM);
+			try {
+				final JobGraph jobGraph = PackagedProgramUtils.createJobGraph(
+					packagedProgram,
+					configuration,
+					defaultParallelism,
+					jobId);
+				jobGraph.setAllowQueuedScheduling(true);
+				jobGraph.setSavepointRestoreSettings(savepointRestoreSettings);
+
+				return jobGraph;
+			} catch (Exception e) {
+				throw new FlinkException("Could not create the JobGraph from the provided user code jar.", e);
+			}
 		}
 	}
 
 	private PackagedProgram createPackagedProgram() throws FlinkException {
 		final String entryClass = getJobClassNameOrScanClassPath();
 		try {
-			return PackagedProgram.newBuilder()
-				.setUserClassPaths(new ArrayList<>(getUserClassPaths()))
-				.setEntryPointClassName(entryClass)
-				.setArguments(programArguments)
-				.build();
-		} catch (ProgramInvocationException e) {
+			final Class<?> mainClass = getClass().getClassLoader().loadClass(entryClass);
+			return new PackagedProgram(mainClass, programArguments);
+		} catch (ClassNotFoundException | ProgramInvocationException e) {
 			throw new FlinkException("Could not load the provided entrypoint class.", e);
 		}
 	}
 
 	private String getJobClassNameOrScanClassPath() throws FlinkException {
 		if (jobClassName != null) {
-			if (userLibDirectory != null) {
-				// check that we find the entrypoint class in the user lib directory.
-				if (!userClassPathContainsJobClass(jobClassName)) {
-					throw new FlinkException(
-						String.format(
-							"Could not find the provided job class (%s) in the user lib directory (%s).",
-							jobClassName,
-							userLibDirectory));
-				}
-			}
 			return jobClassName;
 		}
 
@@ -149,47 +158,10 @@ class ClassPathJobGraphRetriever extends AbstractUserClassPathJobGraphRetriever 
 		}
 	}
 
-	private boolean userClassPathContainsJobClass(String jobClassName) {
-		for (URL userClassPath : getUserClassPaths()) {
-			try (final JarFile jarFile = new JarFile(userClassPath.getFile())) {
-				if (jarContainsJobClass(jobClassName, jarFile)) {
-					return true;
-				}
-			} catch (IOException e) {
-				ExceptionUtils.rethrow(
-					e,
-					String.format(
-						"Failed to open user class path %s. Make sure that all files on the user class path can be accessed.",
-						userClassPath));
-			}
-		}
-		return false;
-	}
-
-	private boolean jarContainsJobClass(String jobClassName, JarFile jarFile) {
-		return jarFile
-			.stream()
-			.map(JarEntry::getName)
-			.filter(fileName -> fileName.endsWith(FileUtils.CLASS_FILE_EXTENSION))
-			.map(FileUtils::stripFileExtension)
-			.map(fileName -> fileName.replaceAll(Pattern.quote(File.separator), FileUtils.PACKAGE_SEPARATOR))
-			.anyMatch(name -> name.equals(jobClassName));
-	}
-
 	private String scanClassPathForJobJar() throws IOException {
-		final Iterable<File> jars;
-		if (userLibDirectory == null) {
-			LOG.info("Scanning system class path for job JAR");
-			jars = jarsOnClassPath.get();
-		} else {
-			LOG.info("Scanning user class path for job JAR");
-			jars = getUserClassPaths()
-				.stream()
-				.map(url -> new File(url.getFile()))
-				.collect(Collectors.toList());
-		}
+		LOG.info("Scanning class path for job JAR");
+		JarFileWithEntryClass jobJar = JarManifestParser.findOnlyEntryClass(jarsOnClassPath.get());
 
-		final JarFileWithEntryClass jobJar = JarManifestParser.findOnlyEntryClass(jars);
 		LOG.info("Using {} as job jar", jobJar);
 		return jobJar.getEntryClass();
 	}
@@ -217,58 +189,6 @@ class ClassPathJobGraphRetriever extends AbstractUserClassPathJobGraphRetriever 
 		private static boolean notNullAndNotEmpty(String string) {
 			return string != null && !string.equals("");
 		}
-	}
-
-	static class Builder {
-
-		private final JobID jobId;
-
-		private final SavepointRestoreSettings savepointRestoreSettings;
-
-		private final String[] programArguments;
-
-		@Nullable
-		private String jobClassName;
-
-		@Nullable
-		private File userLibDirectory;
-
-		private Supplier<Iterable<File>> jarsOnClassPath = JarsOnClassPath.INSTANCE;
-
-		private Builder(JobID jobId, SavepointRestoreSettings savepointRestoreSettings, String[] programArguments) {
-			this.jobId = requireNonNull(jobId);
-			this.savepointRestoreSettings = requireNonNull(savepointRestoreSettings);
-			this.programArguments = requireNonNull(programArguments);
-		}
-
-		Builder setJobClassName(@Nullable String jobClassName) {
-			this.jobClassName = jobClassName;
-			return this;
-		}
-
-		Builder setUserLibDirectory(File userLibDirectory) {
-			this.userLibDirectory = userLibDirectory;
-			return this;
-		}
-
-		Builder setJarsOnClassPath(Supplier<Iterable<File>> jarsOnClassPath) {
-			this.jarsOnClassPath = jarsOnClassPath;
-			return this;
-		}
-
-		ClassPathJobGraphRetriever build() throws IOException {
-			return new ClassPathJobGraphRetriever(
-				jobId,
-				savepointRestoreSettings,
-				programArguments,
-				jobClassName,
-				jarsOnClassPath,
-				userLibDirectory);
-		}
-	}
-
-	static Builder newBuilder(JobID jobId, SavepointRestoreSettings savepointRestoreSettings, String[] programArguments) {
-		return new Builder(jobId, savepointRestoreSettings, programArguments);
 	}
 
 }

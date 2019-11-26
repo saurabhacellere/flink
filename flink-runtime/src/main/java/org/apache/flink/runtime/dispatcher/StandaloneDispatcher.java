@@ -18,11 +18,20 @@
 
 package org.apache.flink.runtime.dispatcher;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.blob.BlobServer;
+import org.apache.flink.runtime.heartbeat.HeartbeatServices;
+import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobmanager.SubmittedJobGraphStore;
 import org.apache.flink.runtime.jobmaster.JobMaster;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
+import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
+import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
+import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 
-import java.util.Collection;
+import javax.annotation.Nullable;
 
 /**
  * Dispatcher implementation which spawns a {@link JobMaster} for each
@@ -33,14 +42,32 @@ public class StandaloneDispatcher extends Dispatcher {
 	public StandaloneDispatcher(
 			RpcService rpcService,
 			String endpointId,
-			DispatcherId fencingToken,
-			Collection<JobGraph> recoveredJobs,
-			DispatcherServices dispatcherServices) throws Exception {
+			Configuration configuration,
+			HighAvailabilityServices highAvailabilityServices,
+			GatewayRetriever<ResourceManagerGateway> resourceManagerGatewayRetriever,
+			SubmittedJobGraphStore jobGraphStore,
+			BlobServer blobServer,
+			HeartbeatServices heartbeatServices,
+			JobManagerMetricGroup jobManagerMetricGroup,
+			@Nullable String metricQueryServiceAddress,
+			ArchivedExecutionGraphStore archivedExecutionGraphStore,
+			JobManagerRunnerFactory jobManagerRunnerFactory,
+			FatalErrorHandler fatalErrorHandler,
+			HistoryServerArchivist historyServerArchivist) throws Exception {
 		super(
 			rpcService,
 			endpointId,
-			fencingToken,
-			recoveredJobs,
-			dispatcherServices);
+			configuration,
+			highAvailabilityServices,
+			jobGraphStore,
+			resourceManagerGatewayRetriever,
+			blobServer,
+			heartbeatServices,
+			jobManagerMetricGroup,
+			metricQueryServiceAddress,
+			archivedExecutionGraphStore,
+			jobManagerRunnerFactory,
+			fatalErrorHandler,
+			historyServerArchivist);
 	}
 }
