@@ -31,13 +31,11 @@ import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.types.Value;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import org.junit.Assert;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -881,23 +879,56 @@ public class PojoTypeExtractionTest {
 	}
 
 	/**
-	 * POJO generated using Lombok.
+	 * POJO with a bounded generic parameter.
+	 *
+	 * @param <T> generic parameter bounded by one type
 	 */
-	@Getter
-	@Setter
-	@NoArgsConstructor
-	public static class TestLombok{
-		private int age = 10;
-		private String name;
+	public static class BoundedPojo<T extends Tuple2<Integer, String>> {
+
+		public T someKey;
+
+		public BoundedPojo() {}
+
+		public BoundedPojo(T someKey) {
+			this.someKey = someKey;
+		}
 	}
 
 	@Test
-	public void testLombokPojo() {
-		TypeInformation<TestLombok> ti = TypeExtractor.getForClass(TestLombok.class);
+	public void testBoundedPojos() {
+		TypeInformation<?> ti = TypeExtractor.createTypeInfo(BoundedPojo.class);
 		Assert.assertTrue(ti instanceof PojoTypeInfo);
+		PojoTypeInfo<?> pti = (PojoTypeInfo<?>) ti;
+		Assert.assertEquals(BoundedPojo.class, pti.getTypeClass());
+		Assert.assertTrue(pti.getPojoFieldAt(0).getTypeInformation() instanceof GenericTypeInfo);
+		TypeInformation<?> fti = pti.getPojoFieldAt(0).getTypeInformation();
+		Assert.assertEquals(Tuple2.class, fti.getTypeClass());
+	}
 
-		PojoTypeInfo<TestLombok> pti = (PojoTypeInfo<TestLombok>) ti;
-		Assert.assertEquals(BasicTypeInfo.INT_TYPE_INFO, pti.getTypeAt(0));
-		Assert.assertEquals(BasicTypeInfo.STRING_TYPE_INFO, pti.getTypeAt(1));
+	/**
+	 * POJO with a bounded generic parameter.
+	 *
+	 * @param <T> generic parameter bounded by two types
+	 */
+	public static class MultiBoundedPojo<T extends Tuple2<Integer, String> & Serializable> {
+
+		public T someKey;
+
+		public MultiBoundedPojo() {}
+
+		public MultiBoundedPojo(T someKey) {
+			this.someKey = someKey;
+		}
+	}
+
+	@Test
+	public void testMultiBoundedPojos() {
+		TypeInformation<?> ti = TypeExtractor.createTypeInfo(MultiBoundedPojo.class);
+		Assert.assertTrue(ti instanceof PojoTypeInfo);
+		PojoTypeInfo<?> pti = (PojoTypeInfo<?>) ti;
+		Assert.assertEquals(MultiBoundedPojo.class, pti.getTypeClass());
+		Assert.assertTrue(pti.getPojoFieldAt(0).getTypeInformation() instanceof GenericTypeInfo);
+		TypeInformation<?> fti = pti.getPojoFieldAt(0).getTypeInformation();
+		Assert.assertEquals(Tuple2.class, fti.getTypeClass());
 	}
 }
