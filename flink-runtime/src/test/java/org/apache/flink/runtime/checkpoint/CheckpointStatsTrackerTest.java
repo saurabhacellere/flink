@@ -64,9 +64,7 @@ public class CheckpointStatsTrackerTest {
 				191929L,
 				123,
 				CheckpointRetentionPolicy.NEVER_RETAIN_AFTER_TERMINATION,
-				false,
-				false,
-				0
+				false
 			),
 			null);
 
@@ -391,6 +389,7 @@ public class CheckpointStatsTrackerTest {
 
 		SubtaskStateStats subtaskStats = new SubtaskStateStats(
 			0,
+			"0.0.0.0:0",
 			ackTimestamp,
 			stateSize,
 			ignored,
@@ -475,6 +474,6 @@ public class CheckpointStatsTrackerTest {
 	}
 
 	private SubtaskStateStats createSubtaskStats(int index) {
-		return new SubtaskStateStats(index, 0, 0, 0, 0, 0, 0);
+		return new SubtaskStateStats(index,"0.0.0.0:0", 0, 0, 0, 0, 0, 0);
 	}
 }
