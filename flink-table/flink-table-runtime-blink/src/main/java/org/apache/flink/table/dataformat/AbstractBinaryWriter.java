@@ -17,20 +17,18 @@
 
 package org.apache.flink.table.dataformat;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.runtime.typeutils.BaseArraySerializer;
-import org.apache.flink.table.runtime.typeutils.BaseMapSerializer;
-import org.apache.flink.table.runtime.typeutils.BaseRowSerializer;
-import org.apache.flink.table.runtime.typeutils.BinaryGenericSerializer;
-import org.apache.flink.table.runtime.util.SegmentsUtil;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.typeutils.BaseRowSerializer;
+import org.apache.flink.table.util.SegmentsUtil;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+
+import static org.apache.flink.table.dataformat.BinaryFormat.MAX_FIX_PART_DATA_SIZE;
 
 /**
  * Use the special format to write data to a {@link MemorySegment} (its capacity grows
@@ -76,10 +74,10 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 	public void writeString(int pos, BinaryString input) {
 		if (input.getSegments() == null) {
 			String javaObject = input.getJavaObject();
-			writeBytes(pos, javaObject.getBytes(StandardCharsets.UTF_8));
+			writeBytes(pos, javaObject.getBytes());
 		} else {
 			int len = input.getSizeInBytes();
-			if (len <= 7) {
+			if (len <= MAX_FIX_PART_DATA_SIZE) {
 				byte[] bytes = SegmentsUtil.allocateReuseBytes(len);
 				SegmentsUtil.copyToBytes(input.getSegments(), input.getOffset(), bytes, 0, len);
 				writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
@@ -91,7 +89,7 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 
 	private void writeBytes(int pos, byte[] bytes) {
 		int len = bytes.length;
-		if (len <= BinaryFormat.MAX_FIX_PART_DATA_SIZE) {
+		if (len <= MAX_FIX_PART_DATA_SIZE) {
 			writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
 		} else {
 			writeBytesToVarLenPart(pos, bytes, len);
@@ -99,15 +97,13 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 	}
 
 	@Override
-	public void writeArray(int pos, BaseArray input, BaseArraySerializer serializer) {
-		BinaryArray binary = serializer.toBinaryArray(input);
-		writeSegmentsToVarLenPart(pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+	public void writeArray(int pos, BinaryArray input) {
+		writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), input.getSizeInBytes());
 	}
 
 	@Override
-	public void writeMap(int pos, BaseMap input, BaseMapSerializer serializer) {
-		BinaryMap binary = serializer.toBinaryMap(input);
-		writeSegmentsToVarLenPart(pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+	public void writeMap(int pos, BinaryMap input) {
+		writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), input.getSizeInBytes());
 	}
 
 	private DataOutputViewStreamWrapper getOutputView() {
@@ -118,20 +114,33 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 	}
 
 	@Override
-	@SuppressWarnings("unchecked")
-	public void writeGeneric(int pos, BinaryGeneric input, BinaryGenericSerializer serializer) {
-		TypeSerializer innerSerializer = serializer.getInnerSerializer();
-		input.ensureMaterialized(innerSerializer);
-		writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), input.getSizeInBytes());
+	public void writeGeneric(int pos, BinaryGeneric input) {
+		if (input.getSegments() == null) {
+			int beforeCursor = cursor;
+			try {
+				input.getJavaObjectSerializer().serialize(input.getJavaObject(), getOutputView());
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+			int size = cursor - beforeCursor;
+			final int roundedSize = roundNumberOfBytesToNearestWord(size);
+			int paddingBytes = roundedSize - size;
+			ensureCapacity(paddingBytes);
+			setOffsetAndSize(pos, beforeCursor, size);
+			zeroBytes(cursor, paddingBytes);
+			cursor += paddingBytes;
+		} else {
+			writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), input.getSizeInBytes());
+		}
 	}
 
 	@Override
-	public void writeRow(int pos, BaseRow input, BaseRowSerializer serializer) {
+	public void writeRow(int pos, BaseRow input, RowType type) {
 		if (input instanceof BinaryFormat) {
 			BinaryFormat row = (BinaryFormat) input;
 			writeSegmentsToVarLenPart(pos, row.getSegments(), row.getOffset(), row.getSizeInBytes());
 		} else {
-			BinaryRow row = serializer.toBinaryRow(input);
+			BinaryRow row = BaseRowSerializer.baseRowToBinary(input, type);
 			writeSegmentsToVarLenPart(pos, row.getSegments(), row.getOffset(), row.getSizeInBytes());
 		}
 	}
@@ -139,7 +148,7 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 	@Override
 	public void writeBinary(int pos, byte[] bytes) {
 		int len = bytes.length;
-		if (len <= BinaryFormat.MAX_FIX_PART_DATA_SIZE) {
+		if (len <= MAX_FIX_PART_DATA_SIZE) {
 			writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
 		} else {
 			writeBytesToVarLenPart(pos, bytes, len);
@@ -178,28 +187,6 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 
 			// move the cursor forward.
 			cursor += 16;
-		}
-	}
-
-	@Override
-	public void writeTimestamp(int pos, SqlTimestamp value, int precision) {
-		if (SqlTimestamp.isCompact(precision)) {
-			writeLong(pos, value.getMillisecond());
-		} else {
-			// store the nanoOfMillisecond in fixed-length part as offset and nanoOfMillisecond
-			ensureCapacity(8);
-
-			if (value == null) {
-				setNullBit(pos);
-				// zero-out the bytes
-				segment.putLong(cursor, 0L);
-				setOffsetAndSize(pos, cursor, 0);
-			} else {
-				segment.putLong(cursor, value.getMillisecond());
-				setOffsetAndSize(pos, cursor, value.getNanoOfMillisecond());
-			}
-
-			cursor += 12;
 		}
 	}
 
@@ -293,12 +280,7 @@ public abstract class AbstractBinaryWriter implements BinaryWriter {
 	}
 
 	protected static int roundNumberOfBytesToNearestWord(int numBytes) {
-		int remainder = numBytes & 0x07;
-		if (remainder == 0) {
-			return numBytes;
-		} else {
-			return numBytes + (8 - remainder);
-		}
+		return (numBytes + 7) & 0xFFFFFFF8;
 	}
 
 	private static void writeBytesToFixLenPart(
