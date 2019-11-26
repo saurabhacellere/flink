@@ -61,16 +61,6 @@ public interface Executor {
 	List<String> listUserDefinedFunctions(SessionContext session) throws SqlExecutionException;
 
 	/**
-	 * Lists all functions known to the executor.
-	 */
-	List<String> listFunctions(SessionContext session) throws SqlExecutionException;
-
-	/**
-	 * Lists all modules known to the executor in their loaded order.
-	 */
-	List<String> listModules(SessionContext session) throws SqlExecutionException;
-
-	/**
 	 * Sets a catalog with given name as the current catalog.
 	 */
 	void useCatalog(SessionContext session, String catalogName) throws SqlExecutionException;
@@ -79,6 +69,11 @@ public interface Executor {
 	 * Sets a database with given name as the current database of the current catalog.
 	 */
 	void useDatabase(SessionContext session, String databaseName) throws SqlExecutionException;
+
+	/**
+	 * Create a table with a DDL.
+	 */
+	void createTable(SessionContext session, String ddl) throws SqlExecutionException;
 
 	/**
 	 * Returns the schema of a table. Throws an exception if the table could not be found. The

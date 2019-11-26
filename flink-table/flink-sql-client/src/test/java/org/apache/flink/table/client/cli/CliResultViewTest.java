@@ -146,22 +146,17 @@ public class CliResultViewTest {
 		}
 
 		@Override
-		public List<String> listFunctions(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
-		public List<String> listModules(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
 		public void useCatalog(SessionContext session, String catalogName) throws SqlExecutionException {
 
 		}
 
 		@Override
 		public void useDatabase(SessionContext session, String databaseName) throws SqlExecutionException {
+
+		}
+
+		@Override
+		public void createTable(SessionContext session, String ddl) throws SqlExecutionException {
 
 		}
 
