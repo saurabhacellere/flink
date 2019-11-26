@@ -19,6 +19,9 @@
 
 # from scala-lang 2.10.4
 
+# Uncomment the following line to enable remote debug
+# export FLINK_SCALA_SHELL_JAVA_OPTS="-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"
+
 # restore stty settings (echo in particular)
 function restoreSttySettings() {
   if [[ -n $SCALA_RUNNER_DEBUG ]]; then
@@ -75,31 +78,20 @@ do
     fi
 done
 
-if [ "$FLINK_IDENT_STRING" = "" ]; then
-        FLINK_IDENT_STRING="$USER"
-fi
+log_setting=""
 
-MODE=$1
-LOG=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-scala-shell-$MODE-$HOSTNAME.log
-
-if [[ ($MODE = "local") || ($MODE = "remote") ]]
+if [[ $1 = "yarn" ]]
 then
-    LOG4J_CONFIG=log4j.properties
-    LOGBACK_CONFIG=logback.xml
-elif [[ $1 = "yarn" ]]
-then
-    LOG4J_CONFIG=log4j-yarn-session.properties
-    LOGBACK_CONFIG=logback-yarn.xml
-    FLINK_CLASSPATH=$FLINK_CLASSPATH:$HADOOP_CLASSPATH:$HADOOP_CONF_DIR:$YARN_CONF_DIR
+FLINK_CLASSPATH=$FLINK_CLASSPATH:$HADOOP_CLASSPATH:$HADOOP_CONF_DIR:$YARN_CONF_DIR
+log=$FLINK_LOG_DIR/flink-$FLINK_IDENT_STRING-scala-shell-yarn-$HOSTNAME.log
+log_setting="-Dlog.file="$log" -Dlog4j.configuration=file:"$FLINK_CONF_DIR"/log4j-yarn-session.properties -Dlogback.configurationFile=file:"$FLINK_CONF_DIR"/logback-yarn.xml"
 fi
-
-log_setting="-Dlog.file="$LOG" -Dlog4j.configuration=file:"$FLINK_CONF_DIR"/$LOG4J_CONFIG -Dlogback.configurationFile=file:"$FLINK_CONF_DIR"/$LOGBACK_CONFIG"
 
 if ${EXTERNAL_LIB_FOUND}
 then
-    $JAVA_RUN -Dscala.color -cp "$FLINK_CLASSPATH" "$log_setting" org.apache.flink.api.scala.FlinkShell $@ --addclasspath "$EXT_CLASSPATH"
+    java -Dscala.color $FLINK_SCALA_SHELL_JAVA_OPTS -cp "$FLINK_CLASSPATH" $log_setting org.apache.flink.api.scala.FlinkShell $@ --addclasspath "$EXT_CLASSPATH"
 else
-    $JAVA_RUN -Dscala.color -cp "$FLINK_CLASSPATH" "$log_setting" org.apache.flink.api.scala.FlinkShell $@
+    java -Dscala.color $FLINK_SCALA_SHELL_JAVA_OPTS -cp "$FLINK_CLASSPATH" $log_setting org.apache.flink.api.scala.FlinkShell $@
 fi
 
 #restore echo
