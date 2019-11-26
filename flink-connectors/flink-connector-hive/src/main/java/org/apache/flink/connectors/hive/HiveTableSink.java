@@ -26,10 +26,8 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.hive.client.HiveMetastoreClientFactory;
 import org.apache.flink.table.catalog.hive.client.HiveMetastoreClientWrapper;
-import org.apache.flink.table.catalog.hive.client.HiveShim;
-import org.apache.flink.table.catalog.hive.client.HiveShimLoader;
 import org.apache.flink.table.catalog.hive.descriptors.HiveCatalogValidator;
-import org.apache.flink.table.catalog.hive.util.HiveReflectionUtils;
+import org.apache.flink.table.catalog.hive.util.HiveTableUtil;
 import org.apache.flink.table.sinks.OutputFormatTableSink;
 import org.apache.flink.table.sinks.OverwritableTableSink;
 import org.apache.flink.table.sinks.PartitionableTableSink;
@@ -43,6 +41,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -68,7 +67,6 @@ public class HiveTableSink extends OutputFormatTableSink<Row> implements Partiti
 	private final ObjectPath tablePath;
 	private final TableSchema tableSchema;
 	private final String hiveVersion;
-	private final HiveShim hiveShim;
 
 	private Map<String, String> staticPartitionSpec = Collections.emptyMap();
 
@@ -77,11 +75,13 @@ public class HiveTableSink extends OutputFormatTableSink<Row> implements Partiti
 	public HiveTableSink(JobConf jobConf, ObjectPath tablePath, CatalogTable table) {
 		this.jobConf = jobConf;
 		this.tablePath = tablePath;
-		this.catalogTable = table;
+
+		this.catalogTable = HiveTableUtil.convertTableSchemaForHive(table);
+
 		hiveVersion = Preconditions.checkNotNull(jobConf.get(HiveCatalogValidator.CATALOG_HIVE_VERSION),
 				"Hive version is not defined");
-		hiveShim = HiveShimLoader.loadHiveShim(hiveVersion);
-		tableSchema = table.getSchema();
+
+		tableSchema = catalogTable.getSchema();
 	}
 
 	@Override
@@ -124,7 +124,7 @@ public class HiveTableSink extends OutputFormatTableSink<Row> implements Partiti
 				tablePath,
 				catalogTable,
 				hiveTablePartition,
-				HiveReflectionUtils.getTableMetadata(hiveShim, table),
+				MetaStoreUtils.getTableMetadata(table),
 				overwrite);
 		} catch (TException e) {
 			throw new CatalogException("Failed to query Hive metaStore", e);
@@ -163,7 +163,8 @@ public class HiveTableSink extends OutputFormatTableSink<Row> implements Partiti
 		return res;
 	}
 
-	private List<String> getPartitionFieldNames() {
+	@Override
+	public List<String> getPartitionFieldNames() {
 		return catalogTable.getPartitionKeys();
 	}
 
