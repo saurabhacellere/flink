@@ -54,6 +54,7 @@ import static org.hamcrest.Matchers.containsString;
 /**
  * Tests the entire lifecycle of a jar submission.
  */
+@Deprecated
 public class JarSubmissionITCase extends TestLogger {
 
 	@Rule
@@ -189,7 +190,6 @@ public class JarSubmissionITCase extends TestLogger {
 				JarListHeaders.getInstance(),
 				CompletableFuture.completedFuture("shazam://localhost:12345"),
 				jarDir.toFile(),
-				new Configuration(),
 				executor);
 
 			planHandler = new JarPlanHandler(

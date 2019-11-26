@@ -20,7 +20,6 @@ package org.apache.flink.runtime.webmonitor.handlers;
 
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.client.program.PackagedProgram;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.rest.handler.AbstractRestHandler;
 import org.apache.flink.runtime.rest.handler.HandlerRequest;
@@ -52,6 +51,7 @@ import static java.util.Objects.requireNonNull;
 /**
  * Handle request for listing uploaded jars.
  */
+@Deprecated
 public class JarListHandler extends AbstractRestHandler<RestfulGateway, EmptyRequestBody, JarListInfo, EmptyMessageParameters> {
 
 	private static final File[] EMPTY_FILES_ARRAY = new File[0];
@@ -59,8 +59,6 @@ public class JarListHandler extends AbstractRestHandler<RestfulGateway, EmptyReq
 	private final CompletableFuture<String> localAddressFuture;
 
 	private final File jarDir;
-
-	private final Configuration configuration;
 
 	private final Executor executor;
 
@@ -71,13 +69,11 @@ public class JarListHandler extends AbstractRestHandler<RestfulGateway, EmptyReq
 			MessageHeaders<EmptyRequestBody, JarListInfo, EmptyMessageParameters> messageHeaders,
 			CompletableFuture<String> localAddressFuture,
 			File jarDir,
-			Configuration configuration,
 			Executor executor) {
 		super(leaderRetriever, timeout, responseHeaders, messageHeaders);
 
 		this.localAddressFuture = localAddressFuture;
 		this.jarDir = requireNonNull(jarDir);
-		this.configuration = configuration;
 		this.executor = requireNonNull(executor);
 	}
 
@@ -134,11 +130,7 @@ public class JarListHandler extends AbstractRestHandler<RestfulGateway, EmptyReq
 
 						PackagedProgram program = null;
 						try {
-							program = PackagedProgram.newBuilder()
-								.setJarFile(f)
-								.setEntryPointClassName(clazz)
-								.setConfiguration(configuration)
-								.build();
+							program = new PackagedProgram(f, clazz, new String[0]);
 						} catch (Exception ignored) {
 							// ignore jar files which throw an error upon creating a PackagedProgram
 						}

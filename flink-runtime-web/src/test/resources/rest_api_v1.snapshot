@@ -1,5 +1,293 @@
 {
   "calls" : [ {
+    "url" : "/artifacts",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "any"
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactListInfo",
+      "properties" : {
+        "address" : {
+          "type" : "string"
+        },
+        "files" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactListInfo:ArtifactFileInfo",
+            "properties" : {
+              "id" : {
+                "type" : "string"
+              },
+              "name" : {
+                "type" : "string"
+              },
+              "uploaded" : {
+                "type" : "integer"
+              },
+              "entry" : {
+                "type" : "array",
+                "items" : {
+                  "type" : "object",
+                  "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactListInfo:ArtifactEntryInfo",
+                  "properties" : {
+                    "name" : {
+                      "type" : "string"
+                    },
+                    "description" : {
+                      "type" : "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, {
+    "url" : "/artifacts/upload",
+    "method" : "POST",
+    "status-code" : "200 OK",
+    "file-upload" : true,
+    "path-parameters" : {
+      "pathParameters" : [ ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "any"
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactUploadResponseBody",
+      "properties" : {
+        "filename" : {
+          "type" : "string"
+        },
+        "status" : {
+          "type" : "string",
+          "enum" : [ "success" ]
+        }
+      }
+    }
+  }, {
+    "url" : "/artifacts/:artifactid",
+    "method" : "DELETE",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "artifactid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "any"
+    },
+    "response" : {
+      "type" : "any"
+    }
+  }, {
+    "url" : "/artifacts/:artifactid/plan",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "artifactid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ {
+        "key" : "program-args",
+        "mandatory" : false
+      }, {
+        "key" : "programArg",
+        "mandatory" : false
+      }, {
+        "key" : "entry-class",
+        "mandatory" : false
+      }, {
+        "key" : "parallelism",
+        "mandatory" : false
+      } ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactPlanRequestBody",
+      "properties" : {
+        "entryClass" : {
+          "type" : "string"
+        },
+        "programArgs" : {
+          "type" : "string"
+        },
+        "programArgsList" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string"
+          }
+        },
+        "parallelism" : {
+          "type" : "integer"
+        },
+        "jobId" : {
+          "type" : "any"
+        }
+      }
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:JobPlanInfo",
+      "properties" : {
+        "plan" : {
+          "type" : "any"
+        }
+      }
+    }
+  }, {
+    "url" : "/artifacts/:artifactid/plan",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "artifactid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ {
+        "key" : "program-args",
+        "mandatory" : false
+      }, {
+        "key" : "programArg",
+        "mandatory" : false
+      }, {
+        "key" : "entry-class",
+        "mandatory" : false
+      }, {
+        "key" : "parallelism",
+        "mandatory" : false
+      } ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactPlanRequestBody",
+      "properties" : {
+        "entryClass" : {
+          "type" : "string"
+        },
+        "programArgs" : {
+          "type" : "string"
+        },
+        "programArgsList" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string"
+          }
+        },
+        "parallelism" : {
+          "type" : "integer"
+        },
+        "jobId" : {
+          "type" : "any"
+        }
+      }
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:JobPlanInfo",
+      "properties" : {
+        "plan" : {
+          "type" : "any"
+        }
+      }
+    }
+  }, {
+    "url" : "/artifacts/:artifactid/run",
+    "method" : "POST",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "artifactid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ {
+        "key" : "allowNonRestoredState",
+        "mandatory" : false
+      }, {
+        "key" : "savepointPath",
+        "mandatory" : false
+      }, {
+        "key" : "program-args",
+        "mandatory" : false
+      }, {
+        "key" : "programArg",
+        "mandatory" : false
+      }, {
+        "key" : "entry-class",
+        "mandatory" : false
+      }, {
+        "key" : "parallelism",
+        "mandatory" : false
+      } ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactRunRequestBody",
+      "properties" : {
+        "entryClass" : {
+          "type" : "string"
+        },
+        "programArgs" : {
+          "type" : "string"
+        },
+        "programArgsList" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string"
+          }
+        },
+        "parallelism" : {
+          "type" : "integer"
+        },
+        "jobId" : {
+          "type" : "any"
+        },
+        "allowNonRestoredState" : {
+          "type" : "boolean"
+        },
+        "savepointPath" : {
+          "type" : "string"
+        }
+      }
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:webmonitor:handlers:ArtifactRunResponseBody",
+      "properties" : {
+        "jobid" : {
+          "type" : "any"
+        }
+      }
+    }
+  }, {
     "url" : "/cluster",
     "method" : "DELETE",
     "status-code" : "200 OK",
@@ -48,15 +336,6 @@
         },
         "flink-revision" : {
           "type" : "string"
-        },
-        "features" : {
-          "type" : "object",
-          "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:DashboardConfiguration:Features",
-          "properties" : {
-            "web-submit" : {
-              "type" : "boolean"
-            }
-          }
         }
       }
     }
@@ -1302,10 +1581,7 @@
       } ]
     },
     "query-parameters" : {
-      "queryParameters" : [ {
-        "key" : "maxExceptions",
-        "mandatory" : false
-      } ]
+      "queryParameters" : [ ]
     },
     "request" : {
       "type" : "any"
@@ -1569,7 +1845,7 @@
       }
     }
   }, {
-    "url" : "/jobs/:jobid/stop",
+    "url" : "/jobs/:jobid/stop-with-savepoint",
     "method" : "POST",
     "status-code" : "202 Accepted",
     "file-upload" : false,
@@ -1588,7 +1864,7 @@
         "targetDirectory" : {
           "type" : "string"
         },
-        "drain" : {
+        "endOfEventTime" : {
           "type" : "boolean"
         }
       }
@@ -1640,7 +1916,7 @@
           "type" : "array",
           "items" : {
             "type" : "object",
-            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:job:SubtaskExecutionAttemptDetailsInfo",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:JobVertexDetailsInfo:VertexTaskDetail",
             "properties" : {
               "subtask" : {
                 "type" : "integer"
@@ -1693,9 +1969,6 @@
                     "type" : "boolean"
                   }
                 }
-              },
-              "taskmanager-id" : {
-                "type" : "string"
               },
               "start_time" : {
                 "type" : "integer"
@@ -1999,12 +2272,6 @@
               "type" : "boolean"
             }
           }
-        },
-        "taskmanager-id" : {
-          "type" : "string"
-        },
-        "start_time" : {
-          "type" : "integer"
         }
       }
     }
@@ -2085,12 +2352,6 @@
               "type" : "boolean"
             }
           }
-        },
-        "taskmanager-id" : {
-          "type" : "string"
-        },
-        "start_time" : {
-          "type" : "integer"
         }
       }
     }
@@ -2320,9 +2581,6 @@
                 "additionalProperties" : {
                   "type" : "integer"
                 }
-              },
-              "taskmanager-id" : {
-                "type" : "string"
               }
             }
           }
