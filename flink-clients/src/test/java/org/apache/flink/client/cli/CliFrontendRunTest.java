@@ -18,13 +18,11 @@
 
 package org.apache.flink.client.cli;
 
-import org.apache.flink.client.deployment.ClusterClientServiceLoader;
-import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
+import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.PackagedProgram;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 
-import org.apache.commons.cli.CommandLine;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -54,45 +52,35 @@ public class CliFrontendRunTest extends CliFrontendTestBase {
 	@Test
 	public void testRun() throws Exception {
 		final Configuration configuration = getConfiguration();
-
-		// test without parallelism, should use parallelism default
+		// test without parallelism
 		{
-			String[] parameters = {"-v",  getTestJarPath()};
-			verifyCliFrontend(getCli(configuration), parameters, 4, false);
-		}
-		//  test parallelism in detached mode, should use parallelism default
-		{
-			String[] parameters = {"-v", "-d", getTestJarPath()};
-			verifyCliFrontend(getCli(configuration), parameters, 4, true);
+			String[] parameters = {"-v", getTestJarPath()};
+			verifyCliFrontend(getCli(configuration), parameters, 1, true, false);
 		}
 
 		// test configure parallelism
 		{
 			String[] parameters = {"-v", "-p", "42",  getTestJarPath()};
-			verifyCliFrontend(getCli(configuration), parameters, 42, false);
+			verifyCliFrontend(getCli(configuration), parameters, 42, true, false);
 		}
 
 		// test configure sysout logging
 		{
 			String[] parameters = {"-p", "2", "-q", getTestJarPath()};
-			verifyCliFrontend(getCli(configuration), parameters, 2, false);
+			verifyCliFrontend(getCli(configuration), parameters, 2, false, false);
 		}
 
 		// test detached mode
 		{
 			String[] parameters = {"-p", "2", "-d", getTestJarPath()};
-			verifyCliFrontend(getCli(configuration), parameters, 2, true);
+			verifyCliFrontend(getCli(configuration), parameters, 2, true, true);
 		}
 
 		// test configure savepoint path (no ignore flag)
 		{
 			String[] parameters = {"-s", "expectedSavepointPath", getTestJarPath()};
-
-			CommandLine commandLine = CliFrontendParser.parse(CliFrontendParser.RUN_OPTIONS, parameters, true);
-			ProgramOptions programOptions = new ProgramOptions(commandLine);
-			ExecutionConfigAccessor executionOptions = ExecutionConfigAccessor.fromProgramOptions(programOptions, Collections.emptyList());
-
-			SavepointRestoreSettings savepointSettings = executionOptions.getSavepointRestoreSettings();
+			RunOptions options = CliFrontendParser.parseRunCommand(parameters);
+			SavepointRestoreSettings savepointSettings = options.getSavepointRestoreSettings();
 			assertTrue(savepointSettings.restoreSavepoint());
 			assertEquals("expectedSavepointPath", savepointSettings.getRestorePath());
 			assertFalse(savepointSettings.allowNonRestoredState());
@@ -101,12 +89,8 @@ public class CliFrontendRunTest extends CliFrontendTestBase {
 		// test configure savepoint path (with ignore flag)
 		{
 			String[] parameters = {"-s", "expectedSavepointPath", "-n", getTestJarPath()};
-
-			CommandLine commandLine = CliFrontendParser.parse(CliFrontendParser.RUN_OPTIONS, parameters, true);
-			ProgramOptions programOptions = new ProgramOptions(commandLine);
-			ExecutionConfigAccessor executionOptions = ExecutionConfigAccessor.fromProgramOptions(programOptions, Collections.emptyList());
-
-			SavepointRestoreSettings savepointSettings = executionOptions.getSavepointRestoreSettings();
+			RunOptions options = CliFrontendParser.parseRunCommand(parameters);
+			SavepointRestoreSettings savepointSettings = options.getSavepointRestoreSettings();
 			assertTrue(savepointSettings.restoreSavepoint());
 			assertEquals("expectedSavepointPath", savepointSettings.getRestorePath());
 			assertTrue(savepointSettings.allowNonRestoredState());
@@ -116,97 +100,90 @@ public class CliFrontendRunTest extends CliFrontendTestBase {
 		{
 			String[] parameters =
 				{ getTestJarPath(), "-arg1", "value1", "justavalue", "--arg2", "value2"};
-
-			CommandLine commandLine = CliFrontendParser.parse(CliFrontendParser.RUN_OPTIONS, parameters, true);
-			ProgramOptions programOptions = new ProgramOptions(commandLine);
-
-			assertEquals("-arg1", programOptions.getProgramArgs()[0]);
-			assertEquals("value1", programOptions.getProgramArgs()[1]);
-			assertEquals("justavalue", programOptions.getProgramArgs()[2]);
-			assertEquals("--arg2", programOptions.getProgramArgs()[3]);
-			assertEquals("value2", programOptions.getProgramArgs()[4]);
+			RunOptions options = CliFrontendParser.parseRunCommand(parameters);
+			assertEquals("-arg1", options.getProgramArgs()[0]);
+			assertEquals("value1", options.getProgramArgs()[1]);
+			assertEquals("justavalue", options.getProgramArgs()[2]);
+			assertEquals("--arg2", options.getProgramArgs()[3]);
+			assertEquals("value2", options.getProgramArgs()[4]);
 		}
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testUnrecognizedOption() throws Exception {
 		// test unrecognized option
-		String[] parameters = {"-v", "-l", "-a", "some", "program", "arguments"};
+		String[] parameters = {"run", "-v", "-l", "-a", "some", "program", "arguments"};
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.run(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testInvalidParallelismOption() throws Exception {
 		// test configure parallelism with non integer value
-		String[] parameters = {"-v", "-p", "text",  getTestJarPath()};
+		String[] parameters = {"run", "-v", "-p", "text",  getTestJarPath()};
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.run(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testParallelismWithOverflow() throws Exception {
 		// test configure parallelism with overflow integer value
-		String[] parameters = {"-v", "-p", "475871387138",  getTestJarPath()};
+		String[] parameters = {"run", "-v", "-p", "475871387138",  getTestJarPath()};
 		Configuration configuration = new Configuration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.run(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	// --------------------------------------------------------------------------------------------
 
 	public static void verifyCliFrontend(
-		AbstractCustomCommandLine cli,
-		String[] parameters,
-		int expectedParallelism,
-		boolean isDetached) throws Exception {
+			AbstractCustomCommandLine<?> cli,
+			String[] parameters,
+			int expectedParallelism,
+			boolean logging,
+			boolean isDetached) throws Exception {
 		RunTestingCliFrontend testFrontend =
-			new RunTestingCliFrontend(new DefaultClusterClientServiceLoader(), cli, expectedParallelism, isDetached);
-		testFrontend.run(parameters); // verifies the expected values (see below)
-	}
+			new RunTestingCliFrontend(cli, expectedParallelism, logging,
+				isDetached);
 
-	public static void verifyCliFrontend(
-		ClusterClientServiceLoader clusterClientServiceLoader,
-		AbstractCustomCommandLine cli,
-		String[] parameters,
-		int expectedParallelism,
-		boolean isDetached) throws Exception {
-		RunTestingCliFrontend testFrontend =
-			new RunTestingCliFrontend(clusterClientServiceLoader, cli, expectedParallelism, isDetached);
-		testFrontend.run(parameters); // verifies the expected values (see below)
+		String[] args = new String[parameters.length + 1];
+		args[0] = "run";
+		System.arraycopy(parameters, 0, args, 1, parameters.length);
+		parseParametersAndRun(testFrontend, args); // verifies the expected values (see below)
 	}
 
 	private static final class RunTestingCliFrontend extends CliFrontend {
 
 		private final int expectedParallelism;
+		private final boolean sysoutLogging;
 		private final boolean isDetached;
 
 		private RunTestingCliFrontend(
-				ClusterClientServiceLoader clusterClientServiceLoader,
-				AbstractCustomCommandLine cli,
+				AbstractCustomCommandLine<?> cli,
 				int expectedParallelism,
-				boolean isDetached) {
+				boolean logging,
+				boolean isDetached) throws Exception {
 			super(
 				cli.getConfiguration(),
-				clusterClientServiceLoader,
 				Collections.singletonList(cli));
 			this.expectedParallelism = expectedParallelism;
+			this.sysoutLogging = logging;
 			this.isDetached = isDetached;
 		}
 
 		@Override
-		protected void executeProgram(Configuration configuration, PackagedProgram program) {
-			final ExecutionConfigAccessor executionConfigAccessor = ExecutionConfigAccessor.fromConfiguration(configuration);
-			assertEquals(isDetached, executionConfigAccessor.getDetachedMode());
-			assertEquals(expectedParallelism, executionConfigAccessor.getParallelism());
+		protected void executeProgram(PackagedProgram program, ClusterClient client, int parallelism) {
+			assertEquals(isDetached, client.isDetached());
+			assertEquals(sysoutLogging, client.getPrintStatusDuringExecution());
+			assertEquals(expectedParallelism, parallelism);
 		}
 	}
 }

@@ -20,20 +20,21 @@ package org.apache.flink.client.cli;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.client.cli.util.MockedCliFrontend;
-import org.apache.flink.client.program.TestingClusterClient;
+import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.testutils.OneShotLatch;
-import org.apache.flink.runtime.messages.Acknowledge;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.isNull;
+import static org.mockito.Matchers.notNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 
 /**
  * Tests for the CANCEL command.
@@ -55,40 +56,33 @@ public class CliFrontendCancelTest extends CliFrontendTestBase {
 		// test cancel properly
 		JobID jid = new JobID();
 
-		OneShotLatch cancelLatch = new OneShotLatch();
-
-		String[] parameters = { jid.toString() };
-
-		TestingClusterClient<String> clusterClient = new TestingClusterClient<>();
-
-		clusterClient.setCancelFunction(jobID -> {
-			cancelLatch.trigger();
-			return CompletableFuture.completedFuture(Acknowledge.get());
-		});
-
+		String[] parameters = {"cancel", jid.toString() };
+		final ClusterClient<String> clusterClient = createClusterClient();
 		MockedCliFrontend testFrontend = new MockedCliFrontend(clusterClient);
-		testFrontend.cancel(parameters);
-		cancelLatch.await();
+
+		parseParametersAndRun(testFrontend, parameters);
+
+		Mockito.verify(clusterClient, times(1)).cancel(any(JobID.class));
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testMissingJobId() throws Exception {
-		String[] parameters = {};
+		String[] parameters = {"cancel"};
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.cancel(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testUnrecognizedOption() throws Exception {
-		String[] parameters = {"-v", "-l"};
+		String[] parameters = {"cancel", "-v", "-l"};
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.cancel(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	/**
@@ -100,58 +94,54 @@ public class CliFrontendCancelTest extends CliFrontendTestBase {
 			// Cancel with savepoint (no target directory)
 			JobID jid = new JobID();
 
-			OneShotLatch cancelWithSavepointLatch = new OneShotLatch();
-
-			String[] parameters = { "-s", jid.toString() };
-			TestingClusterClient<String> clusterClient = new TestingClusterClient<>();
-			clusterClient.setCancelWithSavepointFunction((jobID, savepointDirectory) -> {
-				assertNull(savepointDirectory);
-				cancelWithSavepointLatch.trigger();
-				return CompletableFuture.completedFuture(savepointDirectory);
-			});
+			String[] parameters = {"cancel", "-s", jid.toString() };
+			final ClusterClient<String> clusterClient = createClusterClient();
 			MockedCliFrontend testFrontend = new MockedCliFrontend(clusterClient);
-			testFrontend.cancel(parameters);
-			cancelWithSavepointLatch.await();
+			parseParametersAndRun(testFrontend, parameters);
+
+			Mockito.verify(clusterClient, times(1))
+				.cancelWithSavepoint(any(JobID.class), isNull(String.class));
 		}
 
 		{
 			// Cancel with savepoint (with target directory)
 			JobID jid = new JobID();
 
-			OneShotLatch cancelWithSavepointLatch = new OneShotLatch();
-
-			String[] parameters = { "-s", "targetDirectory", jid.toString() };
-			TestingClusterClient<String> clusterClient = new TestingClusterClient<>();
-			clusterClient.setCancelWithSavepointFunction((jobID, savepointDirectory) -> {
-				assertNotNull(savepointDirectory);
-				cancelWithSavepointLatch.trigger();
-				return CompletableFuture.completedFuture(savepointDirectory);
-			});
+			String[] parameters = {"cancel", "-s", "targetDirectory", jid.toString() };
+			final ClusterClient<String> clusterClient = createClusterClient();
 			MockedCliFrontend testFrontend = new MockedCliFrontend(clusterClient);
-			testFrontend.cancel(parameters);
-			cancelWithSavepointLatch.await();
+			parseParametersAndRun(testFrontend, parameters);
+
+			Mockito.verify(clusterClient, times(1))
+				.cancelWithSavepoint(any(JobID.class), notNull(String.class));
 		}
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testCancelWithSavepointWithoutJobId() throws Exception {
 		// Cancel with savepoint (with target directory), but no job ID
-		String[] parameters = { "-s", "targetDirectory" };
+		String[] parameters = {"cancel", "-s", "targetDirectory" };
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.cancel(parameters);
+		parseParametersAndRun(testFrontend, parameters);
 	}
 
 	@Test(expected = CliArgsException.class)
 	public void testCancelWithSavepointWithoutParameters() throws Exception {
 		// Cancel with savepoint (no target directory) and no job ID
-		String[] parameters = { "-s" };
+		String[] parameters = {"cancel", "-s" };
 		Configuration configuration = getConfiguration();
 		CliFrontend testFrontend = new CliFrontend(
 			configuration,
 			Collections.singletonList(getCli(configuration)));
-		testFrontend.cancel(parameters);
+		parseParametersAndRun(testFrontend, parameters);
+	}
+
+	private static ClusterClient<String> createClusterClient() throws Exception {
+		final ClusterClient<String> clusterClient = mock(ClusterClient.class);
+
+		return clusterClient;
 	}
 }
