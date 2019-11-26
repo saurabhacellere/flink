@@ -18,7 +18,6 @@
 package org.apache.flink.streaming.connectors.cassandra;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -65,24 +64,32 @@ public abstract class CassandraSinkBase<IN, V> extends RichSinkFunction<IN> impl
 		this.builder = builder;
 		this.config = config;
 		this.failureHandler = Preconditions.checkNotNull(failureHandler);
-		ClosureCleaner.clean(builder, ExecutionConfig.ClosureCleanerLevel.RECURSIVE, true);
+		ClosureCleaner.clean(builder, true);
+	}
+
+	CassandraSinkBase(ClusterBuilder builder, CassandraSinkBaseConfig config, CassandraFailureHandler failureHandler, FutureCallback<V> customCallback) {
+		this(builder, config, failureHandler);
+		Preconditions.checkNotNull(customCallback, "Callback cannot be null");
+		this.callback = customCallback;
 	}
 
 	@Override
 	public void open(Configuration configuration) {
-		this.callback = new FutureCallback<V>() {
-			@Override
-			public void onSuccess(V ignored) {
-				semaphore.release();
-			}
+		if (this.callback == null) {
+			this.callback = new FutureCallback<V>() {
+				@Override
+				public void onSuccess(V ignored) {
+					semaphore.release();
+				}
 
-			@Override
-			public void onFailure(Throwable t) {
-				throwable.compareAndSet(null, t);
-				log.error("Error while sending value.", t);
-				semaphore.release();
-			}
-		};
+				@Override
+				public void onFailure(Throwable t) {
+					throwable.compareAndSet(null, t);
+					log.error("Error while sending value.", t);
+					semaphore.release();
+				}
+			};
+		}
 		this.cluster = builder.getCluster();
 		this.session = createSession();
 
@@ -128,14 +135,8 @@ public abstract class CassandraSinkBase<IN, V> extends RichSinkFunction<IN> impl
 	@Override
 	public void invoke(IN value) throws Exception {
 		checkAsyncErrors();
-		tryAcquire(1);
-		final ListenableFuture<V> result;
-		try {
-			result = send(value);
-		} catch (Exception e) {
-			semaphore.release();
-			throw e;
-		}
+		tryAcquire();
+		final ListenableFuture<V> result = send(value);
 		Futures.addCallback(result, callback);
 	}
 
@@ -145,12 +146,11 @@ public abstract class CassandraSinkBase<IN, V> extends RichSinkFunction<IN> impl
 
 	public abstract ListenableFuture<V> send(IN value);
 
-	private void tryAcquire(int permits) throws InterruptedException, TimeoutException {
-		if (!semaphore.tryAcquire(permits, config.getMaxConcurrentRequestsTimeout().toMillis(), TimeUnit.MILLISECONDS)) {
+	private void tryAcquire() throws InterruptedException, TimeoutException {
+		if (!semaphore.tryAcquire(config.getMaxConcurrentRequestsTimeout().toMillis(), TimeUnit.MILLISECONDS)) {
 			throw new TimeoutException(
 				String.format(
-					"Failed to acquire %d out of %d permits to send value in %s.",
-					permits,
+					"Failed to acquire 1 permit of %d to send value in %s.",
 					config.getMaxConcurrentRequests(),
 					config.getMaxConcurrentRequestsTimeout()
 				)
@@ -165,8 +165,8 @@ public abstract class CassandraSinkBase<IN, V> extends RichSinkFunction<IN> impl
 		}
 	}
 
-	private void flush() throws InterruptedException, TimeoutException {
-		tryAcquire(config.getMaxConcurrentRequests());
+	private void flush() {
+		semaphore.acquireUninterruptibly(config.getMaxConcurrentRequests());
 		semaphore.release(config.getMaxConcurrentRequests());
 	}
 
