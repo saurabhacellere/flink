@@ -30,9 +30,9 @@ import org.apache.flink.table.catalog.exceptions.PartitionSpecInvalidException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
+import org.apache.flink.table.catalog.exceptions.TablePartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
-import org.apache.flink.table.functions.FunctionIdentifier;
 import org.apache.flink.util.StringUtils;
 
 import java.util.ArrayList;
@@ -341,12 +341,10 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 	// ------ functions ------
 
 	@Override
-	public void createFunction(ObjectPath path, CatalogFunction function, boolean ignoreIfExists)
+	public void createFunction(ObjectPath functionPath, CatalogFunction function, boolean ignoreIfExists)
 			throws FunctionAlreadyExistException, DatabaseNotExistException {
-		checkNotNull(path);
+		checkNotNull(functionPath);
 		checkNotNull(function);
-
-		ObjectPath functionPath = normalize(path);
 
 		if (!databaseExists(functionPath.getDatabaseName())) {
 			throw new DatabaseNotExistException(getName(), functionPath.getDatabaseName());
@@ -362,12 +360,10 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 	}
 
 	@Override
-	public void alterFunction(ObjectPath path, CatalogFunction newFunction, boolean ignoreIfNotExists)
+	public void alterFunction(ObjectPath functionPath, CatalogFunction newFunction, boolean ignoreIfNotExists)
 			throws FunctionNotExistException {
-		checkNotNull(path);
+		checkNotNull(functionPath);
 		checkNotNull(newFunction);
-
-		ObjectPath functionPath = normalize(path);
 
 		CatalogFunction existingFunction = functions.get(functionPath);
 
@@ -386,10 +382,8 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 	}
 
 	@Override
-	public void dropFunction(ObjectPath path, boolean ignoreIfNotExists) throws FunctionNotExistException {
-		checkNotNull(path);
-
-		ObjectPath functionPath = normalize(path);
+	public void dropFunction(ObjectPath functionPath, boolean ignoreIfNotExists) throws FunctionNotExistException {
+		checkNotNull(functionPath);
 
 		if (functionExists(functionPath)) {
 			functions.remove(functionPath);
@@ -407,16 +401,13 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 		}
 
 		return functions.keySet().stream()
-			.filter(k -> k.getDatabaseName().equals(databaseName))
-			.map(k -> k.getObjectName())
+			.filter(k -> k.getDatabaseName().equals(databaseName)).map(k -> k.getObjectName())
 			.collect(Collectors.toList());
 	}
 
 	@Override
-	public CatalogFunction getFunction(ObjectPath path) throws FunctionNotExistException {
-		checkNotNull(path);
-
-		ObjectPath functionPath = normalize(path);
+	public CatalogFunction getFunction(ObjectPath functionPath) throws FunctionNotExistException {
+		checkNotNull(functionPath);
 
 		if (!functionExists(functionPath)) {
 			throw new FunctionNotExistException(getName(), functionPath);
@@ -426,16 +417,9 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 	}
 
 	@Override
-	public boolean functionExists(ObjectPath path) {
-		checkNotNull(path);
-
-		ObjectPath functionPath = normalize(path);
-
+	public boolean functionExists(ObjectPath functionPath) {
+		checkNotNull(functionPath);
 		return databaseExists(functionPath.getDatabaseName()) && functions.containsKey(functionPath);
-	}
-
-	private ObjectPath normalize(ObjectPath path) {
-		return new ObjectPath(path.getDatabaseName(), FunctionIdentifier.normalizeName(path.getObjectName()));
 	}
 
 	// ------ partitions ------
@@ -657,11 +641,14 @@ public class GenericInMemoryCatalog extends AbstractCatalog {
 
 	@Override
 	public void alterTableStatistics(ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
-			throws TableNotExistException {
+			throws TableNotExistException, TablePartitionedException {
 		checkNotNull(tablePath);
 		checkNotNull(tableStatistics);
 
 		if (tableExists(tablePath)) {
+			if (isPartitionedTable(tablePath)) {
+				throw new TablePartitionedException(getName(), tablePath);
+			}
 			tableStats.put(tablePath, tableStatistics.copy());
 		} else if (!ignoreIfNotExists) {
 			throw new TableNotExistException(getName(), tablePath);
