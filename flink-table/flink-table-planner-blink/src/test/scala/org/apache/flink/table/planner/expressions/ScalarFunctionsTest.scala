@@ -515,6 +515,34 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       "charLength(f0)",
       "CHARACTER_LENGTH(f0)",
       "22")
+
+    testAllApis(
+      "test".cast(DataTypes.CHAR(10)).charLength(),
+      "'test'.cast(CHAR(10)).charLength()",
+      "char_length(cast('test' AS CHAR(10)))",
+      "10"
+    )
+
+    testAllApis(
+      "".cast(DataTypes.CHAR(1)).charLength(),
+      "''.cast(CHAR).charLength()",
+      "char_length(cast('' AS CHAR))",
+      "1"
+    )
+
+    testAllApis(
+      "test".cast(DataTypes.VARCHAR(10)).charLength(),
+      "'test'.cast(VARCHAR(10)).charLength()",
+      "char_length(cast('test' AS VARCHAR(10)))",
+      "4"
+    )
+
+    testAllApis(
+      "".cast(DataTypes.VARCHAR(1)).charLength(),
+      "''.cast(VARCHAR).charLength()",
+      "char_length(cast('' AS VARCHAR))",
+      "0"
+    )
   }
 
   @Test
@@ -1380,19 +1408,17 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       "truncate(cast(f28 as DOUBLE), 1)",
       "0.4")
 
-    // TODO: ignore TableApiTest for cast to DECIMAL(p, s) is not support now.
-    //  see https://issues.apache.org/jira/browse/FLINK-13651
-//    testAllApis(
-//      'f31.cast(DataTypes.DECIMAL(38, 18)).truncate(2),
-//      "f31.cast(DECIMAL(10, 10)).truncate(2)",
-//      "truncate(cast(f31 as decimal(38, 18)), 2)",
-//      "-0.12")
-//
-//    testAllApis(
-//      'f36.cast(DataTypes.DECIMAL(38, 18)).truncate(),
-//      "f36.cast(DECIMAL(10, 10)).truncate()",
-//      "truncate(42.324)",
-//      "42")
+    testAllApis(
+      'f31.cast(DataTypes.DECIMAL(38, 18)).truncate(2),
+      "f31.cast(DECIMAL(38, 18)).truncate(2)",
+      "truncate(cast(f31 as decimal(38, 18)), 2)",
+      "-0.12")
+
+    testAllApis(
+      'f49.cast(DataTypes.DECIMAL(38, 18)).truncate(),
+      "f49.cast(DECIMAL(38, 18)).truncate()",
+      "truncate(1345.1231231321321321111)",
+      "1345")
 
     testSqlApi("truncate(cast(f31 as decimal(38, 18)), 2)", "-0.12")
 
@@ -4016,16 +4042,6 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
   }
 
   @Test
-  def testIfDecimal(): Unit = {
-    // test DECIMAL, DECIMAL
-    testAllApis(
-      ifThenElse('f7 < 5, 'f31, 'f34),
-      "ifThenElse(f7 < 5, f31, f34)",
-      "IF(f7 < 5, f31, f34)",
-      "-0.1231231321321321111")
-  }
-
-  @Test
   def testIsDecimal(): Unit = {
     testSqlApi(
       "IS_DECIMAL('1')",
@@ -4120,5 +4136,20 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
     testSqlApi(
       "IS_ALPHA(f33)",
       "false")
+  }
+
+  @Test
+  def testCastDecimal(): Unit = {
+    testAllApis(
+      'f31.cast(DataTypes.DECIMAL(10, 0)),
+      "f31.cast(DECIMAL)",
+      "cast(f31 as decimal)",
+      "0")
+
+    testAllApis(
+      'f49.cast(DataTypes.DECIMAL(10, 0)),
+      "f49.cast(DECIMAL)",
+      "cast(1345.1231231321321321111 as decimal)",
+      "1345")
   }
 }
