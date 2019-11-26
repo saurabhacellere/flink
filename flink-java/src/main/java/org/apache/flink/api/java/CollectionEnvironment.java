@@ -30,8 +30,8 @@ import org.apache.flink.api.common.operators.CollectionExecutor;
 public class CollectionEnvironment extends ExecutionEnvironment {
 
 	@Override
-	public JobExecutionResult execute(String jobName) throws Exception {
-		Plan p = createProgramPlan(jobName);
+	public JobExecutionResult execute(String jobName, String jobDescription) throws Exception {
+		Plan p = createProgramPlan(jobName, jobDescription);
 
 		// We need to reverse here. Object-Reuse enabled, means safe mode is disabled.
 		CollectionExecutor exec = new CollectionExecutor(getConfig());
@@ -42,5 +42,14 @@ public class CollectionEnvironment extends ExecutionEnvironment {
 	@Override
 	public int getParallelism() {
 		return 1; // always serial
+	}
+
+	@Override
+	public String getExecutionPlan() throws Exception {
+		throw new UnsupportedOperationException("Execution plans are not used for collection-based execution.");
+	}
+
+	@Override
+	public void startNewSession() throws Exception {
 	}
 }

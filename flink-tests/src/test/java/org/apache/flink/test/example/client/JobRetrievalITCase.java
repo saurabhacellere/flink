@@ -20,7 +20,6 @@
 package org.apache.flink.test.example.client;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.deployment.StandaloneClusterId;
 import org.apache.flink.client.program.rest.RestClusterClient;
 import org.apache.flink.configuration.Configuration;
@@ -30,9 +29,8 @@ import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
-import org.apache.flink.runtime.testutils.MiniClusterResource;
-import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.testutils.junit.category.AlsoRunWithSchedulerNG;
+import org.apache.flink.test.util.MiniClusterResource;
+import org.apache.flink.test.util.MiniClusterResourceConfiguration;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.TestLogger;
 
@@ -40,7 +38,6 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
@@ -51,7 +48,6 @@ import static org.junit.Assert.fail;
 /**
  * Tests retrieval of a job from a running Flink cluster.
  */
-@Category(AlsoRunWithSchedulerNG.class)
 public class JobRetrievalITCase extends TestLogger {
 
 	private static final Semaphore lock = new Semaphore(1);
@@ -81,7 +77,7 @@ public class JobRetrievalITCase extends TestLogger {
 	@After
 	public void tearDown() {
 		if (client != null) {
-			client.close();
+			client.shutdown();
 		}
 	}
 
@@ -92,13 +88,14 @@ public class JobRetrievalITCase extends TestLogger {
 		final JobVertex imalock = new JobVertex("imalock");
 		imalock.setInvokableClass(SemaphoreInvokable.class);
 
-		final JobGraph jobGraph = new JobGraph(jobID, "testjob", imalock);
+		final JobGraph jobGraph = new JobGraph(jobID, "testjob", "", imalock);
 
 		// acquire the lock to make sure that the job cannot complete until the job client
 		// has been attached in resumingThread
 		lock.acquire();
 
-		ClientUtils.submitJob(client, jobGraph);
+		client.setDetached(true);
+		client.submitJob(jobGraph, JobRetrievalITCase.class.getClassLoader());
 
 		final CheckedThread resumingThread = new CheckedThread("Flink-Job-Retriever") {
 			@Override
