@@ -19,16 +19,27 @@
 package org.apache.flink.client.cli.util;
 
 import org.apache.flink.client.cli.CustomCommandLine;
+import org.apache.flink.client.deployment.ClusterDescriptor;
+import org.apache.flink.client.deployment.ClusterSpecification;
+import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DeploymentOptions;
+import org.apache.flink.util.FlinkException;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Options;
 
+import javax.annotation.Nullable;
+
 /**
  * Dummy implementation of the {@link CustomCommandLine} for testing purposes.
  */
-public class DummyCustomCommandLine implements CustomCommandLine {
+public class DummyCustomCommandLine<T> implements CustomCommandLine {
+	private final ClusterClient<T> clusterClient;
+
+	public DummyCustomCommandLine(ClusterClient<T> clusterClient) {
+		this.clusterClient = Preconditions.checkNotNull(clusterClient);
+	}
 
 	@Override
 	public boolean isActive(CommandLine commandLine) {
@@ -37,7 +48,7 @@ public class DummyCustomCommandLine implements CustomCommandLine {
 
 	@Override
 	public String getId() {
-		return DummyClusterClientFactory.ID;
+		return DummyCustomCommandLine.class.getSimpleName();
 	}
 
 	@Override
@@ -51,9 +62,23 @@ public class DummyCustomCommandLine implements CustomCommandLine {
 	}
 
 	@Override
-	public Configuration applyCommandLineOptionsToConfiguration(CommandLine commandLine) {
-		final Configuration configuration = new Configuration();
-		configuration.setString(DeploymentOptions.TARGET, DummyClusterClientFactory.ID);
+	public ClusterDescriptor<T> createClusterDescriptor(CommandLine commandLine) {
+		return new DummyClusterDescriptor<>(clusterClient);
+	}
+
+	@Override
+	@Nullable
+	public String getClusterId(CommandLine commandLine) {
+		return "dummy";
+	}
+
+	@Override
+	public ClusterSpecification getClusterSpecification(CommandLine commandLine) {
+		return new ClusterSpecification.ClusterSpecificationBuilder().createClusterSpecification();
+	}
+
+	@Override
+	public Configuration applyCommandLineOptionsToConfiguration(Configuration configuration, CommandLine commandLine) throws FlinkException {
 		return configuration;
 	}
 }
