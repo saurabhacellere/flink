@@ -49,7 +49,7 @@ Example Program
 
 The following program is a complete, working example of WordCount. You can copy &amp; paste the code
 to run it locally. You only have to include the correct Flink's library into your project
-(see Section [Linking with Flink]({{ site.baseurl }}/dev/projectsetup/dependencies.html)) and specify the imports. Then you are ready
+(see Section [Linking with Flink]({{ site.baseurl }}/dev/linking_with_flink.html)) and specify the imports. Then you are ready
 to go!
 
 <div class="codetabs" markdown="1">
@@ -829,7 +829,7 @@ File-based:
 
 Collection-based:
 
-- `fromCollection(Collection)` - Creates a data set from a Java.util.Collection. All elements
+- `fromCollection(Collection)` - Creates a data set from the Java Java.util.Collection. All elements
   in the collection must be of the same type.
 
 - `fromCollection(Iterator, Class)` - Creates a data set from an iterator. The class specifies the
@@ -858,7 +858,7 @@ ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 // read text file from local files system
 DataSet<String> localLines = env.readTextFile("file:///path/to/my/textfile");
 
-// read text file from an HDFS running at nnHost:nnPort
+// read text file from a HDFS running at nnHost:nnPort
 DataSet<String> hdfsLines = env.readTextFile("hdfs://nnHost:nnPort/path/to/my/textfile");
 
 // read a CSV file with three fields
@@ -876,7 +876,7 @@ DataSet<Person>> csvInput = env.readCsvFile("hdfs:///the/CSV/file")
 
 // read a file from the specified path of type SequenceFileInputFormat
 DataSet<Tuple2<IntWritable, Text>> tuples =
- env.createInput(HadoopInputs.readSequenceFile(IntWritable.class, Text.class, "hdfs://nnHost:nnPort/path/to/file"));
+ env.createInput(HadoopInputs.readMapReduceSequenceFile(IntWritable.class, Text.class, "hdfs://nnHost:nnPort/path/to/file"));
 
 // creates a set from some given elements
 DataSet<String> value = env.fromElements("Foo", "bar", "foobar", "fubar");
@@ -965,13 +965,13 @@ File-based:
 - `readFileOfPrimitives(path, delimiter)` / `PrimitiveInputFormat` - Parses files of new-line (or another char sequence)
   delimited primitive data types such as `String` or `Integer` using the given delimiter.
 
-- `readSequenceFile(Key, Value, path)` / `SequenceFileInputFormat` - Creates a JobConf and reads file from the specified path with
+- `readMapReduceSequenceFile(Key, Value, path)` / `SequenceFileInputFormat` - Creates a JobConf and reads file from the specified path with
    type SequenceFileInputFormat, Key class and Value class and returns them as Tuple2<Key, Value>.
 
 Collection-based:
 
-- `fromCollection(Iterable)` - Creates a data set from an Iterable. All elements
-  returned by the Iterable must be of the same type.
+- `fromCollection(Seq)` - Creates a data set from a Seq. All elements
+  in the collection must be of the same type.
 
 - `fromCollection(Iterator)` - Creates a data set from an Iterator. The class specifies the
   data type of the elements returned by the iterator.
@@ -999,7 +999,7 @@ val env  = ExecutionEnvironment.getExecutionEnvironment
 // read text file from local files system
 val localLines = env.readTextFile("file:///path/to/my/textfile")
 
-// read text file from an HDFS running at nnHost:nnPort
+// read text file from a HDFS running at nnHost:nnPort
 val hdfsLines = env.readTextFile("hdfs://nnHost:nnPort/path/to/my/textfile")
 
 // read a CSV file with three fields
@@ -1028,8 +1028,8 @@ val values = env.fromElements("Foo", "bar", "foobar", "fubar")
 val numbers = env.generateSequence(1, 10000000)
 
 // read a file from the specified path of type SequenceFileInputFormat
-val tuples = env.createInput(HadoopInputs.readSequenceFile(classOf[IntWritable], classOf[Text],
- "hdfs://nnHost:nnPort/path/to/file"))
+val tuples = env.readMapReduceSequenceFile(classOf[IntWritable], classOf[Text],
+ "hdfs://nnHost:nnPort/path/to/file")
 
 {% endhighlight %}
 
@@ -1159,7 +1159,7 @@ DataSet<String> textData = // [...]
 // write DataSet to a file on the local file system
 textData.writeAsText("file:///my/result/on/localFS");
 
-// write DataSet to a file on an HDFS with a namenode running at nnHost:nnPort
+// write DataSet to a file on a HDFS with a namenode running at nnHost:nnPort
 textData.writeAsText("hdfs://nnHost:nnPort/my/result/on/localFS");
 
 // write DataSet to a file and overwrite the file if it exists
@@ -1261,7 +1261,7 @@ val textData: DataSet[String] = // [...]
 // write DataSet to a file on the local file system
 textData.writeAsText("file:///my/result/on/localFS")
 
-// write DataSet to a file on an HDFS with a namenode running at nnHost:nnPort
+// write DataSet to a file on a HDFS with a namenode running at nnHost:nnPort
 textData.writeAsText("hdfs://nnHost:nnPort/my/result/on/localFS")
 
 // write DataSet to a file and overwrite the file if it exists
