@@ -19,20 +19,30 @@
 package org.apache.flink.client.program;
 
 import org.apache.flink.api.common.JobExecutionResult;
-import org.apache.flink.api.dag.Pipeline;
+import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.api.java.ExecutionEnvironmentFactory;
+import org.apache.flink.optimizer.Optimizer;
+import org.apache.flink.optimizer.plan.FlinkPlan;
+
+import org.apache.commons.io.output.TeeOutputStream;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 
 /**
- * An {@link ExecutionEnvironment} that never executes a job but only extracts the {@link
- * org.apache.flink.api.dag.Pipeline}.
+ * An {@link ExecutionEnvironment} that never executes a job but only creates the optimized plan.
  */
 public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 
-	private Pipeline pipeline;
+	private final Optimizer compiler;
+
+	private FlinkPlan optimizerPlan;
+
+	public OptimizerPlanEnvironment(Optimizer compiler) {
+		this.compiler = compiler;
+	}
 
 	// ------------------------------------------------------------------------
 	//  Execution Environment methods
@@ -40,21 +50,38 @@ public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 
 	@Override
 	public JobExecutionResult execute(String jobName) throws Exception {
-		this.pipeline = createProgramPlan();
+		Plan plan = createProgramPlan(jobName);
+		this.optimizerPlan = compiler.compile(plan);
 
 		// do not go on with anything now!
 		throw new ProgramAbortException();
 	}
 
-	public Pipeline getPipeline(PackagedProgram prog) throws ProgramInvocationException {
+	@Override
+	public String getExecutionPlan() throws Exception {
+		Plan plan = createProgramPlan(null, false);
+		this.optimizerPlan = compiler.compile(plan);
+
+		// do not go on with anything now!
+		throw new ProgramAbortException();
+	}
+
+	@Override
+	public void startNewSession() {
+		// do nothing
+	}
+
+	public FlinkPlan getOptimizedPlan(PackagedProgram prog) throws ProgramInvocationException {
 
 		// temporarily write syserr and sysout to a byte array.
 		PrintStream originalOut = System.out;
 		PrintStream originalErr = System.err;
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-		System.setOut(new PrintStream(baos));
+		TeeOutputStream combinedStdOut = new TeeOutputStream(originalOut, baos);
+		System.setOut(new PrintStream(combinedStdOut));
 		ByteArrayOutputStream baes = new ByteArrayOutputStream();
-		System.setErr(new PrintStream(baes));
+		TeeOutputStream combinedStdErr = new TeeOutputStream(originalErr, baes);
+		System.setErr(new PrintStream(combinedStdErr));
 
 		setAsContext();
 		try {
@@ -65,8 +92,8 @@ public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 		}
 		catch (Throwable t) {
 			// the invocation gets aborted with the preview plan
-			if (pipeline != null) {
-				return pipeline;
+			if (optimizerPlan != null) {
+				return optimizerPlan;
 			} else {
 				throw new ProgramInvocationException("The program caused an error: ", t);
 			}
@@ -75,6 +102,13 @@ public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 			unsetAsContext();
 			System.setOut(originalOut);
 			System.setErr(originalErr);
+
+			try {
+				baos.close();
+				baes.close();
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
 		}
 
 		String stdout = baos.toString();
@@ -82,8 +116,8 @@ public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 
 		throw new ProgramInvocationException(
 				"The program plan could not be fetched - the program aborted pre-maturely."
-						+ "\n\nSystem.err: " + (stderr.length() == 0 ? "(none)" : stderr)
-						+ "\n\nSystem.out: " + (stdout.length() == 0 ? "(none)" : stdout));
+						+ "\n\nSystem.err: " + (stdout.length() == 0 ? "(none)" : stdout)
+						+ "\n\nSystem.out: " + (stderr.length() == 0 ? "(none)" : stderr));
 	}
 	// ------------------------------------------------------------------------
 
@@ -104,8 +138,8 @@ public class OptimizerPlanEnvironment extends ExecutionEnvironment {
 
 	// ------------------------------------------------------------------------
 
-	public void setPipeline(Pipeline pipeline){
-		this.pipeline = pipeline;
+	public void setPlan(FlinkPlan plan){
+		this.optimizerPlan = plan;
 	}
 
 	/**
