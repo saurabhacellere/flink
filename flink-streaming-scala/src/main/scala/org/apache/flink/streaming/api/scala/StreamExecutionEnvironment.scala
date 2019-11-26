@@ -26,7 +26,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer
 import org.apache.flink.api.scala.ClosureCleaner
-import org.apache.flink.configuration.{Configuration, ReadableConfig}
+import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.state.AbstractStateBackend
 import org.apache.flink.runtime.state.StateBackend
 import org.apache.flink.streaming.api.environment.{StreamExecutionEnvironment => JavaEnv}
@@ -404,25 +404,6 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
   @PublicEvolving
   def getStreamTimeCharacteristic = javaEnv.getStreamTimeCharacteristic()
 
-  /**
-   * Sets all relevant options contained in the [[ReadableConfig]] such as e.g.
-   * [[org.apache.flink.streaming.api.environment.StreamPipelineOptions#TIME_CHARACTERISTIC]].
-   * It will reconfigure [[StreamExecutionEnvironment]],
-   * [[org.apache.flink.api.common.ExecutionConfig]] and
-   * [[org.apache.flink.streaming.api.environment.CheckpointConfig]].
-   *
-   * It will change the value of a setting only if a corresponding option was set in the
-   * `configuration`. If a key is not present, the current value of a field will remain
-   * untouched.
-   *
-   * @param configuration a configuration to read the values from
-   * @param classLoader   a class loader to use when loading classes
-   */
-  @PublicEvolving
-  def configure(configuration: ReadableConfig, classLoader: ClassLoader): Unit = {
-    javaEnv.configure(configuration, classLoader)
-  }
-
   // --------------------------------------------------------------------------------------------
   // Data stream creations
   // --------------------------------------------------------------------------------------------
@@ -583,6 +564,14 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * @param interval
     *          In the case of periodic path monitoring, this specifies the interval (in millis)
     *          between consecutive path scans
+    * @param readConsistencyOffset
+    *          In the case of periodic path monitoring, this specifies the overlapping interval
+    *          (in millis) between two consecutive path scans. Setting this value > 0 ensures
+    *          that files with out-of-order timestamp (files made visible to the directory
+    *          monitoring process not at the moment they were last modified) are not missed.
+    *          Each scan starts from the previuous scan's max modification timestamp minus
+    *          readConsistencyOffset.
+    *          This offset is independent to the periodic <i>interval</i> parameter.
     * @return The data stream that represents the data read from the given file
     */
   @PublicEvolving
@@ -590,9 +579,11 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
       inputFormat: FileInputFormat[T],
       filePath: String,
       watchType: FileProcessingMode,
-      interval: Long): DataStream[T] = {
+      interval: Long,
+      readConsistencyOffset: Long = 0): DataStream[T] = {
     val typeInfo = implicitly[TypeInformation[T]]
-    asScalaStream(javaEnv.readFile(inputFormat, filePath, watchType, interval, typeInfo))
+    asScalaStream(javaEnv.readFile(
+      inputFormat, filePath, watchType, interval, readConsistencyOffset, typeInfo))
   }
 
   /**
@@ -634,7 +625,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     
     val cleanFun = scalaClean(function)
     val typeInfo = implicitly[TypeInformation[T]]
-    asScalaStream(javaEnv.addSource(cleanFun, typeInfo))
+    asScalaStream(javaEnv.addSource(cleanFun).returns(typeInfo))
   }
 
   /**
@@ -702,7 +693,7 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
    */
   private[flink] def scalaClean[F <: AnyRef](f: F): F = {
     if (getConfig.isClosureCleanerEnabled) {
-      ClosureCleaner.clean(f, true, getConfig.getClosureCleanerLevel)
+      ClosureCleaner.clean(f, true)
     } else {
       ClosureCleaner.ensureSerializable(f)
     }
@@ -715,10 +706,10 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * may be local files (which will be distributed via BlobServer), or files in a distributed file
     * system. The runtime will copy the files temporarily to a local cache, if needed.
     *
-    * The [[org.apache.flink.api.common.functions.RuntimeContext]] can be obtained inside UDFs
-    * via [[org.apache.flink.api.common.functions.RichFunction#getRuntimeContext()]] and
-    * provides access [[org.apache.flink.api.common.cache.DistributedCache]] via
-    * [[org.apache.flink.api.common.functions.RuntimeContext#getDistributedCache()]].
+    * The {@link org.apache.flink.api.common.functions.RuntimeContext} can be obtained inside UDFs
+    * via {@link org.apache.flink.api.common.functions.RichFunction#getRuntimeContext()} and
+    * provides access {@link org.apache.flink.api.common.cache.DistributedCache} via
+    * {@link org.apache.flink.api.common.functions.RuntimeContext#getDistributedCache()}.
     *
     * @param filePath The path of the file, as a URI (e.g. "file:///some/path" or
     *                 "hdfs://host:port/and/path")
@@ -734,10 +725,10 @@ class StreamExecutionEnvironment(javaEnv: JavaEnv) {
     * may be local files (which will be distributed via BlobServer), or files in a distributed file
     * system. The runtime will copy the files temporarily to a local cache, if needed.
     *
-    * The [[org.apache.flink.api.common.functions.RuntimeContext]] can be obtained inside UDFs
-    * via [[org.apache.flink.api.common.functions.RichFunction#getRuntimeContext()]] and
-    * provides access [[org.apache.flink.api.common.cache.DistributedCache]] via
-    * [[org.apache.flink.api.common.functions.RuntimeContext#getDistributedCache()]].
+    * The {@link org.apache.flink.api.common.functions.RuntimeContext} can be obtained inside UDFs
+    * via {@link org.apache.flink.api.common.functions.RichFunction#getRuntimeContext()} and
+    * provides access {@link org.apache.flink.api.common.cache.DistributedCache} via
+    * {@link org.apache.flink.api.common.functions.RuntimeContext#getDistributedCache()}.
     *
     * @param filePath   The path of the file, as a URI (e.g. "file:///some/path" or
     *                   "hdfs://host:port/and/path")

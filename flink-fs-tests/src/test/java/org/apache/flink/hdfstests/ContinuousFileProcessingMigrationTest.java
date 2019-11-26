@@ -40,7 +40,8 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OperatorSnapshotUtil;
-import org.apache.flink.testutils.migration.MigrationVersion;
+import org.apache.flink.streaming.util.migration.MigrationTestUtil;
+import org.apache.flink.streaming.util.migration.MigrationVersion;
 import org.apache.flink.util.OperatingSystem;
 
 import org.apache.commons.io.FileUtils;
@@ -72,6 +73,8 @@ public class ContinuousFileProcessingMigrationTest {
 
 	private static final long INTERVAL = 100;
 
+	private static final long READ_CONSISTENCY_OFFSET_INTERVAL = 75;
+
 	@Parameterized.Parameters(name = "Migration Savepoint / Mod Time: {0}")
 	public static Collection<Tuple2<MigrationVersion, Long>> parameters () {
 		return Arrays.asList(
@@ -80,15 +83,12 @@ public class ContinuousFileProcessingMigrationTest {
 			Tuple2.of(MigrationVersion.v1_4, 1516897628000L),
 			Tuple2.of(MigrationVersion.v1_5, 1533639934000L),
 			Tuple2.of(MigrationVersion.v1_6, 1534696817000L),
-			Tuple2.of(MigrationVersion.v1_7, 1544024599000L),
-			Tuple2.of(MigrationVersion.v1_8, 1555215710000L),
-			Tuple2.of(MigrationVersion.v1_9, 1567499868000L));
+			Tuple2.of(MigrationVersion.v1_7, 1544024599000L));
 	}
 
 	/**
 	 * TODO change this to the corresponding savepoint version to be written (e.g. {@link MigrationVersion#v1_3} for 1.3)
 	 * TODO and remove all @Ignore annotations on write*Snapshot() methods to generate savepoints
-	 * TODO Note: You should generate the savepoint based on the release branch instead of the master.
 	 */
 	private final MigrationVersion flinkGenerateSavepointVersion = null;
 
@@ -177,9 +177,11 @@ public class ContinuousFileProcessingMigrationTest {
 
 		testHarness.setup();
 
-		testHarness.initializeState(
+		MigrationTestUtil.restoreFromSnapshot(
+			testHarness,
 			OperatorSnapshotUtil.getResourceFilename(
-				"reader-migration-test-flink" + testMigrateVersion + "-snapshot"));
+				"reader-migration-test-flink" + testMigrateVersion + "-snapshot"),
+			testMigrateVersion);
 
 		testHarness.open();
 
@@ -296,7 +298,7 @@ public class ContinuousFileProcessingMigrationTest {
 		TextInputFormat format = new TextInputFormat(new Path(testFolder.getAbsolutePath()));
 
 		final ContinuousFileMonitoringFunction<String> monitoringFunction =
-			new ContinuousFileMonitoringFunction<>(format, FileProcessingMode.PROCESS_CONTINUOUSLY, 1, INTERVAL);
+			new ContinuousFileMonitoringFunction<>(format, FileProcessingMode.PROCESS_CONTINUOUSLY, 1, INTERVAL, READ_CONSISTENCY_OFFSET_INTERVAL);
 
 		StreamSource<TimestampedFileInputSplit, ContinuousFileMonitoringFunction<String>> src =
 			new StreamSource<>(monitoringFunction);
@@ -306,14 +308,17 @@ public class ContinuousFileProcessingMigrationTest {
 
 		testHarness.setup();
 
-		testHarness.initializeState(
+		MigrationTestUtil.restoreFromSnapshot(
+			testHarness,
 			OperatorSnapshotUtil.getResourceFilename(
-				"monitoring-function-migration-test-" + expectedModTime + "-flink" + testMigrateVersion + "-snapshot"));
+				"monitoring-function-migration-test-" + expectedModTime + "-flink" + testMigrateVersion + "-snapshot"),
+			testMigrateVersion);
 
 		testHarness.open();
 
 		Assert.assertEquals((long) expectedModTime, monitoringFunction.getGlobalModificationTime());
-
+		Assert.assertEquals((long) expectedModTime, monitoringFunction.getMaxProcessedTime());
+		Assert.assertEquals(0, monitoringFunction.getProccessedFiles().size());
 	}
 
 	private static class BlockingFileInputFormat extends FileInputFormat<FileInputSplit> {
