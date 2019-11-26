@@ -31,10 +31,10 @@ import java.security.NoSuchAlgorithmException;
 /**
  * Connection Configuration for RMQ.
  * If {@link Builder#setUri(String)} has been set then {@link RMQConnectionConfig#RMQConnectionConfig(String, Integer,
- * Boolean, Boolean, Integer, Integer, Integer, Integer)}
+ * Boolean, Boolean, Integer, Integer, Integer, Integer, Integer)}
  * will be used for initialize the RMQ connection or
  * {@link RMQConnectionConfig#RMQConnectionConfig(String, Integer, String, String, String, Integer, Boolean,
- * Boolean, Integer, Integer, Integer, Integer)}
+ * Boolean, Integer, Integer, Integer, Integer, Integer)}
  * will be used for initialize the RMQ connection
  */
 public class RMQConnectionConfig implements Serializable {
@@ -58,32 +58,35 @@ public class RMQConnectionConfig implements Serializable {
 	private Integer requestedChannelMax;
 	private Integer requestedFrameMax;
 	private Integer requestedHeartbeat;
+	private Integer clientBufferCapacity;
 
 	/**
-	*
-	* @param host host name
-	* @param port port
-	* @param virtualHost virtual host
-	* @param username username
-	* @param password password
-	* @param networkRecoveryInterval connection recovery interval in milliseconds
-	* @param automaticRecovery if automatic connection recovery
-	* @param topologyRecovery if topology recovery
-	* @param connectionTimeout connection timeout
-	* @param requestedChannelMax requested maximum channel number
-	* @param requestedFrameMax requested maximum frame size
-	* @param requestedHeartbeat requested heartbeat interval
-	* @throws NullPointerException if host or virtual host or username or password is null
-	*/
+	 *
+	 * @param host host name
+	 * @param port port
+	 * @param virtualHost virtual host
+	 * @param username username
+	 * @param password password
+	 * @param networkRecoveryInterval connection recovery interval in milliseconds
+	 * @param automaticRecovery if automatic connection recovery
+	 * @param topologyRecovery if topology recovery
+	 * @param connectionTimeout connection timeout
+	 * @param requestedChannelMax requested maximum channel number
+	 * @param requestedFrameMax requested maximum frame size
+	 * @param requestedHeartbeat requested heartbeat interval
+	 * @param clientBufferCapacity the number of records that can sit in memory at once
+	 * @throws NullPointerException if host or virtual host or username or password is null
+	 */
 	private RMQConnectionConfig(String host, Integer port, String virtualHost, String username, String password,
-								Integer networkRecoveryInterval, Boolean automaticRecovery,
-								Boolean topologyRecovery, Integer connectionTimeout, Integer requestedChannelMax,
-								Integer requestedFrameMax, Integer requestedHeartbeat){
+									Integer networkRecoveryInterval, Boolean automaticRecovery,
+									Boolean topologyRecovery, Integer connectionTimeout, Integer requestedChannelMax,
+									Integer requestedFrameMax, Integer requestedHeartbeat, Integer clientBufferCapacity){
 		Preconditions.checkNotNull(host, "host can not be null");
 		Preconditions.checkNotNull(port, "port can not be null");
 		Preconditions.checkNotNull(virtualHost, "virtualHost can not be null");
 		Preconditions.checkNotNull(username, "username can not be null");
 		Preconditions.checkNotNull(password, "password can not be null");
+		Preconditions.checkArgument(clientBufferCapacity > 0, "Buffer capacity must be greater than 0");
 		this.host = host;
 		this.port = port;
 		this.virtualHost = virtualHost;
@@ -97,23 +100,24 @@ public class RMQConnectionConfig implements Serializable {
 		this.requestedChannelMax = requestedChannelMax;
 		this.requestedFrameMax = requestedFrameMax;
 		this.requestedHeartbeat = requestedHeartbeat;
+		this.clientBufferCapacity = clientBufferCapacity;
 	}
 
 	/**
-	*
-	* @param uri the connection URI
-	* @param networkRecoveryInterval connection recovery interval in milliseconds
-	* @param automaticRecovery if automatic connection recovery
-	* @param topologyRecovery if topology recovery
-	* @param connectionTimeout connection timeout
-	* @param requestedChannelMax requested maximum channel number
-	* @param requestedFrameMax requested maximum frame size
-	* @param requestedHeartbeat requested heartbeat interval
-	* @throws NullPointerException if URI is null
-	*/
+	 *
+	 * @param uri the connection URI
+	 * @param networkRecoveryInterval connection recovery interval in milliseconds
+	 * @param automaticRecovery if automatic connection recovery
+	 * @param topologyRecovery if topology recovery
+	 * @param connectionTimeout connection timeout
+	 * @param requestedChannelMax requested maximum channel number
+	 * @param requestedFrameMax requested maximum frame size
+	 * @param requestedHeartbeat requested heartbeat interval
+	 * @throws NullPointerException if URI is null
+	 */
 	private RMQConnectionConfig(String uri, Integer networkRecoveryInterval, Boolean automaticRecovery,
-								Boolean topologyRecovery, Integer connectionTimeout, Integer requestedChannelMax,
-								Integer requestedFrameMax, Integer requestedHeartbeat){
+									Boolean topologyRecovery, Integer connectionTimeout, Integer requestedChannelMax,
+									Integer requestedFrameMax, Integer requestedHeartbeat, Integer clientBufferCapacity){
 		Preconditions.checkNotNull(uri, "Uri can not be null");
 		this.uri = uri;
 
@@ -124,6 +128,7 @@ public class RMQConnectionConfig implements Serializable {
 		this.requestedChannelMax = requestedChannelMax;
 		this.requestedFrameMax = requestedFrameMax;
 		this.requestedHeartbeat = requestedHeartbeat;
+		this.clientBufferCapacity = clientBufferCapacity;
 	}
 
 	/** @return the host to use for connections */
@@ -225,6 +230,17 @@ public class RMQConnectionConfig implements Serializable {
 	}
 
 	/**
+	 * Retrieve the buffer capacity of the rabbitMQ client.
+	 * @return The capacity of the internal buffer, defaults to {@link Integer#MAX_VALUE} if not set
+	 */
+	public Integer getClientBufferCapacity() {
+		if (clientBufferCapacity == null) {
+			return Integer.MAX_VALUE;
+		}
+		return clientBufferCapacity;
+	}
+
+	/**
 	 *
 	 * @return Connection Factory for RMQ
 	 * @throws URISyntaxException if Malformed URI has been passed
@@ -301,6 +317,8 @@ public class RMQConnectionConfig implements Serializable {
 		private Integer requestedChannelMax;
 		private Integer requestedFrameMax;
 		private Integer requestedHeartbeat;
+
+		private Integer clientBufferCapacity = Integer.MAX_VALUE;
 
 		private String uri;
 
@@ -435,26 +453,37 @@ public class RMQConnectionConfig implements Serializable {
 		}
 
 		/**
+		 * Sets the number of records that can sit in memory unacked at once.
+		 * @param clientBufferCapacity the number of records
+		 * @return the Builder
+		 */
+		public Builder setClientBufferCapacity(int clientBufferCapacity) {
+			this.clientBufferCapacity = clientBufferCapacity;
+			return this;
+		}
+
+		/**
 		 * The Builder method.
 		 *
 		 * <p>If URI is NULL we use host, port, vHost, username, password combination
 		 * to initialize connection. using  {@link RMQConnectionConfig#RMQConnectionConfig(String, Integer, String, String, String,
-		 * Integer, Boolean, Boolean, Integer, Integer, Integer, Integer)}.
+		 * Integer, Boolean, Boolean, Integer, Integer, Integer, Integer, Integer)}.
 		 *
 		 * <p>Otherwise the URI will be used to initialize the client connection
-		 * {@link RMQConnectionConfig#RMQConnectionConfig(String, Integer, Boolean, Boolean, Integer, Integer, Integer, Integer)}
+		 * {@link RMQConnectionConfig#RMQConnectionConfig(String, Integer, Boolean, Boolean, Integer, Integer, Integer, Integer, Integer)}
 		 * @return RMQConnectionConfig
 		 */
 		public RMQConnectionConfig build(){
 			if (this.uri != null) {
 				return new RMQConnectionConfig(this.uri, this.networkRecoveryInterval,
 					this.automaticRecovery, this.topologyRecovery, this.connectionTimeout, this.requestedChannelMax,
-					this.requestedFrameMax, this.requestedHeartbeat);
+					this.requestedFrameMax, this.requestedHeartbeat, this.clientBufferCapacity);
 			} else {
 				return new RMQConnectionConfig(this.host, this.port, this.virtualHost, this.username, this.password,
 					this.networkRecoveryInterval, this.automaticRecovery, this.topologyRecovery,
-					this.connectionTimeout, this.requestedChannelMax, this.requestedFrameMax, this.requestedHeartbeat);
+					this.connectionTimeout, this.requestedChannelMax, this.requestedFrameMax, this.requestedHeartbeat, this.clientBufferCapacity);
 			}
 		}
 	}
 }
+
