@@ -49,7 +49,6 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -237,6 +236,35 @@ public class CliClient {
 		}).orElse(false);
 	}
 
+	public boolean executeQuery(String statement) {
+		// TODO: long running streaming query would block the process, only support batch query now.
+		//  https://issues.apache.org/jira/browse/FLINK-12814 intros a non-interactive view mode,
+		//  and streaming query would time out and terminate. we could execute streaming query in
+		//  non-interactive view mode.
+		if (!(executor.getSessionProperties(context).containsKey("execution.type")
+			&& "batch".equalsIgnoreCase(executor.getSessionProperties(context).get("execution.type")))) {
+			printError("Unsupported execution mode: please use batch mode!");
+			return false;
+		}
+
+		terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_WILL_EXECUTE).toAnsi());
+		terminal.writer().println(new AttributedString(statement).toString());
+		terminal.flush();
+
+		final Optional<SqlCommandCall> parsedStatement = parseCommand(statement);
+
+		return parsedStatement.map(cmdCall -> {
+			switch (cmdCall.command) {
+				case SELECT:
+					callSelect(cmdCall);
+					return true;
+				default:
+					printError(CliStrings.MESSAGE_UNSUPPORTED_SQL);
+					return false;
+			}
+		}).orElse(false);
+	}
+
 	// --------------------------------------------------------------------------------------------
 
 	private Optional<SqlCommandCall> parseCommand(String line) {
@@ -275,9 +303,6 @@ public class CliClient {
 				break;
 			case SHOW_FUNCTIONS:
 				callShowFunctions();
-				break;
-			case SHOW_MODULES:
-				callShowModules();
 				break;
 			case USE_CATALOG:
 				callUseCatalog(cmdCall);
@@ -410,7 +435,7 @@ public class CliClient {
 	private void callShowFunctions() {
 		final List<String> functions;
 		try {
-			functions = executor.listFunctions(context);
+			functions = executor.listUserDefinedFunctions(context);
 		} catch (SqlExecutionException e) {
 			printExecutionException(e);
 			return;
@@ -418,25 +443,7 @@ public class CliClient {
 		if (functions.isEmpty()) {
 			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
 		} else {
-			Collections.sort(functions);
 			functions.forEach((v) -> terminal.writer().println(v));
-		}
-		terminal.flush();
-	}
-
-	private void callShowModules() {
-		final List<String> modules;
-		try {
-			modules = executor.listModules(context);
-		} catch (SqlExecutionException e) {
-			printExecutionException(e);
-			return;
-		}
-		if (modules.isEmpty()) {
-			terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EMPTY).toAnsi());
-		} else {
-			// modules are already in the loaded order
-			modules.forEach((v) -> terminal.writer().println(v));
 		}
 		terminal.flush();
 	}
