@@ -19,6 +19,7 @@
 package org.apache.flink.runtime.webmonitor.testutils;
 
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.Bootstrap;
+import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
 import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
@@ -47,11 +48,12 @@ import org.apache.flink.shaded.netty4.io.netty.util.CharsetUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * A simple HTTP client.
@@ -129,7 +131,7 @@ public class HttpTestClient implements AutoCloseable {
 	 *
 	 * @param request The {@link HttpRequest} to send to the server
 	 */
-	public void sendRequest(HttpRequest request, Duration timeout) throws InterruptedException, TimeoutException {
+	public void sendRequest(HttpRequest request, FiniteDuration timeout) throws InterruptedException, TimeoutException {
 		LOG.debug("Writing {}.", request);
 
 		// Make the connection attempt.
@@ -152,7 +154,7 @@ public class HttpTestClient implements AutoCloseable {
 	 *
 	 * @param path The $path to GET (http://$host:$host/$path)
 	 */
-	public void sendGetRequest(String path, Duration timeout) throws TimeoutException, InterruptedException {
+	public void sendGetRequest(String path, FiniteDuration timeout) throws TimeoutException, InterruptedException {
 		if (!path.startsWith("/")) {
 			path = "/" + path;
 		}
@@ -171,17 +173,17 @@ public class HttpTestClient implements AutoCloseable {
 	 *
 	 * @param path The $path to DELETE (http://$host:$host/$path)
 	 */
-	public void sendDeleteRequest(String path, Duration timeout) throws TimeoutException, InterruptedException {
+	public void sendDeleteRequest(String path, FiniteDuration timeout) throws TimeoutException, InterruptedException {
 		if (!path.startsWith("/")) {
 			path = "/" + path;
 		}
 
-		HttpRequest getRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,
+		HttpRequest deleteRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,
 				HttpMethod.DELETE, path);
-		getRequest.headers().set(HttpHeaders.Names.HOST, host);
-		getRequest.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
+		deleteRequest.headers().set(HttpHeaders.Names.HOST, host);
+		deleteRequest.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
 
-		sendRequest(getRequest, timeout);
+		sendRequest(deleteRequest, timeout);
 	}
 
 	/**
@@ -189,18 +191,52 @@ public class HttpTestClient implements AutoCloseable {
 	 * http://$host:$host/$path.
 	 *
 	 * @param path The $path to PATCH (http://$host:$host/$path)
+	 * @param payload The request content to be attached, which should be wrapped in byte buffer by
+	 *                {@link org.apache.flink.shaded.netty4.io.netty.buffer.Unpooled}.
 	 */
-	public void sendPatchRequest(String path, Duration timeout) throws TimeoutException, InterruptedException {
+	public void sendPatchRequest(String path, ByteBuf payload, FiniteDuration timeout) throws TimeoutException, InterruptedException {
 		if (!path.startsWith("/")) {
 			path = "/" + path;
 		}
 
-		HttpRequest getRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,
+		DefaultFullHttpRequest patchRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,
 			HttpMethod.PATCH, path);
-		getRequest.headers().set(HttpHeaders.Names.HOST, host);
-		getRequest.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
+		patchRequest.headers().set(HttpHeaders.Names.HOST, host);
+		patchRequest.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
 
-		sendRequest(getRequest, timeout);
+		if (payload != null) {
+			patchRequest.content().clear().writeBytes(payload);
+		}
+
+		sendRequest(patchRequest, timeout);
+	}
+
+	/**
+	 * Send a simple POST request to the given path. You only specify the $path part of
+	 * http://$host:host/$path.
+	 * If payload is required, it should be passed in as a byte array.
+	 *
+	 * @param path The $path to POST (http://$host:$host/$path)
+	 * @param payload The request content to be attached, which should be wrapped in byte buffer by
+	 *                {@link org.apache.flink.shaded.netty4.io.netty.buffer.Unpooled}.
+	 */
+	public void sendPostRequest(String path, ByteBuf payload, FiniteDuration timeout) throws TimeoutException, InterruptedException {
+		if (!path.startsWith("/")) {
+			path = "/" + path;
+		}
+
+		DefaultFullHttpRequest postRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1,
+			HttpMethod.POST, path);
+		postRequest.headers().set(HttpHeaders.Names.HOST, host);
+		postRequest.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
+
+		if (payload != null) {
+			postRequest.headers().add(HttpHeaders.Names.CONTENT_TYPE, "application/json");
+			postRequest.headers().set(HttpHeaders.Names.CONTENT_LENGTH, payload.readableBytes());
+			postRequest.content().clear().writeBytes(payload);
+		}
+
+		sendRequest(postRequest, timeout);
 	}
 
 	/**
@@ -220,7 +256,7 @@ public class HttpTestClient implements AutoCloseable {
 	 * @param timeout Timeout in milliseconds for the next response to become available
 	 * @return The next available {@link SimpleHttpResponse}
 	 */
-	public SimpleHttpResponse getNextResponse(Duration timeout) throws InterruptedException,
+	public SimpleHttpResponse getNextResponse(FiniteDuration timeout) throws InterruptedException,
 			TimeoutException {
 
 		SimpleHttpResponse response = responses.poll(timeout.toMillis(), TimeUnit.MILLISECONDS);
