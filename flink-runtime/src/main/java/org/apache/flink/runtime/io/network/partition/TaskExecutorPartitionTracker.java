@@ -19,6 +19,7 @@ package org.apache.flink.runtime.io.network.partition;
 
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
+import org.apache.flink.runtime.taskexecutor.partition.ClusterPartitionReport;
 
 import java.util.Collection;
 
@@ -32,8 +33,9 @@ public interface TaskExecutorPartitionTracker extends PartitionTracker<JobID, Ta
 	 *
 	 * @param producingJobId ID of job by which the partition is produced
 	 * @param intermediateDataSetId the corresponding dataset ID
+	 * @param totalNumberOfPartitions the total number of partitions that exist for the corresponding dataset
 	 */
-	void startTrackingPartition(JobID producingJobId, ResultPartitionID resultPartitionId, IntermediateDataSetID intermediateDataSetId);
+	void startTrackingPartition(JobID producingJobId, ResultPartitionID resultPartitionId, IntermediateDataSetID intermediateDataSetId, int totalNumberOfPartitions);
 
 	/**
 	 * Releases the given partitions and stop the tracking of partitions that were released.
@@ -54,4 +56,9 @@ public interface TaskExecutorPartitionTracker extends PartitionTracker<JobID, Ta
 	 * Releases and stops tracking all partitions.
 	 */
 	void stopTrackingAndReleaseAllClusterPartitions();
+
+	/**
+	 * Creates a {@link ClusterPartitionReport}, describing which cluster partitions are currently available.
+	 */
+	ClusterPartitionReport createClusterPartitionReport();
 }

@@ -624,7 +624,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			Collection<ResultPartitionDeploymentDescriptor> producedResultPartitions,
 			CompletableFuture<ExecutionState> terminationFuture) {
 		final Set<ResultPartitionID> partitionsRequiringRelease = filterPartitionsRequiringRelease(producedResultPartitions)
-			.peek(rpdd -> partitionTracker.startTrackingPartition(jobId, rpdd.getShuffleDescriptor().getResultPartitionID(), rpdd.getResultId()))
+			.peek(rpdd -> partitionTracker.startTrackingPartition(jobId, rpdd.getShuffleDescriptor().getResultPartitionID(), rpdd.getResultId(), rpdd.getTotalNumberOfPartitions()))
 			.map(ResultPartitionDeploymentDescriptor::getShuffleDescriptor)
 			.map(ShuffleDescriptor::getResultPartitionID)
 			.collect(Collectors.toSet());
@@ -1840,7 +1840,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 		@Override
 		public TaskExecutorHeartbeatPayload retrievePayload(ResourceID resourceID) {
 			validateRunsInMainThread();
-			return new TaskExecutorHeartbeatPayload(taskSlotTable.createSlotReport(getResourceID()));
+			return new TaskExecutorHeartbeatPayload(taskSlotTable.createSlotReport(getResourceID()), partitionTracker.createClusterPartitionReport());
 		}
 	}
 
