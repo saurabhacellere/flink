@@ -138,6 +138,9 @@ by default. To enable this feature, users can instantiate a `RocksDBStateBackend
         new RocksDBStateBackend(filebackend, true);
 {% endhighlight %}
 
+Notice that once incremental checkpoont is enabled, the `Checkpointed Data Size` showed in web UI only represents the 
+delta checkpointed data size of that checkpoint instead of full state size.
+
 **RocksDB Timers**
 
 For RocksDB, a user can chose whether timers are stored on the heap (default) or inside RocksDB. Heap-based timers can have a better performance for smaller numbers of

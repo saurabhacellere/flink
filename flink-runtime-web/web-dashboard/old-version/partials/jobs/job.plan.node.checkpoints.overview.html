@@ -26,7 +26,7 @@ limitations under the License.
       </tr>
       <tr>
         <td><strong>Latest Completed Checkpoint</strong></td>
-        <td ng-if="checkpointStats['latest']['completed']">ID: {{ checkpointStats['latest']['completed']['id'] }}<span>Completion Time: {{ checkpointStats['latest']['completed']['latest_ack_timestamp'] | amDateFormat:'H:mm:ss' }}</span><span>End to End Duration: {{ checkpointStats['latest']['completed']['end_to_end_duration'] | humanizeDuration }}</span><span>State Size: {{ checkpointStats['latest']['completed']['state_size'] | humanizeBytes }}</span><span><i aria-hidden="true" class="fa fa-caret-square-o-right"></i> <a ui-sref="^.details({checkpointId: checkpointStats['latest']['completed']['id']})">More details</a></span></td>
+        <td ng-if="checkpointStats['latest']['completed']">ID: {{ checkpointStats['latest']['completed']['id'] }}<span>Completion Time: {{ checkpointStats['latest']['completed']['latest_ack_timestamp'] | amDateFormat:'H:mm:ss' }}</span><span>End to End Duration: {{ checkpointStats['latest']['completed']['end_to_end_duration'] | humanizeDuration }}</span><span>Checkpointed Data Size: {{ checkpointStats['latest']['completed']['state_size'] | humanizeBytes }}</span><span><i aria-hidden="true" class="fa fa-caret-square-o-right"></i> <a ui-sref="^.details({checkpointId: checkpointStats['latest']['completed']['id']})">More details</a></span></td>
         <td ng-if="!checkpointStats['latest']['completed']">None</td>
       </tr>
       <tr>
@@ -36,7 +36,7 @@ limitations under the License.
       </tr>
       <tr>
         <td><strong>Latest Savepoint</strong></td>
-        <td ng-if="checkpointStats['latest']['savepoint']">ID: {{ checkpointStats['latest']['savepoint']['id'] }}<span>Completion Time: {{ checkpointStats['latest']['savepoint']['latest_ack_timestamp'] | amDateFormat:'H:mm:ss' }}</span><span>State Size: {{ checkpointStats['latest']['savepoint']['state_size'] | humanizeBytes }}</span><span>Path: {{ checkpointStats['latest']['savepoint']['external_path'] }}</span><span><i aria-hidden="true" class="fa fa-caret-square-o-right"></i> <a ui-sref="^.details({checkpointId: checkpointStats['latest']['savepoint']['id']})">More details</a></span></td>
+        <td ng-if="checkpointStats['latest']['savepoint']">ID: {{ checkpointStats['latest']['savepoint']['id'] }}<span>Completion Time: {{ checkpointStats['latest']['savepoint']['latest_ack_timestamp'] | amDateFormat:'H:mm:ss' }}</span><span>Checkpointed Data Size: {{ checkpointStats['latest']['savepoint']['state_size'] | humanizeBytes }}</span><span>Path: {{ checkpointStats['latest']['savepoint']['external_path'] }}</span><span><i aria-hidden="true" class="fa fa-caret-square-o-right"></i> <a ui-sref="^.details({checkpointId: checkpointStats['latest']['savepoint']['id']})">More details</a></span></td>
         <td ng-if="!checkpointStats['latest']['savepoint']">None</td>
       </tr>
       <tr>
