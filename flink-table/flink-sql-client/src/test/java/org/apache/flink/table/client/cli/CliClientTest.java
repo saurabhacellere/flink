@@ -233,16 +233,6 @@ public class CliClientTest extends TestLogger {
 		}
 
 		@Override
-		public List<String> listFunctions(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
-		public List<String> listModules(SessionContext session) throws SqlExecutionException {
-			return null;
-		}
-
-		@Override
 		public void useCatalog(SessionContext session, String catalogName) throws SqlExecutionException {
 
 		}
@@ -287,6 +277,11 @@ public class CliClientTest extends TestLogger {
 
 		@Override
 		public List<Row> retrieveResultPage(String resultId, int page) throws SqlExecutionException {
+			return null;
+		}
+
+		@Override
+		public List<Row> retrieveResult(String resultId) throws SqlExecutionException {
 			return null;
 		}
 

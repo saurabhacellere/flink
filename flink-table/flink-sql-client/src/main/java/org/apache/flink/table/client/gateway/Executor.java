@@ -61,16 +61,6 @@ public interface Executor {
 	List<String> listUserDefinedFunctions(SessionContext session) throws SqlExecutionException;
 
 	/**
-	 * Lists all functions known to the executor.
-	 */
-	List<String> listFunctions(SessionContext session) throws SqlExecutionException;
-
-	/**
-	 * Lists all modules known to the executor in their loaded order.
-	 */
-	List<String> listModules(SessionContext session) throws SqlExecutionException;
-
-	/**
 	 * Sets a catalog with given name as the current catalog.
 	 */
 	void useCatalog(SessionContext session, String catalogName) throws SqlExecutionException;
@@ -116,6 +106,11 @@ public interface Executor {
 	 * Returns the rows that are part of the current page or throws an exception if the snapshot has been expired.
 	 */
 	List<Row> retrieveResultPage(String resultId, int page) throws SqlExecutionException;
+
+	/**
+	 * Returns the finalized rows. Throws an exception if the Finalized Result has been removed.
+	 */
+	List<Row> retrieveResult(String resultId) throws SqlExecutionException;
 
 	/**
 	 * Cancels a table program and stops the result retrieval. Blocking until cancellation command has
