@@ -20,8 +20,6 @@ package org.apache.flink.streaming.runtime.io.benchmark;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
-import org.apache.flink.runtime.io.network.api.writer.RecordWriterBuilder;
-import org.apache.flink.runtime.io.network.api.writer.ResultPartitionWriter;
 import org.apache.flink.types.LongValue;
 
 import java.util.concurrent.CompletableFuture;
@@ -64,8 +62,8 @@ public class StreamNetworkPointToPointBenchmark {
 		recordsReceived.get(RECEIVER_TIMEOUT, TimeUnit.MILLISECONDS);
 	}
 
-	public void setUp(long flushTimeout) throws Exception {
-		setUp(flushTimeout, new Configuration());
+	public void setUp(int flushTimeout) throws Exception {
+		setUp(flushTimeout, new Configuration(), false);
 	}
 
 	/**
@@ -73,16 +71,22 @@ public class StreamNetworkPointToPointBenchmark {
 	 *
 	 * @param flushTimeout
 	 * 		output flushing interval of the
-	 * 		{@link org.apache.flink.runtime.io.network.api.writer.RecordWriter}'s output flusher thread
+	 * 		{@link org.apache.flink.streaming.runtime.io.StreamRecordWriter}'s output flusher thread
+	 * @param localMode controls whether to use local or remote mode (input channels)
 	 */
-	public void setUp(long flushTimeout, Configuration config) throws Exception {
+	public void setUp(long flushTimeout, Configuration config, boolean localMode) throws Exception {
 		environment = new StreamNetworkBenchmarkEnvironment<>();
-		environment.setUp(1, 1, false, -1, -1, config);
+		environment.setUp(
+			1,
+			1,
+			localMode,
+			false,
+			-1,
+			-1,
+			config);
 
-		ResultPartitionWriter resultPartitionWriter = environment.createResultPartitionWriter(0);
-
-		recordWriter = new RecordWriterBuilder().setTimeout(flushTimeout).build(resultPartitionWriter);
 		receiver = environment.createReceiver();
+		recordWriter = environment.createRecordWriter(0, flushTimeout);
 	}
 
 	/**

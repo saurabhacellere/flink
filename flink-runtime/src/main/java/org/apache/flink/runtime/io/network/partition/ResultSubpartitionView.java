@@ -22,7 +22,6 @@ import org.apache.flink.runtime.io.network.buffer.Buffer;
 import org.apache.flink.runtime.io.network.partition.ResultSubpartition.BufferAndBacklog;
 
 import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /**
@@ -46,7 +45,11 @@ public interface ResultSubpartitionView {
 
 	void notifyDataAvailable();
 
+	void registerPeriodicFlush(long flushTimeout);
+
 	void releaseAllResources() throws IOException;
+
+	void notifySubpartitionConsumed() throws IOException;
 
 	boolean isReleased();
 
@@ -58,6 +61,4 @@ public interface ResultSubpartitionView {
 	boolean nextBufferIsEvent();
 
 	boolean isAvailable();
-
-	int unsynchronizedGetNumberOfQueuedBuffers();
 }

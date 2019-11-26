@@ -52,6 +52,8 @@ public interface NetworkSequenceViewReader {
 	 */
 	boolean isAvailable();
 
+	boolean isBlocked();
+
 	boolean isRegisteredAsAvailable();
 
 	/**
@@ -60,6 +62,8 @@ public interface NetworkSequenceViewReader {
 	 * @param isRegisteredAvailable True if this reader is already enqueued in the pipeline.
 	 */
 	void setRegisteredAsAvailable(boolean isRegisteredAvailable);
+
+	void notifySubpartitionConsumed() throws IOException;
 
 	boolean isReleased();
 
