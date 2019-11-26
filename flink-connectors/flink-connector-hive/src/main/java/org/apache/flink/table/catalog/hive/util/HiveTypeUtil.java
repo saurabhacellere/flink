@@ -55,6 +55,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
+import java.sql.Date;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -165,9 +166,10 @@ public class HiveTypeUtil {
 			case DOUBLE:
 				return DataTypes.DOUBLE();
 			case DATE:
-				return DataTypes.DATE();
+				return DataTypes.DATE().bridgedTo(Date.class);
 			case TIMESTAMP:
-				return DataTypes.TIMESTAMP();
+				throw new UnsupportedOperationException(
+					"Hive connector does not support timestamp type currently, as the precision may be lost.");
 			case BINARY:
 				return DataTypes.BYTES();
 			case DECIMAL:
@@ -322,14 +324,5 @@ public class HiveTypeUtil {
 			throw new UnsupportedOperationException(
 					String.format("Flink doesn't support converting type %s to Hive type yet.", dataType.toString()));
 		}
-	}
-
-	/**
-	 * INTERVAL are not available in older versions. So better to have our own enum for primitive categories.
-	 */
-	public enum HivePrimitiveCategory {
-		VOID, BOOLEAN, BYTE, SHORT, INT, LONG, FLOAT, DOUBLE, STRING,
-		DATE, TIMESTAMP, BINARY, DECIMAL, VARCHAR, CHAR, INTERVAL_YEAR_MONTH, INTERVAL_DAY_TIME,
-		UNKNOWN
 	}
 }

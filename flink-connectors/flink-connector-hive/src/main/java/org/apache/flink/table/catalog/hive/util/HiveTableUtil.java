@@ -19,7 +19,11 @@
 package org.apache.flink.table.catalog.hive.util;
 
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.utils.LegacyTypeInfoDataTypeConverter;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -30,11 +34,14 @@ import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
+import java.sql.Date;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 
 import static org.apache.flink.table.catalog.hive.HiveCatalogConfig.DEFAULT_LIST_COLUMN_TYPES_SEPARATOR;
 
@@ -49,8 +56,7 @@ public class HiveTableUtil {
 	/**
 	 * Create a Flink's TableSchema from Hive table's columns and partition keys.
 	 */
-	public static TableSchema createTableSchema(List<FieldSchema> cols, List<FieldSchema> partitionKeys,
-			Set<String> notNullColumns) {
+	public static TableSchema createTableSchema(List<FieldSchema> cols, List<FieldSchema> partitionKeys) {
 		List<FieldSchema> allCols = new ArrayList<>(cols);
 		allCols.addAll(partitionKeys);
 
@@ -62,9 +68,6 @@ public class HiveTableUtil {
 
 			colNames[i] = fs.getName();
 			colTypes[i] = HiveTypeUtil.toFlinkType(TypeInfoUtils.getTypeInfoFromTypeString(fs.getType()));
-			if (notNullColumns.contains(colNames[i])) {
-				colTypes[i] = colTypes[i].notNull();
-			}
 		}
 
 		return TableSchema.builder()
@@ -138,4 +141,48 @@ public class HiveTableUtil {
 		return partition;
 	}
 
+	/**
+	 * Create a new catalog table according to the given catalog table.
+	 * The two catalog tables are the same except for their table schemas.
+	 * DataTypes not supported by hive will be changed to the types that hive supports.
+	 *
+	 * <p>TODO:
+	 * Can we just change the table schema of the given catalog table
+	 * without creating a new catalog table?
+	 */
+	public static CatalogTable convertTableSchemaForHive(CatalogTable oldTable) {
+		TableSchema oldSchema = oldTable.getSchema();
+		DataType[] fieldDataTypes = oldSchema.getFieldDataTypes();
+		String[] fieldNames = oldSchema.getFieldNames();
+
+		TableSchema.Builder builder = TableSchema.builder();
+		for (int i = 0; i < fieldDataTypes.length; i++) {
+			// Hive stores date and timestamp using java.sql.*,
+			// so we change our date / time / timestamp type here.
+			switch (fieldDataTypes[i].getLogicalType().getTypeRoot()) {
+				case DATE:
+					builder.field(fieldNames[i], fieldDataTypes[i].bridgedTo(Date.class));
+					break;
+				case TIME_WITHOUT_TIME_ZONE:
+					builder.field(fieldNames[i], fieldDataTypes[i].bridgedTo(Time.class));
+					break;
+				case TIMESTAMP_WITHOUT_TIME_ZONE:
+					Preconditions.checkArgument(
+						LegacyTypeInfoDataTypeConverter.canConvertToTimestampTypeInfoLenient(fieldDataTypes[i]),
+						"Flink only supports timestamp with precision not larger than 3 internally");
+					builder.field(fieldNames[i], fieldDataTypes[i].bridgedTo(Timestamp.class));
+					break;
+				default:
+					builder.field(fieldNames[i], fieldDataTypes[i]);
+					break;
+			}
+		}
+		TableSchema newSchema = builder.build();
+
+		return new CatalogTableImpl(
+			newSchema,
+			new ArrayList<>(oldTable.getPartitionKeys()),
+			new HashMap<>(oldTable.getProperties()),
+			oldTable.getComment());
+	}
 }
