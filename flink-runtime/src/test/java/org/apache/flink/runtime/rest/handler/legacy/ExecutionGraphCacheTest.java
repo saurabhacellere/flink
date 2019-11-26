@@ -27,7 +27,9 @@ import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.executiongraph.AccessExecutionGraph;
 import org.apache.flink.runtime.executiongraph.ArchivedExecutionGraph;
 import org.apache.flink.runtime.executiongraph.ErrorInfo;
+import org.apache.flink.runtime.executiongraph.ExecutionGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
+import org.apache.flink.runtime.jobmanager.JobManager;
 import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.rest.handler.legacy.utils.ArchivedExecutionGraphBuilder;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
@@ -168,7 +170,7 @@ public class ExecutionGraphCacheTest extends TestLogger {
 		final ArchivedExecutionGraph expectedExecutionGraph2 = new ArchivedExecutionGraphBuilder().build();
 
 		final AtomicInteger requestJobCalls = new AtomicInteger(0);
-		final TestingRestfulGateway restfulGateway = new TestingRestfulGateway.Builder()
+		final TestingRestfulGateway restfulGateway = TestingRestfulGateway.newBuilder()
 			.setRequestJobFunction(
 				jobId -> {
 					requestJobCalls.incrementAndGet();
@@ -244,8 +246,88 @@ public class ExecutionGraphCacheTest extends TestLogger {
 		}
 	}
 
-	private CountingRestfulGateway createCountingRestfulGateway(JobID jobId, CompletableFuture<ArchivedExecutionGraph>... accessExecutionGraphs) {
-		final ConcurrentLinkedQueue<CompletableFuture<ArchivedExecutionGraph>> queue = new ConcurrentLinkedQueue<>(Arrays.asList(accessExecutionGraphs));
+	/**
+	 * Tests that a cache entry is invalidated if the retrieved {@link AccessExecutionGraph} is in
+	 * state {@link JobStatus#SUSPENDED}.
+	 *
+	 * <p>This test can be removed once we no longer request the actual {@link ExecutionGraph} from the
+	 * {@link JobManager}.
+	 */
+	@Test
+	public void testCacheInvalidationIfSuspended() throws Exception {
+		final Time timeout = Time.milliseconds(100L);
+		final Time timeToLive = Time.hours(1L);
+		final JobID expectedJobId = new JobID();
+
+		final ArchivedExecutionGraph suspendedExecutionGraph = new ArchivedExecutionGraphBuilder().setState(JobStatus.SUSPENDED).build();
+		final ConcurrentLinkedQueue<CompletableFuture<? extends AccessExecutionGraph>> requestJobAnswers = new ConcurrentLinkedQueue<>();
+
+		requestJobAnswers.offer(CompletableFuture.completedFuture(suspendedExecutionGraph));
+		requestJobAnswers.offer(CompletableFuture.completedFuture(expectedExecutionGraph));
+
+		final TestingRestfulGateway restfulGateway = TestingRestfulGateway.newBuilder()
+			.setRequestJobFunction(
+				jobId -> {
+					assertThat(jobId, Matchers.equalTo(expectedJobId));
+
+					return requestJobAnswers.poll();
+				}
+			)
+			.build();
+
+		try (ExecutionGraphCache executionGraphCache = new ExecutionGraphCache(timeout, timeToLive)) {
+			CompletableFuture<AccessExecutionGraph> executionGraphFuture = executionGraphCache.getExecutionGraph(expectedJobId, restfulGateway);
+
+			assertEquals(suspendedExecutionGraph, executionGraphFuture.get());
+
+			executionGraphFuture = executionGraphCache.getExecutionGraph(expectedJobId, restfulGateway);
+
+			assertEquals(expectedExecutionGraph, executionGraphFuture.get());
+		}
+	}
+
+	/**
+	 * Tests that a cache entry is invalidated if the retrieved {@link AccessExecutionGraph} changes its
+	 * state to {@link JobStatus#SUSPENDED}.
+	 *
+	 * <p>This test can be removed once we no longer request the actual {@link ExecutionGraph} from the
+	 * {@link JobManager}.
+	 */
+	@Test
+	public void testCacheInvalidationIfSwitchToSuspended() throws Exception {
+		final Time timeout = Time.milliseconds(100L);
+		final Time timeToLive = Time.hours(1L);
+		final JobID expectedJobId = new JobID();
+
+		final SuspendableAccessExecutionGraph toBeSuspendedExecutionGraph = new SuspendableAccessExecutionGraph(expectedJobId);
+
+		final CountingRestfulGateway restfulGateway = createCountingRestfulGateway(
+			expectedJobId,
+			CompletableFuture.completedFuture(toBeSuspendedExecutionGraph),
+			CompletableFuture.completedFuture(expectedExecutionGraph));
+
+		try (ExecutionGraphCache executionGraphCache = new ExecutionGraphCache(timeout, timeToLive)) {
+			CompletableFuture<AccessExecutionGraph> executionGraphFuture = executionGraphCache.getExecutionGraph(expectedJobId, restfulGateway);
+
+			assertEquals(toBeSuspendedExecutionGraph, executionGraphFuture.get());
+
+			toBeSuspendedExecutionGraph.setJobStatus(JobStatus.SUSPENDED);
+
+			// retrieve the same job from the cache again --> this should return it and invalidate the cache entry
+			executionGraphFuture = executionGraphCache.getExecutionGraph(expectedJobId, restfulGateway);
+
+			assertEquals(expectedExecutionGraph, executionGraphFuture.get());
+
+			executionGraphFuture = executionGraphCache.getExecutionGraph(expectedJobId, restfulGateway);
+
+			assertEquals(expectedExecutionGraph, executionGraphFuture.get());
+
+			assertThat(restfulGateway.getNumRequestJobCalls(), Matchers.equalTo(2));
+		}
+	}
+
+	private CountingRestfulGateway createCountingRestfulGateway(JobID jobId, CompletableFuture<? extends AccessExecutionGraph>... accessExecutionGraphs) {
+		final ConcurrentLinkedQueue<CompletableFuture<? extends AccessExecutionGraph>> queue = new ConcurrentLinkedQueue<>(Arrays.asList(accessExecutionGraphs));
 		return new CountingRestfulGateway(
 			jobId,
 			ignored -> queue.poll());
@@ -260,13 +342,13 @@ public class ExecutionGraphCacheTest extends TestLogger {
 
 		private AtomicInteger numRequestJobCalls = new AtomicInteger(0);
 
-		private CountingRestfulGateway(JobID expectedJobId, Function<JobID, CompletableFuture<ArchivedExecutionGraph>> requestJobFunction) {
+		private CountingRestfulGateway(JobID expectedJobId, Function<JobID, CompletableFuture<? extends AccessExecutionGraph>> requestJobFunction) {
 			this.expectedJobId = Preconditions.checkNotNull(expectedJobId);
 			this.requestJobFunction = Preconditions.checkNotNull(requestJobFunction);
 		}
 
 		@Override
-		public CompletableFuture<ArchivedExecutionGraph> requestJob(JobID jobId, Time timeout) {
+		public CompletableFuture<? extends AccessExecutionGraph> requestJob(JobID jobId, Time timeout) {
 			assertThat(jobId, Matchers.equalTo(expectedJobId));
 			numRequestJobCalls.incrementAndGet();
 			return super.requestJob(jobId, timeout);
