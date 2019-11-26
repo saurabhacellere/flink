@@ -21,12 +21,14 @@ package org.apache.flink.api.scala
 import org.apache.flink.annotation.PublicEvolving
 import org.apache.flink.api.common.distributions.DataDistribution
 import org.apache.flink.api.common.operators.Keys
+import org.apache.flink.api.common.operators.base.PartitionOperatorBase
 import org.apache.flink.api.common.operators.base.PartitionOperatorBase.PartitionMethod
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.java.Utils
 import org.apache.flink.api.java.Utils.ChecksumHashCode
 import org.apache.flink.api.java.functions.KeySelector
 import org.apache.flink.api.java.operators.PartitionOperator
+import org.apache.flink.api.java.typeutils.TypeExtractor
 import org.apache.flink.api.java.utils.{DataSetUtils => jutils}
 import org.apache.flink.util.AbstractID
 
@@ -88,6 +90,33 @@ package object utils {
       wrap(jutils.zipWithUniqueId(self.javaSet)).map {
         t: org.apache.flink.api.java.tuple.Tuple2[java.lang.Long, T]=> (t.f0.toLong, t.f1)
       }
+    }
+
+    /**
+      * Return an DataSet created by piping elements to a forked external process.
+      *
+      * @param command the command which will invoke by the external process.
+      * @return The result data set collect the output from the external process.
+      */
+    def pipe(command: String): DataSet[T] = {
+      wrap(jutils.pipe(self.javaSet, command))
+    }
+
+    /**
+      * Return an DataSet created by piping elements to a forked external process.
+      *
+      * @param command    the command which will invoke by the external process.
+      * @param envVars    the customized user defined environment variables.
+      * @param encoding   the encoding for the input of the external process.
+      * @param bufferSize the buffer size used by the external process reading the input.
+      * @return The result data set collect the output from the external process.
+      */
+    def pipe(
+        command: java.util.List[String],
+        envVars: java.util.Map[String, String],
+        encoding: String,
+        bufferSize: Int): DataSet[T] = {
+      wrap(jutils.pipe(self.javaSet, command, envVars, encoding, bufferSize))
     }
 
     // --------------------------------------------------------------------------------------------
