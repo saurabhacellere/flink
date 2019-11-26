@@ -18,17 +18,14 @@
 
 package org.apache.flink.runtime.io.network.api.reader;
 
-import org.apache.flink.core.io.IOReadableWritable;
+import org.apache.flink.runtime.event.TaskEvent;
 
 import java.io.IOException;
 
 /**
- * A record-oriented reader for mutable record types.
+ * The basic API for every reader.
  */
-public interface MutableReader<T extends IOReadableWritable> extends TaskEventSender, IterationReader {
+public interface TaskEventSender {
 
-	boolean next(T target) throws IOException, InterruptedException;
-
-	void clearBuffers();
-
+	void sendTaskEvent(TaskEvent event) throws IOException;
 }
