@@ -569,6 +569,8 @@ case class Replace(
     search: PlannerExpression,
     replacement: PlannerExpression) extends PlannerExpression with InputTypeSpec {
 
+  def this(str: PlannerExpression, begin: PlannerExpression) = this(str, begin, CharLength(str))
+
   override private[flink] def children: Seq[PlannerExpression] = str :: search :: replacement :: Nil
 
   override private[flink] def resultType: TypeInformation[_] = STRING_TYPE_INFO
@@ -581,4 +583,29 @@ case class Replace(
   override private[flink] def toRexNode(implicit relBuilder: RelBuilder): RexNode = {
     relBuilder.call(SqlStdOperatorTable.REPLACE, children.map(_.toRexNode))
   }
+}
+
+/**
+  * Returns the string with the order of the characters reversed.
+  */
+case class Reverse(child: PlannerExpression) extends UnaryExpression with InputTypeSpec {
+
+  override private[flink] def expectedTypes: Seq[TypeInformation[_]] = Seq(STRING_TYPE_INFO)
+
+  override private[flink] def resultType: TypeInformation[_] = STRING_TYPE_INFO
+
+  override private[flink] def validateInput(): ValidationResult = {
+    if (child.resultType == STRING_TYPE_INFO) {
+      ValidationSuccess
+    } else {
+      ValidationFailure(s"Reverse operator requires a String input, " +
+        s"but $child is of type ${child.resultType}")
+    }
+  }
+
+  override private[flink] def toRexNode(implicit relBuilder: RelBuilder): RexNode = {
+    relBuilder.call(ScalarSqlFunctions.REVERSE, child.toRexNode)
+  }
+
+  override def toString: String = s"($child).reverse"
 }

@@ -896,6 +896,39 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       "")
   }
 
+  @Test
+  def testReverse(): Unit = {
+    testAllApis(
+      'f37.reverse(),
+      "f37.reverse()",
+      "REVERSE(f37)",
+      "")
+
+    testAllApis(
+      'f33.reverse(),
+      "f33.reverse()",
+      "REVERSE(f33)",
+      "null")
+
+    testAllApis(
+      'f0.reverse(),
+      "f0.reverse()",
+      "REVERSE(f0)",
+      ".gnirtS tset a si sihT")
+
+    testAllApis(
+      'f24.reverse(),
+      "f24.reverse()",
+      "REVERSE(f24)",
+      ".gnirtS tset a si sihT_*")
+
+    testAllApis(
+      'f38.reverse(),
+      "f38.reverse()",
+      "REVERSE(f38)",
+      "knilF ehcapA，好你")
+  }
+
   // ----------------------------------------------------------------------------------------------
   // Math functions
   // ----------------------------------------------------------------------------------------------
@@ -2339,31 +2372,31 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       'f18.floor(TimeIntervalUnit.YEAR),
       "f18.floor(YEAR)",
       "FLOOR(f18 TO YEAR)",
-      "1996-01-01 00:00:00.000")
+      "1996-01-01 00:00:00.0")
 
     testAllApis(
       'f18.floor(TimeIntervalUnit.MONTH),
       "f18.floor(MONTH)",
       "FLOOR(f18 TO MONTH)",
-      "1996-11-01 00:00:00.000")
+      "1996-11-01 00:00:00.0")
 
     testAllApis(
       'f18.floor(TimeIntervalUnit.DAY),
       "f18.floor(DAY)",
       "FLOOR(f18 TO DAY)",
-      "1996-11-10 00:00:00.000")
+      "1996-11-10 00:00:00.0")
 
     testAllApis(
       'f18.floor(TimeIntervalUnit.MINUTE),
       "f18.floor(MINUTE)",
       "FLOOR(f18 TO MINUTE)",
-      "1996-11-10 06:55:00.000")
+      "1996-11-10 06:55:00.0")
 
     testAllApis(
       'f18.floor(TimeIntervalUnit.SECOND),
       "f18.floor(SECOND)",
       "FLOOR(f18 TO SECOND)",
-      "1996-11-10 06:55:44.000")
+      "1996-11-10 06:55:44.0")
 
     testAllApis(
       'f17.floor(TimeIntervalUnit.HOUR),
@@ -2399,31 +2432,31 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       'f18.ceil(TimeIntervalUnit.YEAR),
       "f18.ceil(YEAR)",
       "CEIL(f18 TO YEAR)",
-      "1997-01-01 00:00:00.000")
+      "1997-01-01 00:00:00.0")
 
     testAllApis(
       'f18.ceil(TimeIntervalUnit.MONTH),
       "f18.ceil(MONTH)",
       "CEIL(f18 TO MONTH)",
-      "1996-12-01 00:00:00.000")
+      "1996-12-01 00:00:00.0")
 
     testAllApis(
       'f18.ceil(TimeIntervalUnit.DAY),
       "f18.ceil(DAY)",
       "CEIL(f18 TO DAY)",
-      "1996-11-11 00:00:00.000")
+      "1996-11-11 00:00:00.0")
 
     testAllApis(
       'f18.ceil(TimeIntervalUnit.MINUTE),
       "f18.ceil(MINUTE)",
       "CEIL(f18 TO MINUTE)",
-      "1996-11-10 06:56:00.000")
+      "1996-11-10 06:56:00.0")
 
     testAllApis(
       'f18.ceil(TimeIntervalUnit.SECOND),
       "f18.ceil(SECOND)",
       "CEIL(f18 TO SECOND)",
-      "1996-11-10 06:55:45.000")
+      "1996-11-10 06:55:45.0")
 
     testAllApis(
       'f17.ceil(TimeIntervalUnit.HOUR),
@@ -2447,13 +2480,13 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
       'f16.ceil(TimeIntervalUnit.YEAR),
       "f16.ceil(YEAR)",
       "CEIL(f16 TO YEAR)",
-      "1997-01-01")
+      "1996-01-01")
 
     testAllApis(
       'f16.ceil(TimeIntervalUnit.MONTH),
       "f16.ceil(MONTH)",
       "CEIL(f16 TO MONTH)",
-      "1996-12-01")
+      "1996-11-01")
   }
 
   @Test
@@ -2810,22 +2843,22 @@ class ScalarFunctionsTest extends ScalarTypesTestBase {
     testAllApis("2016-06-15".toTimestamp - 1.hour,
       "'2016-06-15'.toTimestamp - 1.hour",
       "timestampadd(HOUR, -1, date '2016-06-15')",
-      "2016-06-14 23:00:00.000")
+      "2016-06-14 23:00:00.0")
 
     testAllApis("2016-06-15".toTimestamp + 1.minute,
       "'2016-06-15'.toTimestamp + 1.minute",
       "timestampadd(MINUTE, 1, date '2016-06-15')",
-      "2016-06-15 00:01:00.000")
+      "2016-06-15 00:01:00.0")
 
     testAllApis("2016-06-15".toTimestamp - 1.second,
       "'2016-06-15'.toTimestamp - 1.second",
       "timestampadd(SQL_TSI_SECOND, -1, date '2016-06-15')",
-      "2016-06-14 23:59:59.000")
+      "2016-06-14 23:59:59.0")
 
     testAllApis("2016-06-15".toTimestamp + 1.second,
       "'2016-06-15'.toTimestamp + 1.second",
       "timestampadd(SECOND, 1, date '2016-06-15')",
-      "2016-06-15 00:00:01.000")
+      "2016-06-15 00:00:01.0")
 
     testAllApis(nullOf(Types.SQL_TIMESTAMP) + 1.second,
       "nullOf(SQL_TIMESTAMP) + 1.second",

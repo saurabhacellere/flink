@@ -207,6 +207,13 @@ object FunctionGenerator {
     STRING_TYPE_INFO,
     BuiltInMethods.REPEAT)
 
+  addSqlFunctionMethod(
+    REVERSE,
+    Seq(STRING_TYPE_INFO),
+    STRING_TYPE_INFO,
+    BuiltInMethods.REVERSE
+  )
+
   // ----------------------------------------------------------------------------------------------
   // Arithmetic functions
   // ----------------------------------------------------------------------------------------------
@@ -678,14 +685,12 @@ object FunctionGenerator {
       BuiltInMethod.FLOOR.method,
       Some(BuiltInMethod.UNIX_TIMESTAMP_FLOOR.method)))
 
-  // TODO: fixme if CALCITE-3199 fixed, use BuiltInMethod.UNIX_DATE_CEIL
-  //  https://issues.apache.org/jira/browse/CALCITE-3199
   addSqlFunction(
     CEIL,
     Seq(SqlTimeTypeInfo.DATE, new GenericTypeInfo(classOf[TimeUnitRange])),
     new FloorCeilCallGen(
       BuiltInMethod.CEIL.method,
-      Some(BuiltInMethods.UNIX_DATE_CEIL)))
+      Some(BuiltInMethod.UNIX_DATE_CEIL.method)))
 
   addSqlFunction(
     CEIL,
