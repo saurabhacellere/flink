@@ -36,8 +36,9 @@ import org.apache.flink.util.Preconditions;
 import org.junit.Test;
 
 import java.io.BufferedInputStream;
-import java.io.FileInputStream;
+import java.io.File;
 import java.net.URL;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
@@ -58,18 +59,20 @@ public class HeapKeyedStateBackendSnapshotMigrationTest extends HeapStateBackend
 
 		Preconditions.checkNotNull(resource, "Binary snapshot resource not found!");
 
-		final SnapshotResult<KeyedStateHandle> stateHandles;
-		try (BufferedInputStream bis = new BufferedInputStream((new FileInputStream(resource.getFile())))) {
-			stateHandles = InstantiationUtil.deserializeObject(bis, Thread.currentThread().getContextClassLoader());
-		}
-		final KeyedStateHandle stateHandle = stateHandles.getJobManagerOwnedSnapshot();
-		try (final HeapKeyedStateBackend<String> keyedBackend = createKeyedBackend(StateObjectCollection.singleton(stateHandle))) {
+		try (final HeapKeyedStateBackend<String> keyedBackend = createKeyedBackend()) {
 			final Integer namespace1 = 1;
 			final Integer namespace2 = 2;
 			final Integer namespace3 = 3;
 
+			final SnapshotResult<KeyedStateHandle> stateHandles;
+			try (BufferedInputStream bis = new BufferedInputStream(Files.newInputStream(new File(resource.getFile()).toPath()))) {
+				stateHandles = InstantiationUtil.deserializeObject(bis, Thread.currentThread().getContextClassLoader());
+			}
+
 			final MapStateDescriptor<Long, Long> stateDescr = new MapStateDescriptor<>("my-map-state", Long.class, Long.class);
 			stateDescr.initializeSerializerUnlessSet(new ExecutionConfig());
+
+			keyedBackend.restore(StateObjectCollection.singleton(stateHandles.getJobManagerOwnedSnapshot()));
 
 			InternalMapState<String, Integer, Long, Long> state = keyedBackend.createInternalState(IntSerializer.INSTANCE, stateDescr);
 
@@ -222,11 +225,12 @@ public class HeapKeyedStateBackendSnapshotMigrationTest extends HeapStateBackend
 		final Integer namespace2 = 2;
 		final Integer namespace3 = 3;
 
-		final KeyGroupsStateHandle stateHandle;
-		try (BufferedInputStream bis = new BufferedInputStream((new FileInputStream(resource.getFile())))) {
-			stateHandle = InstantiationUtil.deserializeObject(bis, Thread.currentThread().getContextClassLoader());
-		}
-		try (final HeapKeyedStateBackend<String> keyedBackend = createKeyedBackend(StateObjectCollection.singleton(stateHandle))) {
+		try (final HeapKeyedStateBackend<String> keyedBackend = createKeyedBackend()) {
+			final KeyGroupsStateHandle stateHandle;
+			try (BufferedInputStream bis = new BufferedInputStream((Files.newInputStream(new File(resource.getFile()).toPath())))) {
+				stateHandle = InstantiationUtil.deserializeObject(bis, Thread.currentThread().getContextClassLoader());
+			}
+			keyedBackend.restore(StateObjectCollection.singleton(stateHandle));
 			final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
 			stateDescr.initializeSerializerUnlessSet(new ExecutionConfig());
 
