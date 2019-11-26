@@ -20,9 +20,12 @@ package org.apache.flink.streaming.api.environment;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.client.program.ContextEnvironment;
+import org.apache.flink.client.program.DetachedEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.apache.flink.util.Preconditions;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Special {@link StreamExecutionEnvironment} that will be used in cases where the CLI client or
@@ -32,25 +35,36 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 @PublicEvolving
 public class StreamContextEnvironment extends StreamExecutionEnvironment {
 
+	private static final Logger LOG = LoggerFactory.getLogger(StreamContextEnvironment.class);
+
 	private final ContextEnvironment ctx;
 
-	StreamContextEnvironment(final ContextEnvironment ctx) {
-		super(checkNotNull(ctx).getExecutorServiceLoader(), ctx.getConfiguration(), ctx.getUserCodeClassLoader());
-
+	protected StreamContextEnvironment(ContextEnvironment ctx) {
 		this.ctx = ctx;
-
-		final int parallelism = ctx.getParallelism();
-		if (parallelism > 0) {
-			setParallelism(parallelism);
+		if (ctx.getParallelism() > 0) {
+			setParallelism(ctx.getParallelism());
 		}
 	}
 
 	@Override
-	public JobExecutionResult execute(StreamGraph streamGraph) throws Exception {
+	public JobExecutionResult execute(String jobName) throws Exception {
+		Preconditions.checkNotNull(jobName, "Streaming Job name should not be null.");
+
+		StreamGraph streamGraph = this.getStreamGraph();
+		streamGraph.setJobName(jobName);
+
 		transformations.clear();
 
-		final JobExecutionResult jobExecutionResult = super.execute(streamGraph);
-		ctx.setJobExecutionResult(jobExecutionResult);
-		return jobExecutionResult;
+		// execute the programs
+		if (ctx instanceof DetachedEnvironment) {
+			LOG.warn("Job was executed in detached mode, the results will be available on completion.");
+			((DetachedEnvironment) ctx).setDetachedPlan(streamGraph);
+			return DetachedEnvironment.DetachedJobExecutionResult.INSTANCE;
+		} else {
+			return ctx
+				.getClient()
+				.run(streamGraph, ctx.getJars(), ctx.getClasspaths(), ctx.getUserCodeClassLoader(), ctx.getSavepointRestoreSettings(), null)
+				.getJobExecutionResult();
+		}
 	}
 }

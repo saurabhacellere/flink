@@ -19,15 +19,10 @@
 package org.apache.flink.streaming.api.environment;
 
 import org.apache.flink.api.common.JobExecutionResult;
-import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobSubmissionResult;
-import org.apache.flink.client.RemoteExecutor;
 import org.apache.flink.client.program.rest.RestClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Assert;
@@ -38,18 +33,13 @@ import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
-import java.util.concurrent.CompletableFuture;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
  * Tests for the {@link RemoteStreamEnvironment}.
  */
 @RunWith(PowerMockRunner.class)
-// TODO: I don't like that I have to do this
-@PrepareForTest({RemoteStreamEnvironment.class, RemoteExecutor.class})
+@PrepareForTest({RemoteStreamEnvironment.class})
 public class RemoteStreamExecutionEnvironmentTest extends TestLogger {
 
 	/**
@@ -60,16 +50,11 @@ public class RemoteStreamExecutionEnvironmentTest extends TestLogger {
 
 		String host = "fakeHost";
 		int port = 99;
-		JobID jobID = new JobID();
-		JobResult jobResult = (new JobResult.Builder())
-			.jobId(jobID)
-			.netRuntime(0)
-			.applicationStatus(ApplicationStatus.SUCCEEDED)
-			.build();
+		JobExecutionResult expectedResult = new JobExecutionResult(null, 0, null);
 
 		RestClusterClient mockedClient = Mockito.mock(RestClusterClient.class);
-		when(mockedClient.submitJob(any())).thenReturn(CompletableFuture.completedFuture(new JobSubmissionResult(jobID)));
-		when(mockedClient.requestJobResult(any())).thenReturn(CompletableFuture.completedFuture(jobResult));
+		when(mockedClient.run(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+			.thenReturn(expectedResult);
 
 		PowerMockito.whenNew(RestClusterClient.class).withAnyArguments().thenAnswer((invocation) -> {
 				Object[] args = invocation.getArguments();
@@ -86,7 +71,7 @@ public class RemoteStreamExecutionEnvironmentTest extends TestLogger {
 			host, port, clientConfiguration);
 		env.fromElements(1).map(x -> x * 2);
 		JobExecutionResult actualResult = env.execute("fakeJobName");
-		Assert.assertEquals(jobID, actualResult.getJobID());
+		Assert.assertEquals(expectedResult, actualResult);
 	}
 
 	@Test
@@ -96,20 +81,14 @@ public class RemoteStreamExecutionEnvironmentTest extends TestLogger {
 			null, new String[]{}, null, restoreSettings);
 		env.fromElements(1).map(x -> x * 2);
 
-		JobID jobID = new JobID();
-		JobResult jobResult = (new JobResult.Builder())
-			.jobId(jobID)
-			.netRuntime(0)
-			.applicationStatus(ApplicationStatus.SUCCEEDED)
-			.build();
-
 		RestClusterClient mockedClient = Mockito.mock(RestClusterClient.class);
+		JobExecutionResult expectedResult = new JobExecutionResult(null, 0, null);
 
 		PowerMockito.whenNew(RestClusterClient.class).withAnyArguments().thenReturn(mockedClient);
-		when(mockedClient.submitJob(any())).thenReturn(CompletableFuture.completedFuture(new JobSubmissionResult(jobID)));
-		when(mockedClient.requestJobResult(eq(jobID))).thenReturn(CompletableFuture.completedFuture(jobResult));
+		when(mockedClient.run(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any(),
+			Mockito.eq(restoreSettings), Mockito.any())).thenReturn(expectedResult);
 
 		JobExecutionResult actualResult = env.execute("fakeJobName");
-		Assert.assertEquals(jobID, actualResult.getJobID());
+		Assert.assertEquals(expectedResult, actualResult);
 	}
 }
