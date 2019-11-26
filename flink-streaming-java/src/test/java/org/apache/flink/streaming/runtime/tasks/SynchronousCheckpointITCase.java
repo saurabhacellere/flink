@@ -21,6 +21,7 @@ package org.apache.flink.streaming.runtime.tasks;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.runtime.blob.BlobCacheService;
 import org.apache.flink.runtime.blob.PermanentBlobCache;
 import org.apache.flink.runtime.blob.TransientBlobCache;
@@ -61,18 +62,21 @@ import org.apache.flink.runtime.taskmanager.CheckpointResponder;
 import org.apache.flink.runtime.taskmanager.Task;
 import org.apache.flink.runtime.taskmanager.TaskManagerActions;
 import org.apache.flink.runtime.util.TestingTaskManagerRuntimeInfo;
-import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxDefaultAction;
 import org.apache.flink.util.SerializedValue;
 
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -85,7 +89,10 @@ import static org.mockito.Mockito.when;
  * Tests that the cached thread pool used by the {@link Task} allows
  * synchronous checkpoints to complete successfully.
  */
+@RunWith(Parameterized.class)
 public class SynchronousCheckpointITCase {
+
+	private static OneShotLatch checkpointTriggered = new OneShotLatch();
 
 	// A thread-safe queue to "log" and monitor events happening in the task's methods. Also, used by the test thread
 	// to synchronize actions with the task's threads.
@@ -94,8 +101,16 @@ public class SynchronousCheckpointITCase {
 	@Rule
 	public final Timeout timeoutPerTest = Timeout.seconds(10);
 
+	@Parameterized.Parameters(name = "checkpointType = {0}")
+	public static Collection<CheckpointType> parameters () {
+		return Arrays.asList(CheckpointType.SYNC_CHECKPOINT, CheckpointType.SYNC_SAVEPOINT);
+	}
+
+	@Parameterized.Parameter
+	public CheckpointType checkpointType;
+
 	@Test
-	public void taskDispatcherThreadPoolAllowsForSynchronousCheckpoints() throws Exception {
+	public void taskCachedThreadPoolAllowsForSynchronousCheckpoints() throws Exception {
 		final Task task = createTask(SynchronousCheckpointTestingTask.class);
 
 		try (TaskCleaner ignored = new TaskCleaner(task)) {
@@ -106,20 +121,29 @@ public class SynchronousCheckpointITCase {
 
 			assertEquals(ExecutionState.RUNNING, task.getExecutionState());
 
+			// Hack: we are triggering a checkpoint with advanceToEndOfEventTime = true, to be sure that
+			// triggerCheckpointBarrier has reached the sync checkpoint latch (by verifying in
+			// SynchronousCheckpointTestingTask.advanceToEndOfEventTime) and only then proceeding to
+			// notifyCheckpointComplete.
+			// Without such synchronization, the notifyCheckpointComplete execution may be executed first and leave this
+			// test in a deadlock.
 			task.triggerCheckpointBarrier(
 					42,
 					156865867234L,
-					new CheckpointOptions(CheckpointType.SYNC_SAVEPOINT, CheckpointStorageLocationReference.getDefault()),
+					new CheckpointOptions(checkpointType, CheckpointStorageLocationReference.getDefault()),
 					true);
 
 			assertThat(eventQueue.take(), is(Event.PRE_TRIGGER_CHECKPOINT));
-			assertThat(eventQueue.take(), is(Event.POST_TRIGGER_CHECKPOINT));
 			assertTrue(eventQueue.isEmpty());
+
+			checkpointTriggered.await();
 
 			task.notifyCheckpointComplete(42);
 
 			assertThat(eventQueue.take(), is(Event.PRE_NOTIFY_CHECKPOINT_COMPLETE));
-			assertThat(eventQueue.take(), is(Event.POST_NOTIFY_CHECKPOINT_COMPLETE));
+			assertThat(
+				Arrays.asList(eventQueue.take(), eventQueue.take()),
+				containsInAnyOrder(Event.POST_NOTIFY_CHECKPOINT_COMPLETE, Event.POST_TRIGGER_CHECKPOINT));
 			assertTrue(eventQueue.isEmpty());
 
 			assertEquals(ExecutionState.RUNNING, task.getExecutionState());
@@ -139,42 +163,35 @@ public class SynchronousCheckpointITCase {
 		}
 
 		@Override
-		protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
+		protected void performDefaultAction(ActionContext context) throws Exception {
 			if (!isRunning) {
 				isRunning = true;
 				eventQueue.put(Event.TASK_IS_RUNNING);
 			}
 			if (isCanceled()) {
-				controller.allActionsCompleted();
+				context.allActionsCompleted();
 			} else {
-				controller.suspendDefaultAction();
+				context.actionsUnavailable();
 			}
 		}
 
 		@Override
-		public Future<Boolean> triggerCheckpointAsync(CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions, boolean advanceToEndOfEventTime) {
-			try {
-				eventQueue.put(Event.PRE_TRIGGER_CHECKPOINT);
-				Future<Boolean> result = super.triggerCheckpointAsync(checkpointMetaData, checkpointOptions, advanceToEndOfEventTime);
-				eventQueue.put(Event.POST_TRIGGER_CHECKPOINT);
-				return result;
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				throw new RuntimeException(e);
-			}
+		protected void cancelTask() {
 		}
 
 		@Override
-		public Future<Void> notifyCheckpointCompleteAsync(long checkpointId) {
-			try {
-				eventQueue.put(Event.PRE_NOTIFY_CHECKPOINT_COMPLETE);
-				Future<Void> result = super.notifyCheckpointCompleteAsync(checkpointId);
-				eventQueue.put(Event.POST_NOTIFY_CHECKPOINT_COMPLETE);
-				return result;
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-				throw new RuntimeException(e);
-			}
+		public boolean triggerCheckpoint(CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions, boolean advanceToEndOfEventTime) throws Exception {
+			eventQueue.put(Event.PRE_TRIGGER_CHECKPOINT);
+			boolean result = super.triggerCheckpoint(checkpointMetaData, checkpointOptions, advanceToEndOfEventTime);
+			eventQueue.put(Event.POST_TRIGGER_CHECKPOINT);
+			return result;
+		}
+
+		@Override
+		public void notifyCheckpointComplete(long checkpointId) throws Exception {
+			eventQueue.put(Event.PRE_NOTIFY_CHECKPOINT_COMPLETE);
+			super.notifyCheckpointComplete(checkpointId);
+			eventQueue.put(Event.POST_NOTIFY_CHECKPOINT_COMPLETE);
 		}
 
 		@Override
@@ -194,6 +211,13 @@ public class SynchronousCheckpointITCase {
 		@Override
 		protected void cleanup() {
 
+		}
+
+		@Override
+		protected void advanceToEndOfEventTime() throws Exception {
+			// Wake up the test thread that we have actually entered the checkpoint invocation and the sync checkpoint
+			// latch is set.
+			checkpointTriggered.trigger();
 		}
 	}
 
@@ -220,7 +244,7 @@ public class SynchronousCheckpointITCase {
 		ResultPartitionConsumableNotifier consumableNotifier = new NoOpResultPartitionConsumableNotifier();
 		PartitionProducerStateChecker partitionProducerStateChecker = mock(PartitionProducerStateChecker.class);
 		Executor executor = mock(Executor.class);
-		ShuffleEnvironment<?, ?> shuffleEnvironment = new NettyShuffleEnvironmentBuilder().build();
+		ShuffleEnvironment shuffleEnvironment = new NettyShuffleEnvironmentBuilder().build();
 
 		TaskMetricGroup taskMetricGroup = UnregisteredMetricGroups.createUnregisteredTaskMetricGroup();
 

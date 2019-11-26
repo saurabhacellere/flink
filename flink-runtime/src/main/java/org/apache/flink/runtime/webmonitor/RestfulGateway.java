@@ -158,6 +158,22 @@ public interface RestfulGateway extends RpcGateway {
 	}
 
 	/**
+	 * Stops the job with a checkpoint.
+	 *
+	 * @param jobId ID of the job for which the checkpoint should be triggered.
+	 * @param advanceToEndOfEventTime Flag indicating if the source should inject a {@code MAX_WATERMARK} in the pipeline
+	 *                              to fire any registered event-time timers
+	 * @param timeout for the rpc call
+	 * @return Future which is completed with the checkpoint path once completed
+	 */
+	default CompletableFuture<String> stopWithCheckpoint(
+		final JobID jobId,
+		final boolean advanceToEndOfEventTime,
+		@RpcTimeout final Time timeout) {
+		throw new UnsupportedOperationException();
+	}
+
+	/**
 	 * Request the {@link JobStatus} of the given job.
 	 *
 	 * @param jobId identifying the job for which to retrieve the JobStatus

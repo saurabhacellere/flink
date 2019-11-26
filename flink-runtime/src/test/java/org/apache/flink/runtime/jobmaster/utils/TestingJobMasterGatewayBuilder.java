@@ -37,6 +37,7 @@ import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmaster.JMTMRegistrationSuccess;
 import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.jobmaster.SerializedInputSplit;
+import org.apache.flink.runtime.jobmaster.message.ClassloadingProps;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.messages.checkpoint.DeclineCheckpoint;
 import org.apache.flink.runtime.messages.webmonitor.JobDetails;
@@ -80,6 +81,7 @@ public class TestingJobMasterGatewayBuilder {
 	private Function<ResultPartitionID, CompletableFuture<Acknowledge>> scheduleOrUpdateConsumersFunction = ignored -> CompletableFuture.completedFuture(Acknowledge.get());
 	private Function<ResourceID, CompletableFuture<Acknowledge>> disconnectTaskManagerFunction = ignored -> CompletableFuture.completedFuture(Acknowledge.get());
 	private Consumer<ResourceManagerId> disconnectResourceManagerConsumer = ignored -> {};
+	private Supplier<CompletableFuture<ClassloadingProps>> classloadingPropsSupplier = () -> CompletableFuture.completedFuture(new ClassloadingProps(6124, Collections.emptyList(), Collections.emptyList()));
 	private BiFunction<ResourceID, Collection<SlotOffer>, CompletableFuture<Collection<SlotOffer>>> offerSlotsFunction = (ignoredA, ignoredB) -> CompletableFuture.completedFuture(Collections.emptyList());
 	private TriConsumer<ResourceID, AllocationID, Throwable> failSlotConsumer = (ignoredA, ignoredB, ignoredC) -> {};
 	private BiFunction<String, TaskManagerLocation, CompletableFuture<RegistrationResponse>> registerTaskManagerFunction = (ignoredA, ignoredB) -> CompletableFuture.completedFuture(new JMTMRegistrationSuccess(RESOURCE_MANAGER_ID));
@@ -89,6 +91,7 @@ public class TestingJobMasterGatewayBuilder {
 	private Supplier<CompletableFuture<ArchivedExecutionGraph>> requestJobSupplier = () -> FutureUtils.completedExceptionally(new UnsupportedOperationException());
 	private BiFunction<String, Boolean, CompletableFuture<String>> triggerSavepointFunction = (targetDirectory, ignoredB) -> CompletableFuture.completedFuture(targetDirectory != null ? targetDirectory : UUID.randomUUID().toString());
 	private BiFunction<String, Boolean, CompletableFuture<String>> stopWithSavepointFunction = (targetDirectory, ignoredB) -> CompletableFuture.completedFuture(targetDirectory != null ? targetDirectory : UUID.randomUUID().toString());
+	private Function<Boolean, CompletableFuture<String>> stopWithCheckpointFunction = (ignoreB) -> CompletableFuture.completedFuture(UUID.randomUUID().toString());
 	private Function<JobVertexID, CompletableFuture<OperatorBackPressureStatsResponse>> requestOperatorBackPressureStatsFunction = ignored -> CompletableFuture.completedFuture(OperatorBackPressureStatsResponse.of(null));
 	private BiConsumer<AllocationID, Throwable> notifyAllocationFailureConsumer = (ignoredA, ignoredB) -> {};
 	private Consumer<Tuple5<JobID, ExecutionAttemptID, Long, CheckpointMetrics, TaskStateSnapshot>> acknowledgeCheckpointConsumer = ignored -> {};
@@ -144,6 +147,11 @@ public class TestingJobMasterGatewayBuilder {
 		return this;
 	}
 
+	public TestingJobMasterGatewayBuilder setClassloadingPropsSupplier(Supplier<CompletableFuture<ClassloadingProps>> classloadingPropsSupplier) {
+		this.classloadingPropsSupplier = classloadingPropsSupplier;
+		return this;
+	}
+
 	public TestingJobMasterGatewayBuilder setOfferSlotsFunction(BiFunction<ResourceID, Collection<SlotOffer>, CompletableFuture<Collection<SlotOffer>>> offerSlotsFunction) {
 		this.offerSlotsFunction = offerSlotsFunction;
 		return this;
@@ -186,6 +194,11 @@ public class TestingJobMasterGatewayBuilder {
 
 	public TestingJobMasterGatewayBuilder setStopWithSavepointSupplier(BiFunction<String, Boolean, CompletableFuture<String>> stopWithSavepointFunction) {
 		this.stopWithSavepointFunction = stopWithSavepointFunction;
+		return this;
+	}
+
+	public TestingJobMasterGatewayBuilder setStopWithCheckpointFunction(Function<Boolean, CompletableFuture<String>> stopWithCheckpointFunction) {
+		this.stopWithCheckpointFunction = stopWithCheckpointFunction;
 		return this;
 	}
 
@@ -245,6 +258,7 @@ public class TestingJobMasterGatewayBuilder {
 			scheduleOrUpdateConsumersFunction,
 			disconnectTaskManagerFunction,
 			disconnectResourceManagerConsumer,
+			classloadingPropsSupplier,
 			offerSlotsFunction,
 			failSlotConsumer,
 			registerTaskManagerFunction,
@@ -254,6 +268,7 @@ public class TestingJobMasterGatewayBuilder {
 			requestJobSupplier,
 			triggerSavepointFunction,
 			stopWithSavepointFunction,
+			stopWithCheckpointFunction,
 			requestOperatorBackPressureStatsFunction,
 			notifyAllocationFailureConsumer,
 			acknowledgeCheckpointConsumer,
