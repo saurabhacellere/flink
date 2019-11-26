@@ -17,13 +17,10 @@
 
 package org.apache.flink.runtime.checkpoint;
 
-import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
-import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkRuntimeException;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Iterator;
+import java.util.TreeSet;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -33,25 +30,26 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 public class CheckpointFailureManager {
 
-	public static final int UNLIMITED_TOLERABLE_FAILURE_NUMBER = Integer.MAX_VALUE;
+	private final static int UNLIMITED_TOLERABLE_FAILURE_NUMBER = Integer.MAX_VALUE;
 
 	private final int tolerableCpFailureNumber;
 	private final FailJobCallback failureCallback;
-	private final AtomicInteger continuousFailureCounter;
-	private final Set<Long> countedCheckpointIds;
+	private final TreeSet<Long> failedCheckpointIds;
+	private final Object lock = new Object();
+	private long maxSuccessCheckpointId;
 
 	public CheckpointFailureManager(int tolerableCpFailureNumber, FailJobCallback failureCallback) {
 		checkArgument(tolerableCpFailureNumber >= 0,
 			"The tolerable checkpoint failure number is illegal, " +
 				"it must be greater than or equal to 0 .");
 		this.tolerableCpFailureNumber = tolerableCpFailureNumber;
-		this.continuousFailureCounter = new AtomicInteger(0);
 		this.failureCallback = checkNotNull(failureCallback);
-		this.countedCheckpointIds = ConcurrentHashMap.newKeySet();
+		this.failedCheckpointIds = new TreeSet<>();
+		this.maxSuccessCheckpointId = 0;
 	}
 
 	/**
-	 * Handle job level checkpoint exception with a handler callback.
+	 * Handle checkpoint exception with a handler callback.
 	 *
 	 * @param exception the checkpoint exception.
 	 * @param checkpointId the failed checkpoint id used to count the continuous failure number based on
@@ -59,80 +57,56 @@ public class CheckpointFailureManager {
 	 *                     happens before the checkpoint id generation. In this case, it will be specified a negative
 	 *                      latest generated checkpoint id as a special flag.
 	 */
-	public void handleJobLevelCheckpointException(CheckpointException exception, long checkpointId) {
-		checkFailureCounter(exception, checkpointId);
-		if (continuousFailureCounter.get() > tolerableCpFailureNumber) {
-			clearCount();
-			failureCallback.failJob(new FlinkRuntimeException("Exceeded checkpoint tolerable failure threshold."));
-		}
-	}
-
-	/**
-	 * Handle task level checkpoint exception with a handler callback.
-	 *
-	 * @param exception the checkpoint exception.
-	 * @param checkpointId the failed checkpoint id used to count the continuous failure number based on
-	 *                     checkpoint id sequence. In trigger phase, we may not get the checkpoint id when the failure
-	 *                     happens before the checkpoint id generation. In this case, it will be specified a negative
-	 *                      latest generated checkpoint id as a special flag.
-	 * @param executionAttemptID the execution attempt id, as a safe guard.
-	 */
-	public void handleTaskLevelCheckpointException(
-			CheckpointException exception,
-			long checkpointId,
-			ExecutionAttemptID executionAttemptID) {
-		checkFailureCounter(exception, checkpointId);
-		if (continuousFailureCounter.get() > tolerableCpFailureNumber) {
-			clearCount();
-			failureCallback.failJobDueToTaskFailure(new FlinkRuntimeException("Exceeded checkpoint tolerable failure threshold."), executionAttemptID);
-		}
-	}
-
-	public void checkFailureCounter(
-			CheckpointException exception,
-			long checkpointId) {
+	public void handleCheckpointException(CheckpointException exception, long checkpointId) {
 		if (tolerableCpFailureNumber == UNLIMITED_TOLERABLE_FAILURE_NUMBER) {
 			return;
 		}
 
-		CheckpointFailureReason reason = exception.getCheckpointFailureReason();
-		switch (reason) {
-			case PERIODIC_SCHEDULER_SHUTDOWN:
-			case ALREADY_QUEUED:
-			case TOO_MANY_CONCURRENT_CHECKPOINTS:
-			case MINIMUM_TIME_BETWEEN_CHECKPOINTS:
-			case NOT_ALL_REQUIRED_TASKS_RUNNING:
-			case CHECKPOINT_SUBSUMED:
-			case CHECKPOINT_COORDINATOR_SUSPEND:
-			case CHECKPOINT_COORDINATOR_SHUTDOWN:
-			case JOB_FAILURE:
-			case JOB_FAILOVER_REGION:
-			//for compatibility purposes with user job behavior
-			case CHECKPOINT_DECLINED_TASK_NOT_READY:
-			case CHECKPOINT_DECLINED_TASK_NOT_CHECKPOINTING:
-			case CHECKPOINT_DECLINED_ALIGNMENT_LIMIT_EXCEEDED:
-			case CHECKPOINT_DECLINED_ON_CANCELLATION_BARRIER:
-			case CHECKPOINT_DECLINED_SUBSUMED:
-			case CHECKPOINT_DECLINED_INPUT_END_OF_STREAM:
+		synchronized (lock) {
+			CheckpointFailureReason reason = exception.getCheckpointFailureReason();
+			switch (reason) {
+				case PERIODIC_SCHEDULER_SHUTDOWN:
+				case ALREADY_QUEUED:
+				case TOO_MANY_CONCURRENT_CHECKPOINTS:
+				case MINIMUM_TIME_BETWEEN_CHECKPOINTS:
+				case NOT_ALL_REQUIRED_TASKS_RUNNING:
+				case CHECKPOINT_SUBSUMED:
+				case CHECKPOINT_COORDINATOR_SUSPEND:
+				case CHECKPOINT_COORDINATOR_SHUTDOWN:
+				case JOB_FAILURE:
+				case JOB_FAILOVER_REGION:
+					//for compatibility purposes with user job behavior
+				case CHECKPOINT_DECLINED_TASK_NOT_READY:
+				case CHECKPOINT_DECLINED_TASK_NOT_CHECKPOINTING:
+				case CHECKPOINT_DECLINED_ALIGNMENT_LIMIT_EXCEEDED:
+				case CHECKPOINT_DECLINED_ON_CANCELLATION_BARRIER:
+				case CHECKPOINT_DECLINED_SUBSUMED:
+				case CHECKPOINT_DECLINED_INPUT_END_OF_STREAM:
 
-			case EXCEPTION:
-			case CHECKPOINT_EXPIRED:
-			case TASK_CHECKPOINT_FAILURE:
-			case TRIGGER_CHECKPOINT_FAILURE:
-			case FINALIZE_CHECKPOINT_FAILURE:
-				//ignore
-				break;
+				case EXCEPTION:
+				case CHECKPOINT_EXPIRED:
+				case TASK_CHECKPOINT_FAILURE:
+				case TRIGGER_CHECKPOINT_FAILURE:
+				case FINALIZE_CHECKPOINT_FAILURE:
+					//ignore
+					break;
 
-			case CHECKPOINT_DECLINED:
-				//we should make sure one checkpoint only be counted once
-				if (countedCheckpointIds.add(checkpointId)) {
-					continuousFailureCounter.incrementAndGet();
-				}
+				case CHECKPOINT_DECLINED:
+					//we should make sure one checkpoint only be counted once
+					if (!failedCheckpointIds.contains(checkpointId)) {
+						failedCheckpointIds.add(checkpointId);
+					}
 
-				break;
+					break;
 
-			default:
-				throw new FlinkRuntimeException("Unknown checkpoint failure reason : " + reason.name());
+				default:
+					throw new FlinkRuntimeException("Unknown checkpoint failure reason : " + reason.name());
+			}
+
+			if (failedCheckpointIds.contains(checkpointId) && (checkContinuityForward(checkpointId) || countContinuityBack(checkpointId))) {
+				clearAllFailedCheckpointIds();
+				failureCallback.failJob();
+			}
 		}
 	}
 
@@ -143,34 +117,87 @@ public class CheckpointFailureManager {
 	 *                     checkpoint id sequence.
 	 */
 	public void handleCheckpointSuccess(long checkpointId) {
-		clearCount();
-	}
+		synchronized (lock) {
+			//remember the maximum success checkpoint id
+			maxSuccessCheckpointId = checkpointId > maxSuccessCheckpointId ? checkpointId : maxSuccessCheckpointId;
 
-	private void clearCount() {
-		continuousFailureCounter.set(0);
-		countedCheckpointIds.clear();
-	}
+			if (failedCheckpointIds.size() == 0) {
+				return;
+			}
 
-	/**
-	 * Fails the whole job graph in case an in-progress synchronous savepoint is discarded.
-	 *
-	 * <p>If the checkpoint was cancelled at the checkpoint coordinator, i.e. before
-	 * the synchronous savepoint barrier was sent to the tasks, then we do not cancel the job
-	 * as we do not risk having a deadlock.
-	 *
-	 * @param cause The reason why the job is cancelled.
-	 * */
-	void handleSynchronousSavepointFailure(final Throwable cause) {
-		if (!isPreFlightFailure(cause)) {
-			failureCallback.failJob(cause);
+			Long latestCheckpointId = failedCheckpointIds.last();
+			boolean needClearAll = latestCheckpointId == null ? true : checkpointId > latestCheckpointId;
+
+			if (needClearAll) {
+				clearAllFailedCheckpointIds();
+			} else {
+				clearFailedCheckpointIdsBefore(checkpointId);
+			}
 		}
 	}
 
-	private static boolean isPreFlightFailure(final Throwable cause) {
-		return ExceptionUtils.findThrowable(cause, CheckpointException.class)
-				.map(CheckpointException::getCheckpointFailureReason)
-				.map(CheckpointFailureReason::isPreFlight)
-				.orElse(false);
+	private void clearAllFailedCheckpointIds() {
+		failedCheckpointIds.clear();
+	}
+
+	private void clearFailedCheckpointIdsBefore(long currentCheckpointId) {
+		Iterator<Long> descendingIterator = failedCheckpointIds.descendingIterator();
+		while (descendingIterator.hasNext()) {
+			if (descendingIterator.next() < currentCheckpointId) {
+				descendingIterator.remove();
+			}
+		}
+	}
+
+	/**
+	 * Check continuity from current checkpoint id forward the further checkpoint id.
+	 */
+	private boolean checkContinuityForward(long currentCheckpointId) {
+		//short out
+		if (failedCheckpointIds.size() == 0 || currentCheckpointId < maxSuccessCheckpointId) {
+			return false;
+		}
+
+		Long oldLatestCheckpointId = failedCheckpointIds.last();
+		if (oldLatestCheckpointId <= currentCheckpointId ||
+			oldLatestCheckpointId - currentCheckpointId < tolerableCpFailureNumber - 1) {
+
+			return false;
+		}
+
+		boolean flag = true;
+		for (int i = 1; i <= tolerableCpFailureNumber; i++) {
+			if (!failedCheckpointIds.contains(currentCheckpointId + i)) {
+				flag = false;
+				break;
+			}
+		}
+
+		return flag;
+	}
+
+	/**
+	 * Check continuity from current checkpoint id back to the old checkpoint ids.
+	 */
+	private boolean countContinuityBack(long currentCheckpointId) {
+		if (failedCheckpointIds.size() == 0 || currentCheckpointId < maxSuccessCheckpointId) {
+			return false;
+		}
+
+		Long firstCheckpointId = failedCheckpointIds.first();
+		if (currentCheckpointId - firstCheckpointId < tolerableCpFailureNumber - 1) {
+			return false;
+		}
+
+		boolean flag = true;
+		for (int i = 1; i <= tolerableCpFailureNumber; i++) {
+			if (!failedCheckpointIds.contains(currentCheckpointId - i)) {
+				flag = false;
+				break;
+			}
+		}
+
+		return flag;
 	}
 
 	/**
@@ -178,20 +205,7 @@ public class CheckpointFailureManager {
 	 */
 	public interface FailJobCallback {
 
-		/**
-		 * Fails the whole job graph.
-		 *
-		 * @param cause The reason why the synchronous savepoint fails.
-		 */
-		void failJob(final Throwable cause);
-
-		/**
-		 * Fails the whole job graph due to task failure.
-		 *
-		 * @param cause The reason why the job is cancelled.
-		 * @param failingTask The id of the failing task attempt to prevent failing the job multiple times.
-		 */
-		void failJobDueToTaskFailure(final Throwable cause, final ExecutionAttemptID failingTask);
+		void failJob();
 
 	}
 
