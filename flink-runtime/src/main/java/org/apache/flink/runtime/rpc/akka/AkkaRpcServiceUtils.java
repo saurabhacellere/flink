@@ -41,7 +41,6 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.apache.flink.util.NetUtils.isValidClientPort;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -69,14 +68,14 @@ public class AkkaRpcServiceUtils {
 	// ------------------------------------------------------------------------
 
 	/**
-	 * Utility method to create RPC service from configuration and hostname, port.
+	 * Utility method to create RPC service from configuration and hostname, port range.
 	 *
-	 * @param hostname   The hostname/address that describes the TaskManager's data location.
-	 * @param portRangeDefinition   The port range to start TaskManager on.
-	 * @param configuration                 The configuration for the TaskManager.
-	 * @return   The rpc service which is used to start and connect to the TaskManager RpcEndpoint .
-	 * @throws IOException      Thrown, if the actor system can not bind to the address
-	 * @throws Exception      Thrown is some other error occurs while creating akka actor system
+	 * @param hostname              The hostname/address that describes the Akka ActorSystem's location.
+	 * @param portRangeDefinition   The port range to start ActorSystem on.
+	 * @param configuration         The configuration for the AkkaRpcService.
+	 * @return                      The rpc service which is used to start and connect to the RpcEndpoint.
+	 * @throws IOException          Thrown if the actor system can not bind to the address.
+	 * @throws Exception            Thrown if some other error occurs while creating akka actor system.
 	 */
 	public static RpcService createRpcService(
 			String hostname,
@@ -89,48 +88,18 @@ public class AkkaRpcServiceUtils {
 	/**
 	 * Utility method to create RPC service from configuration and hostname, port.
 	 *
-	 * @param hostname   The hostname/address that describes the TaskManager's data location.
-	 * @param port           If true, the TaskManager will not initiate the TCP network stack.
-	 * @param configuration                 The configuration for the TaskManager.
-	 * @return   The rpc service which is used to start and connect to the TaskManager RpcEndpoint .
-	 * @throws IOException      Thrown, if the actor system can not bind to the address
-	 * @throws Exception      Thrown is some other error occurs while creating akka actor system
+	 * @param hostname      The hostname/address that describes the Akka ActorSystem's location.
+	 * @param port          The port to start ActorSystem on.
+	 * @param configuration The configuration for the AkkaRpcService.
+	 * @return              The rpc service which is used to start and connect to the RpcEndpoint.
+	 * @throws IOException  Thrown if the actor system can not bind to the address.
+	 * @throws Exception    Thrown if some other error occurs while creating akka actor system.
 	 */
 	public static RpcService createRpcService(
 			String hostname,
 			int port,
 			Configuration configuration) throws Exception {
 		final ActorSystem actorSystem = BootstrapTools.startActorSystem(configuration, hostname, port, LOG);
-		return instantiateAkkaRpcService(configuration, actorSystem);
-	}
-
-	/**
-	 * Utility method to create RPC service from configuration and hostname, port.
-	 *
-	 * @param hostname The hostname/address that describes the TaskManager's data location.
-	 * @param portRangeDefinition The port range to start TaskManager on.
-	 * @param configuration The configuration for the TaskManager.
-	 * @param actorSystemName The actor system name of the RpcService.
-	 * @param actorSystemExecutorConfiguration The configuration of the executor of the actor system.
-	 * @return The rpc service which is used to start and connect to the TaskManager RpcEndpoint .
-	 * @throws IOException Thrown, if the actor system can not bind to the address
-	 * @throws Exception Thrown is some other error occurs while creating akka actor system
-	 */
-	public static RpcService createRpcService(
-		String hostname,
-		String portRangeDefinition,
-		Configuration configuration,
-		String actorSystemName,
-		@Nonnull BootstrapTools.ActorSystemExecutorConfiguration actorSystemExecutorConfiguration) throws Exception {
-
-		final ActorSystem actorSystem = BootstrapTools.startActorSystem(
-			configuration,
-			actorSystemName,
-			hostname,
-			portRangeDefinition,
-			LOG,
-			actorSystemExecutorConfiguration);
-
 		return instantiateAkkaRpcService(configuration, actorSystem);
 	}
 
@@ -193,7 +162,7 @@ public class AkkaRpcServiceUtils {
 
 		checkNotNull(hostname, "hostname is null");
 		checkNotNull(endpointName, "endpointName is null");
-		checkArgument(isValidClientPort(port), "port must be in [1, 65535]");
+		checkArgument(port > 0 && port <= 65535, "port must be in [1, 65535]");
 
 		final String protocolPrefix = akkaProtocol == AkkaProtocol.SSL_TCP ? AKKA_SSL_TCP : AKKA_TCP;
 
