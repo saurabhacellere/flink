@@ -18,7 +18,13 @@
 
 package org.apache.flink.runtime.clusterframework;
 
+import org.apache.flink.api.common.resources.CPUResource;
 import org.apache.flink.configuration.MemorySize;
+
+import javax.annotation.Nullable;
+
+import java.io.Serializable;
+import java.util.Optional;
 
 /**
  * Describe the specifics of different resource dimensions of the TaskExecutor.
@@ -74,7 +80,9 @@ import org.apache.flink.configuration.MemorySize;
  *               └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
  * </pre>
  */
-public class TaskExecutorResourceSpec {
+public class TaskExecutorResourceSpec implements Serializable {
+
+	private final Optional<CPUResource> cpuCores;
 
 	private final MemorySize frameworkHeapSize;
 
@@ -94,7 +102,10 @@ public class TaskExecutorResourceSpec {
 
 	private final MemorySize jvmOverheadSize;
 
+	private final double defaultSlotFraction;
+
 	public TaskExecutorResourceSpec(
+		@Nullable CPUResource cpuCores,
 		MemorySize frameworkHeapSize,
 		MemorySize frameworkOffHeapSize,
 		MemorySize taskHeapSize,
@@ -103,8 +114,10 @@ public class TaskExecutorResourceSpec {
 		MemorySize onHeapManagedMemorySize,
 		MemorySize offHeapManagedMemorySize,
 		MemorySize jvmMetaspaceSize,
-		MemorySize jvmOverheadSize) {
+		MemorySize jvmOverheadSize,
+		double defaultSlotFraction) {
 
+		this.cpuCores = Optional.ofNullable(cpuCores);
 		this.frameworkHeapSize = frameworkHeapSize;
 		this.frameworkOffHeapMemorySize = frameworkOffHeapSize;
 		this.taskHeapSize = taskHeapSize;
@@ -114,6 +127,11 @@ public class TaskExecutorResourceSpec {
 		this.offHeapManagedMemorySize = offHeapManagedMemorySize;
 		this.jvmMetaspaceSize = jvmMetaspaceSize;
 		this.jvmOverheadSize = jvmOverheadSize;
+		this.defaultSlotFraction = defaultSlotFraction;
+	}
+
+	public Optional<CPUResource> getCpuCores() {
+		return cpuCores;
 	}
 
 	public MemorySize getFrameworkHeapSize() {
@@ -172,10 +190,15 @@ public class TaskExecutorResourceSpec {
 		return frameworkOffHeapMemorySize.add(taskOffHeapSize).add(shuffleMemSize);
 	}
 
+	public double getDefaultSlotFraction() {
+		return defaultSlotFraction;
+	}
+
 	@Override
 	public String toString() {
 		return "TaskExecutorResourceSpec {"
-			+ "frameworkHeapSize=" + frameworkHeapSize.toString()
+			+ "cpuCores=" + (cpuCores.isPresent() ? cpuCores.get() : "unknown")
+			+ ", frameworkHeapSize=" + frameworkHeapSize.toString()
 			+ ", frameworkOffHeapSize=" + frameworkOffHeapMemorySize.toString()
 			+ ", taskHeapSize=" + taskHeapSize.toString()
 			+ ", taskOffHeapSize=" + taskOffHeapSize.toString()
@@ -184,6 +207,7 @@ public class TaskExecutorResourceSpec {
 			+ ", offHeapManagedMemorySize=" + offHeapManagedMemorySize.toString()
 			+ ", jvmMetaspaceSize=" + jvmMetaspaceSize.toString()
 			+ ", jvmOverheadSize=" + jvmOverheadSize.toString()
+			+ ", defaultSlotFraction=" + defaultSlotFraction
 			+ "}";
 	}
 }
