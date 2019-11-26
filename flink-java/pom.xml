@@ -25,7 +25,7 @@ under the License.
 	<parent>
 		<groupId>org.apache.flink</groupId>
 		<artifactId>flink-parent</artifactId>
-		<version>1.10-SNAPSHOT</version>
+		<version>1.8-SNAPSHOT</version>
 		<relativePath>..</relativePath>
 	</parent>
 
@@ -43,7 +43,7 @@ under the License.
 
 		<dependency>
 			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-shaded-asm-7</artifactId>
+			<artifactId>flink-shaded-asm</artifactId>
 		</dependency>
 
 		<dependency>
@@ -73,6 +73,14 @@ under the License.
 			<plugin>
 				<groupId>com.github.siom79.japicmp</groupId>
 				<artifactId>japicmp-maven-plugin</artifactId>
+				<configuration>
+					<parameter>
+						<excludes combine.children="append">
+							<exclude>org.apache.flink.api.java.ExecutionEnvironment#execute(java.lang.String,org.apache.flink.api.java.operators.DataSink[])</exclude>
+						</excludes>
+					</parameter>
+				</configuration>
+
 			</plugin>
 
 			<!-- Because flink-scala, flink-avro and flink-hadoop-compatibility uses it in tests -->

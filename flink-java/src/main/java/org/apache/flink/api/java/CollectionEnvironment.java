@@ -22,6 +22,7 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.Plan;
 import org.apache.flink.api.common.operators.CollectionExecutor;
+import org.apache.flink.api.java.operators.DataSink;
 
 /**
  * Version of {@link ExecutionEnvironment} that allows serial, local, collection-based executions of Flink programs.
@@ -30,8 +31,8 @@ import org.apache.flink.api.common.operators.CollectionExecutor;
 public class CollectionEnvironment extends ExecutionEnvironment {
 
 	@Override
-	public JobExecutionResult execute(String jobName) throws Exception {
-		Plan p = createProgramPlan(jobName);
+	public JobExecutionResult execute(String jobName, DataSink<?>... sinks) throws Exception {
+		Plan p = createProgramPlan(jobName, sinks);
 
 		// We need to reverse here. Object-Reuse enabled, means safe mode is disabled.
 		CollectionExecutor exec = new CollectionExecutor(getConfig());
@@ -42,5 +43,14 @@ public class CollectionEnvironment extends ExecutionEnvironment {
 	@Override
 	public int getParallelism() {
 		return 1; // always serial
+	}
+
+	@Override
+	public String getExecutionPlan() throws Exception {
+		throw new UnsupportedOperationException("Execution plans are not used for collection-based execution.");
+	}
+
+	@Override
+	public void startNewSession() throws Exception {
 	}
 }

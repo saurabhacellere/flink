@@ -18,14 +18,14 @@
 package org.apache.flink.api.scala
 
 import com.esotericsoftware.kryo.Serializer
-import org.apache.flink.annotation.{PublicEvolving, Public}
+import org.apache.flink.annotation.{Public, PublicEvolving}
 import org.apache.flink.api.common.io.{FileInputFormat, InputFormat}
 import org.apache.flink.api.common.restartstrategy.RestartStrategies.RestartStrategyConfiguration
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
 import org.apache.flink.api.common.typeutils.CompositeType
-import org.apache.flink.api.common.{ExecutionConfig, JobExecutionResult}
+import org.apache.flink.api.common.{ExecutionConfig, JobExecutionResult, JobID}
 import org.apache.flink.api.java.io._
-import org.apache.flink.api.java.operators.DataSource
+import org.apache.flink.api.java.operators.{DataSink, DataSource}
 import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer
 import org.apache.flink.api.java.typeutils.{PojoTypeInfo, TupleTypeInfoBase, ValueTypeInfo}
 import org.apache.flink.api.java.{CollectionEnvironment, ExecutionEnvironment => JavaEnv}
@@ -135,9 +135,57 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
   def getNumberOfExecutionRetries = javaEnv.getNumberOfExecutionRetries
 
   /**
+   * Gets the UUID by which this environment is identified. The UUID sets the execution context
+   * in the cluster or local environment.
+   */
+  @PublicEvolving
+  def getId: JobID = {
+    javaEnv.getId
+  }
+
+  /**
    * Gets the JobExecutionResult of the last executed job.
    */
   def getLastJobExecutionResult = javaEnv.getLastJobExecutionResult
+
+  /**
+   * Gets the UUID by which this environment is identified, as a string.
+   */
+  @PublicEvolving
+  def getIdString: String = {
+    javaEnv.getIdString
+  }
+
+  /**
+   * Starts a new session, discarding all intermediate results.
+   */
+  @PublicEvolving
+  def startNewSession() {
+    javaEnv.startNewSession()
+  }
+
+  /**
+   * Sets the session timeout to hold the intermediate results of a job. This only
+   * applies the updated timeout in future executions.
+ *
+   * @param timeout The timeout in seconds.
+   */
+  @PublicEvolving
+  def setSessionTimeout(timeout: Long) {
+    javaEnv.setSessionTimeout(timeout)
+  }
+
+  /**
+   * Gets the session timeout for this environment. The session timeout defines for how long
+   * after an execution, the job and its intermediate results will be kept for future
+   * interactions.
+   *
+   * @return The session timeout, in seconds.
+   */
+  @PublicEvolving
+  def getSessionTimeout: Long = {
+    javaEnv.getSessionTimeout
+  }
 
   /**
    * Registers the given type with the serializer at the [[KryoSerializer]].
@@ -465,7 +513,7 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
 
   /**
    * Triggers the program execution. The environment will execute all parts of the program that have
-   * resulted in a "sink" operation. Sink operations are for example printing results
+   * resulted in all "sink" operations. Sink operations are for example printing results
    * [[DataSet.print]], writing results (e.g. [[DataSet.writeAsText]], [[DataSet.write]], or other
    * generic data sinks created with [[DataSet.output]].
    *
@@ -483,12 +531,40 @@ class ExecutionEnvironment(javaEnv: JavaEnv) {
    * [[DataSet.print]], writing results (e.g. [[DataSet.writeAsText]], [[DataSet.write]], or other
    * generic data sinks created with [[DataSet.output]].
    *
+   * The program execution will be logged and displayed with a generated default name.
+   *
+   * @return The result of the job execution, containing elapsed time and accumulators.
+   */
+  def execute(sinks: DataSink[_]*): JobExecutionResult = {
+    javaEnv.execute(sinks: _*)
+  }
+
+  /**
+   * Triggers the program execution. The environment will execute all parts of the program that have
+   * resulted in all "sink" operation. Sink operations are for example printing results
+   * [[DataSet.print]], writing results (e.g. [[DataSet.writeAsText]], [[DataSet.write]], or other
+   * generic data sinks created with [[DataSet.output]].
+   *
    * The program execution will be logged and displayed with the given name.
    *
    * @return The result of the job execution, containing elapsed time and accumulators.
    */
   def execute(jobName: String): JobExecutionResult = {
-    javaEnv.execute(jobName)
+    javaEnv.execute(jobName, Array.empty[DataSink[_]]: _*)
+  }
+
+  /**
+   * Triggers the program execution. The environment will execute all parts of the program that have
+   * resulted in the {@code sinks} operation. Sink operations are for example printing results
+   * [[DataSet.print]], writing results (e.g. [[DataSet.writeAsText]], [[DataSet.write]], or other
+   * generic data sinks created with [[DataSet.output]].
+   *
+   * The program execution will be logged and displayed with the given name.
+   *
+   * @return The result of the job execution, containing elapsed time and accumulators.
+   */
+  def execute(jobName: String, sinks: DataSink[_]*): JobExecutionResult = {
+    javaEnv.execute(jobName, sinks: _*)
   }
 
   /**
@@ -561,7 +637,7 @@ object ExecutionEnvironment {
    * This method sets the environment's default parallelism to given parameter, which
    * defaults to the value set via [[setDefaultLocalParallelism(Int)]].
    */
-  def createLocalEnvironment(parallelism: Int = JavaEnv.getDefaultLocalParallelism): 
+  def createLocalEnvironment(parallelism: Int = JavaEnv.getDefaultLocalParallelism):
       ExecutionEnvironment = {
     new ExecutionEnvironment(JavaEnv.createLocalEnvironment(parallelism))
   }
