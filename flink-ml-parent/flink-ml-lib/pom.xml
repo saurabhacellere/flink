@@ -26,8 +26,7 @@ under the License.
 		<version>1.10-SNAPSHOT</version>
 	</parent>
 
-	<artifactId>flink-ml-lib_${scala.binary.version}</artifactId>
-	<name>flink-ml-lib</name>
+	<artifactId>flink-ml-lib</artifactId>
 
 	<dependencies>
 		<dependency>
@@ -36,25 +35,13 @@ under the License.
 			<version>${project.version}</version>
 		</dependency>
 		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-table-api-java</artifactId>
-			<version>${project.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-table-api-java-bridge_${scala.binary.version}</artifactId>
-			<version>${project.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-			<version>${project.version}</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
 			<groupId>com.github.fommil.netlib</groupId>
 			<artifactId>core</artifactId>
 			<version>1.1.2</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-math3</artifactId>
 		</dependency>
 	</dependencies>
 </project>
