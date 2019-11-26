@@ -659,7 +659,6 @@ Parameters:
 - `username` - (optional) InfluxDB username used for authentication
 - `password` - (optional) InfluxDB username's password used for authentication
 - `retentionPolicy` - (optional) InfluxDB retention policy, defaults to retention policy defined on the server for the db
-- `consistency` - (optional) InfluxDB consistency level for metrics. Possible values: [ALL, ANY, ONE, QUORUM], default is ONE
 - `connectTimeout` - (optional) the InfluxDB client connect timeout in milliseconds, default is 10000 ms
 - `writeTimeout` - (optional) the InfluxDB client write timeout in milliseconds, default is 10000 ms
 
@@ -674,7 +673,6 @@ metrics.reporter.influxdb.db: flink
 metrics.reporter.influxdb.username: flink-metrics
 metrics.reporter.influxdb.password: qwerty
 metrics.reporter.influxdb.retentionPolicy: one_hour
-metrics.reporter.influxdb.consistency: ANY
 metrics.reporter.influxdb.connectTimeout: 60000
 metrics.reporter.influxdb.writeTimeout: 60000
 
@@ -1119,7 +1117,7 @@ Metrics related to data exchange between task executors using netty network comm
       <td>Gauge</td>
     </tr>
     <tr>
-      <th rowspan="8">Task</th>
+      <th rowspan="9">Task</th>
       <td rowspan="2">Shuffle.Netty.Input.Buffers</td>
       <td>inputQueueLength</td>
       <td>The number of queued input buffers.</td>
@@ -1139,6 +1137,12 @@ Metrics related to data exchange between task executors using netty network comm
     <tr>
       <td>outPoolUsage</td>
       <td>An estimate of the output buffers usage.</td>
+      <td>Gauge</td>
+    </tr>
+    <tr>
+      <td rowspan="1">Shuffle.Netty.BackPressure</td>
+      <td>isBackPressured</td>
+      <td>whether the task is back-pressured</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1278,7 +1282,7 @@ Metrics related to data exchange between task executors using netty network comm
     </tr>
     <tr>
       <td>fullRestarts</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <b>numRestarts</b>.</td>
+      <td>The total number of full restarts since this job was submitted.</td>
       <td>Gauge</td>
     </tr>
     <tr>
