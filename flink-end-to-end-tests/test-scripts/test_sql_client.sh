@@ -19,9 +19,7 @@
 
 set -Eeuo pipefail
 
-PLANNER="${1:-old}"
-
-KAFKA_VERSION="2.2.0"
+KAFKA_VERSION="2.3.0"
 CONFLUENT_VERSION="5.0.0"
 CONFLUENT_MAJOR_VERSION="5.0"
 KAFKA_SQL_VERSION="universal"
@@ -101,7 +99,7 @@ echo "Preparing Elasticsearch..."
 ELASTICSEARCH_VERSION=6
 DOWNLOAD_URL='https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-6.3.1.tar.gz'
 
-setup_elasticsearch $DOWNLOAD_URL $ELASTICSEARCH_VERSION
+setup_elasticsearch $DOWNLOAD_URL
 wait_elasticsearch_working
 
 ################################################################################
@@ -187,9 +185,6 @@ functions:
   - name: RegReplace
     from: class
     class: org.apache.flink.table.toolbox.StringRegexReplaceFunction
-
-execution:
-  planner: "$PLANNER"
 EOF
 
 # submit SQL statements
@@ -199,7 +194,7 @@ echo "Executing SQL: Values -> Elasticsearch (upsert)"
 SQL_STATEMENT_3=$(cat << EOF
 INSERT INTO ElasticsearchUpsertSinkTable
   SELECT user_id, user_name, COUNT(*) AS user_count
-  FROM (VALUES (1, 'Bob'), (22, 'Tom'), (42, 'Kim'), (42, 'Kim'), (42, 'Kim'), (1, 'Bob'))
+  FROM (VALUES (1, 'Bob'), (22, 'Alice'), (42, 'Greg'), (42, 'Greg'), (42, 'Greg'), (1, 'Bob'))
     AS UserCountTable(user_id, user_name)
   GROUP BY user_id, user_name
 EOF
@@ -213,7 +208,7 @@ JOB_ID=$($FLINK_DIR/bin/sql-client.sh embedded \
 
 wait_job_terminal_state "$JOB_ID" "FINISHED"
 
-verify_result_hash "SQL Client Elasticsearch Upsert" "$ELASTICSEARCH_INDEX" 3 "21a76360e2a40f442816d940e7071ccf"
+verify_result_hash "SQL Client Elasticsearch Upsert" "$ELASTICSEARCH_INDEX" 3 "982cb32908def9801e781381c1b8a8db"
 
 echo "Executing SQL: Values -> Elasticsearch (append, no key)"
 
@@ -223,10 +218,10 @@ INSERT INTO ElasticsearchAppendSinkTable
   FROM (
     VALUES
       (1, 'Bob', CAST(0 AS BIGINT)),
-      (22, 'Tom', CAST(0 AS BIGINT)),
-      (42, 'Kim', CAST(0 AS BIGINT)),
-      (42, 'Kim', CAST(0 AS BIGINT)),
-      (42, 'Kim', CAST(0 AS BIGINT)),
+      (22, 'Alice', CAST(0 AS BIGINT)),
+      (42, 'Greg', CAST(0 AS BIGINT)),
+      (42, 'Greg', CAST(0 AS BIGINT)),
+      (42, 'Greg', CAST(0 AS BIGINT)),
       (1, 'Bob', CAST(0 AS BIGINT)))
     AS UserCountTable(user_id, user_name, user_count)
 EOF
