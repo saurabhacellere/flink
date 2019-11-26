@@ -20,6 +20,7 @@ package org.apache.flink.streaming.runtime.tasks;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.configuration.CheckpointingOptions;
@@ -54,9 +55,7 @@ import org.apache.flink.runtime.filecache.FileCache;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.network.NettyShuffleEnvironmentBuilder;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
-import org.apache.flink.runtime.io.network.api.writer.AvailabilityTestResultPartitionWriter;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
-import org.apache.flink.runtime.io.network.api.writer.ResultPartitionWriter;
 import org.apache.flink.runtime.io.network.partition.NoOpResultPartitionConsumableNotifier;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionConsumableNotifier;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
@@ -106,11 +105,13 @@ import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.InternalTimeServiceManager;
-import org.apache.flink.streaming.api.operators.MailboxExecutor;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
 import org.apache.flink.streaming.api.operators.Output;
+import org.apache.flink.streaming.api.operators.StreamMap;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorStateContext;
@@ -121,7 +122,6 @@ import org.apache.flink.streaming.runtime.io.StreamInputProcessor;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.streamstatus.StreamStatusMaintainer;
 import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxDefaultAction;
-import org.apache.flink.streaming.util.MockStreamConfig;
 import org.apache.flink.streaming.util.TestSequentialReadingStreamOperator;
 import org.apache.flink.util.CloseableIterable;
 import org.apache.flink.util.ExceptionUtils;
@@ -894,54 +894,54 @@ public class StreamTaskTest extends TestLogger {
 	}
 
 	@Test
-	public void testProcessWithAvailableOutput() throws Exception {
-		try (final MockEnvironment environment = setupEnvironment(new boolean[] {true, true})) {
-			final int numberOfProcessCalls = 10;
-			final AvailabilityTestInputProcessor inputProcessor = new AvailabilityTestInputProcessor(numberOfProcessCalls);
-			final AvailabilityTestStreamTask task = new AvailabilityTestStreamTask<>(environment, inputProcessor);
+	public void testNonHeadOperatorEndingInputExceptionally() throws Exception {
+		StreamConfig streamConfig = new StreamConfig(new Configuration());
+		streamConfig.setStreamOperator(new StreamSource<>(new MockSourceFunction()));
+		streamConfig.setOperatorID(new OperatorID());
 
-			task.invoke();
-			assertEquals(numberOfProcessCalls, inputProcessor.currentNumProcessCalls);
+		new StreamConfigChainer(new OperatorID(), streamConfig)
+			.chain(
+				new OperatorID(),
+				new ExceptionallyEndedInputOperator(),
+				BasicTypeInfo.VOID_TYPE_INFO.createSerializer(new ExecutionConfig()))
+			.finish();
+
+		try (MockEnvironment mockEnvironment = new MockEnvironmentBuilder()
+			.setTaskConfiguration(streamConfig.getConfiguration())
+			.build()) {
+
+			mockEnvironment.addOutput(new ArrayList<>());
+			mockEnvironment.setExpectedExternalFailureCause(Throwable.class);
+
+			RunningTask<StreamTask<Void, ?>> task = runTask(() -> new NoOpStreamTask<>(mockEnvironment));
+			task.waitForTaskCompletion(false);
+
+			Optional<? extends Throwable> actualExternalFailureCause = mockEnvironment.getActualExternalFailureCause();
+			assertTrue(actualExternalFailureCause.isPresent());
+			ExceptionUtils.findThrowableWithMessage(actualExternalFailureCause.get(), "exception at ending input");
 		}
 	}
 
 	@Test
-	public void testProcessWithUnAvailableOutput() throws Exception {
-		try (final MockEnvironment environment = setupEnvironment(new boolean[] {true, false})) {
-			final int numberOfProcessCalls = 10;
-			final AvailabilityTestInputProcessor inputProcessor = new AvailabilityTestInputProcessor(numberOfProcessCalls);
-			final AvailabilityTestStreamTask task = new AvailabilityTestStreamTask<>(environment, inputProcessor);
-			final MailboxExecutor executor = task.mailboxProcessor.getMainMailboxExecutor();
+	public void testOperatorClosingExceptionally() throws Exception {
+		StreamConfig streamConfig = new StreamConfig(new Configuration());
+		streamConfig.setStreamOperator(new ExceptionallyClosedOperator());
+		streamConfig.setOperatorID(new OperatorID());
 
-			final Runnable completeFutureTask = () -> {
-				assertEquals(1, inputProcessor.currentNumProcessCalls);
-				assertTrue(task.mailboxProcessor.isDefaultActionUnavailable());
-				environment.getWriter(1).getAvailableFuture().complete(null);
-			};
+		try (MockEnvironment mockEnvironment = new MockEnvironmentBuilder()
+			.setTaskConfiguration(streamConfig.getConfiguration())
+			.build()) {
 
-			executor.submit(() -> {
-				executor.submit(completeFutureTask, "This task will complete the future to resume process input action."); },
-				"This task will submit another task to execute after processing input once.");
+			mockEnvironment.addOutput(new ArrayList<>());
+			mockEnvironment.setExpectedExternalFailureCause(Throwable.class);
 
-			task.invoke();
-			assertEquals(numberOfProcessCalls, inputProcessor.currentNumProcessCalls);
+			RunningTask<StreamTask<Void, ?>> task = runTask(() -> new NoOpStreamTask<>(mockEnvironment));
+			task.waitForTaskCompletion(false);
+
+			Optional<? extends Throwable> actualExternalFailureCause = mockEnvironment.getActualExternalFailureCause();
+			assertTrue(actualExternalFailureCause.isPresent());
+			ExceptionUtils.findThrowableWithMessage(actualExternalFailureCause.get(), "exception at closing");
 		}
-	}
-
-	private MockEnvironment setupEnvironment(boolean[] outputAvailabilities) {
-		final Configuration configuration = new Configuration();
-		new MockStreamConfig(configuration, outputAvailabilities.length);
-
-		final List<ResultPartitionWriter> writers = new ArrayList<>(outputAvailabilities.length);
-		for (int i = 0; i < outputAvailabilities.length; i++) {
-			writers.add(new AvailabilityTestResultPartitionWriter(outputAvailabilities[i]));
-		}
-
-		final MockEnvironment environment = new MockEnvironmentBuilder()
-			.setTaskConfiguration(configuration)
-			.build();
-		environment.addOutputs(writers);
-		return environment;
 	}
 
 	// ------------------------------------------------------------------------
@@ -1041,49 +1041,6 @@ public class StreamTaskTest extends TestLogger {
 
 		@Override
 		protected void cleanup() throws Exception {}
-	}
-
-	/**
-	 * A stream task implementation used to construct a specific {@link StreamInputProcessor} for tests.
-	 */
-	private static class AvailabilityTestStreamTask<T, OP extends StreamOperator<T>> extends StreamTask<T, OP> {
-
-		AvailabilityTestStreamTask(Environment environment, StreamInputProcessor inputProcessor) {
-			super(environment);
-
-			this.inputProcessor = inputProcessor;
-		}
-
-		@Override
-		protected void init() {
-		}
-	}
-
-	/**
-	 * A stream input processor implementation used to control the returned input status based on
-	 * the total number of processing calls.
-	 */
-	private static class AvailabilityTestInputProcessor implements StreamInputProcessor {
-		private final int totalProcessCalls;
-		private int currentNumProcessCalls;
-
-		AvailabilityTestInputProcessor(int totalProcessCalls) {
-			this.totalProcessCalls = totalProcessCalls;
-		}
-
-		@Override
-		public InputStatus processInput()  {
-			return ++currentNumProcessCalls < totalProcessCalls ? InputStatus.MORE_AVAILABLE : InputStatus.END_OF_INPUT;
-		}
-
-		@Override
-		public void close() throws IOException {
-		}
-
-		@Override
-		public CompletableFuture<?> getAvailableFuture() {
-			return AVAILABLE;
-		}
 	}
 
 	private static class BlockingCloseStreamOperator extends AbstractStreamOperator<Void> {
@@ -1311,7 +1268,7 @@ public class StreamTaskTest extends TestLogger {
 		}
 
 		@Override
-		public CompletableFuture<?> getAvailableFuture() {
+		public CompletableFuture<?> isAvailable() {
 			return AVAILABLE;
 		}
 
@@ -1537,11 +1494,16 @@ public class StreamTaskTest extends TestLogger {
 		}
 
 		@Override
+		public StreamOperator<?> getHeadOperator() {
+			return new StreamMap<String, String>(value -> value);
+		}
+
+		@Override
 		protected void init() throws Exception {
 			checkTaskThreadInfo();
 
 			// Create a time trigger to validate that it would also be invoked in the task's thread.
-			getProcessingTimeService(0).registerTimer(0, new ProcessingTimeCallback() {
+			getProcessingTimeService(getHeadOperator(), 0).registerTimer(0, new ProcessingTimeCallback() {
 				@Override
 				public void onProcessingTime(long timestamp) throws Exception {
 					checkTaskThreadInfo();
@@ -1869,6 +1831,27 @@ public class StreamTaskTest extends TestLogger {
 		@Override
 		public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
 			throw new UnsupportedOperationException();
+		}
+	}
+
+	private static class ExceptionallyEndedInputOperator extends AbstractStreamOperator<Void>
+		implements OneInputStreamOperator<Void, Void>, BoundedOneInput {
+
+		@Override
+		public void processElement(StreamRecord element) throws Exception {
+		}
+
+		@Override
+		public void endInput() throws Exception {
+			throw new Exception("exception at ending input");
+		}
+	}
+
+	private static class ExceptionallyClosedOperator extends AbstractStreamOperator<Void> {
+
+		@Override
+		public void close() throws Exception {
+			throw new Exception("exception at closing");
 		}
 	}
 }
