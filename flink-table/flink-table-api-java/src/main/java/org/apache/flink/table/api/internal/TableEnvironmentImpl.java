@@ -59,7 +59,12 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.QueryOperation;
 import org.apache.flink.table.operations.TableSourceQueryOperation;
 import org.apache.flink.table.operations.UseCatalogOperation;
+import org.apache.flink.table.operations.UseDatabaseOperation;
+import org.apache.flink.table.operations.UseOperation;
+import org.apache.flink.table.operations.ddl.AlterDatabaseOperation;
+import org.apache.flink.table.operations.ddl.CreateDatabaseOperation;
 import org.apache.flink.table.operations.ddl.CreateTableOperation;
+import org.apache.flink.table.operations.ddl.DropDatabaseOperation;
 import org.apache.flink.table.operations.ddl.DropTableOperation;
 import org.apache.flink.table.operations.utils.OperationTreeBuilder;
 import org.apache.flink.table.sinks.TableSink;
@@ -451,7 +456,8 @@ public class TableEnvironmentImpl implements TableEnvironment {
 		if (operations.size() != 1) {
 			throw new TableException(
 				"Unsupported SQL query! sqlUpdate() only accepts a single SQL statement of type " +
-					"INSERT, CREATE TABLE, DROP TABLE, USE CATALOG");
+					"INSERT, CREATE TABLE, DROP TABLE, USE CATALOG, USE [catalog.]database, " +
+					"CREATE DATABASE, DROP DATABASE, ALTER DATABASE");
 		}
 
 		Operation operation = operations.get(0);
@@ -469,18 +475,53 @@ public class TableEnvironmentImpl implements TableEnvironment {
 				createTableOperation.getCatalogTable(),
 				createTableOperation.getTableIdentifier(),
 				createTableOperation.isIgnoreIfExists());
+		} else if (operation instanceof CreateDatabaseOperation) {
+			CreateDatabaseOperation createDatabaseOperation = (CreateDatabaseOperation) operation;
+			catalogManager.createDatabase(
+					createDatabaseOperation.getCatalogName(),
+					createDatabaseOperation.getDatabaseName(),
+					createDatabaseOperation.getCatalogDatabase(),
+					createDatabaseOperation.isIgnoreIfExists(),
+					false);
 		} else if (operation instanceof DropTableOperation) {
 			DropTableOperation dropTableOperation = (DropTableOperation) operation;
 			catalogManager.dropTable(
 				dropTableOperation.getTableIdentifier(),
 				dropTableOperation.isIfExists());
-		} else if (operation instanceof UseCatalogOperation) {
-			UseCatalogOperation useCatalogOperation = (UseCatalogOperation) operation;
-			catalogManager.setCurrentCatalog(useCatalogOperation.getCatalogName());
+		} else if (operation instanceof DropDatabaseOperation) {
+			DropDatabaseOperation dropDatabaseOperation = (DropDatabaseOperation) operation;
+			catalogManager.dropDatabase(
+					dropDatabaseOperation.getCatalogName(),
+					dropDatabaseOperation.getDatabaseName(),
+					dropDatabaseOperation.isIfExists(),
+					dropDatabaseOperation.isRestrict(),
+					false);
+		} else if (operation instanceof AlterDatabaseOperation) {
+			AlterDatabaseOperation alterDatabaseOperation = (AlterDatabaseOperation) operation;
+			catalogManager.alterDatabase(
+					alterDatabaseOperation.getCatalogName(),
+					alterDatabaseOperation.getDatabaseName(),
+					alterDatabaseOperation.getCatalogDatabase(),
+					false);
+		} else if (operation instanceof UseOperation) {
+			applyUseOperation((UseOperation) operation);
 		} else {
 			throw new TableException(
 				"Unsupported SQL query! sqlUpdate() only accepts a single SQL statements of " +
-					"type INSERT, CREATE TABLE, DROP TABLE, USE CATALOG");
+					"type INSERT, CREATE TABLE, DROP TABLE, USE CATALOG, USE [catalog.]database, " +
+					"CREATE DATABASE, DROP DATABASE, ALTER DATABASE");
+		}
+	}
+
+	/**Apply use operation to current table environment. */
+	private void applyUseOperation(UseOperation operation) {
+		if (operation instanceof UseCatalogOperation) {
+			UseCatalogOperation useCatalogOperation = (UseCatalogOperation) operation;
+			catalogManager.setCurrentCatalog(useCatalogOperation.getCatalogName());
+		} else if (operation instanceof UseDatabaseOperation) {
+			UseDatabaseOperation useDatabaseOperation = (UseDatabaseOperation) operation;
+			catalogManager.setCurrentCatalog(useDatabaseOperation.getCatalogName());
+			catalogManager.setCurrentDatabase(useDatabaseOperation.getDatabaseName());
 		}
 	}
 
