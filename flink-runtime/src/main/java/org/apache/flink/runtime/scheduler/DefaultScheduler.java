@@ -132,7 +132,8 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 			jobManagerJobMetricGroup,
 			slotRequestTimeout,
 			shuffleMaster,
-			partitionTracker);
+			partitionTracker,
+			false);
 
 		this.log = log;
 
@@ -150,7 +151,7 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 			getFailoverTopology(),
 			failoverStrategy,
 			restartBackoffTimeStrategy);
-		this.schedulingStrategy = schedulingStrategyFactory.createInstance(this, getSchedulingTopology());
+		this.schedulingStrategy = schedulingStrategyFactory.createInstance(this, getSchedulingTopology(), getJobGraph());
 		this.executionSlotAllocator = checkNotNull(executionSlotAllocatorFactory).createInstance(getInputsLocationsRetriever());
 	}
 
