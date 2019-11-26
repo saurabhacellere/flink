@@ -37,10 +37,21 @@ else
  NUM_SLOTS=$NEW_DOP
 fi
 
-set_config_key "taskmanager.numberOfTaskSlots" "${NUM_SLOTS}"
-set_config_key "metrics.fetcher.update-interval" "2000"
+backup_config
+change_conf "taskmanager.numberOfTaskSlots" "1" "${NUM_SLOTS}"
 setup_flink_slf4j_metric_reporter
 start_cluster
+
+function test_cleanup {
+  # don't call ourselves again for another signal interruption
+  trap "exit -1" INT
+  # don't call ourselves again for normal exit
+  trap "" EXIT
+
+  rollback_flink_slf4j_metric_reporter
+}
+trap test_cleanup INT
+trap test_cleanup EXIT
 
 CHECKPOINT_DIR="$TEST_DATA_DIR/externalized-chckpt-e2e-backend-dir"
 CHECKPOINT_DIR_URI="file://$CHECKPOINT_DIR"
@@ -95,7 +106,7 @@ if [[ $SIMULATE_FAILURE == "true" ]]; then
 else
   wait_job_running $DATASTREAM_JOB
   wait_num_checkpoints $DATASTREAM_JOB 1
-  wait_oper_metric_num_in_records SemanticsCheckMapper.0 200
+  wait_oper_metric_num_in_records ArtificalKeyedStateMapper.0 200
 
   cancel_job $DATASTREAM_JOB
 fi
@@ -131,7 +142,7 @@ if [ -z $DATASTREAM_JOB ]; then
 fi
 
 wait_job_running $DATASTREAM_JOB
-wait_oper_metric_num_in_records SemanticsCheckMapper.0 200
+wait_oper_metric_num_in_records ArtificalKeyedStateMapper.0 200
 
 # if state is errorneous and the general purpose DataStream job produces alerting messages,
 # output would be non-empty and the test will not pass
