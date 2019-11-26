@@ -27,7 +27,7 @@ import org.apache.flink.api.java.tuple.{Tuple2 => JTuple2}
 import org.apache.flink.api.java.typeutils.RowTypeInfo
 import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.datastream.{DataStream, DataStreamSink}
+import org.apache.flink.streaming.api.datastream.DataStream
 import org.apache.flink.streaming.api.functions.ProcessFunction
 import org.apache.flink.streaming.api.functions.sink.SinkFunction
 import org.apache.flink.streaming.api.scala.StreamExecutionEnvironment
@@ -95,8 +95,8 @@ class TableSinkITCase extends AbstractTestBase {
     tEnv.registerTableSink(
       "csvSink",
       new CsvTableSink(path).configure(
-        Array[String]("nullableCol", "c", "b"),
-        Array[TypeInformation[_]](Types.INT, Types.STRING, Types.SQL_TIMESTAMP)))
+        Array[String]("c", "b"),
+        Array[TypeInformation[_]](Types.STRING, Types.SQL_TIMESTAMP)))
 
     val input = StreamTestData.get3TupleDataStream(env)
       .assignAscendingTimestamps(_._2)
@@ -104,21 +104,20 @@ class TableSinkITCase extends AbstractTestBase {
 
     input.toTable(tEnv, 'a, 'b.rowtime, 'c)
       .where('a < 5 || 'a > 17)
-      .select(ifThenElse('a < 4, nullOf(Types.INT()), 'a), 'c, 'b)
+      .select('c, 'b)
       .insertInto("csvSink")
 
     env.execute()
 
     val expected = Seq(
-      ",Hello world,1970-01-01 00:00:00.002",
-      ",Hello,1970-01-01 00:00:00.002",
-      ",Hi,1970-01-01 00:00:00.001",
-      "18,Comment#12,1970-01-01 00:00:00.006",
-      "19,Comment#13,1970-01-01 00:00:00.006",
-      "20,Comment#14,1970-01-01 00:00:00.006",
-      "21,Comment#15,1970-01-01 00:00:00.006",
-      "4,Hello world, how are you?,1970-01-01 00:00:00.003"
-    ).mkString("\n")
+      "Hi,1970-01-01 00:00:00.001",
+      "Hello,1970-01-01 00:00:00.002",
+      "Hello world,1970-01-01 00:00:00.002",
+      "Hello world, how are you?,1970-01-01 00:00:00.003",
+      "Comment#12,1970-01-01 00:00:00.006",
+      "Comment#13,1970-01-01 00:00:00.006",
+      "Comment#14,1970-01-01 00:00:00.006",
+      "Comment#15,1970-01-01 00:00:00.006").mkString("\n")
 
     TestBaseUtils.compareResultsByLinesInMemory(expected, path)
   }
@@ -154,6 +153,36 @@ class TableSinkITCase extends AbstractTestBase {
       "1970-01-01 00:00:00.015,5,24",
       "1970-01-01 00:00:00.02,5,29",
       "1970-01-01 00:00:00.025,2,12")
+      .sorted
+    assertEquals(expected, result)
+  }
+
+  @Test
+  def testAppendSinkWithSubsetOfSourceKeys(): Unit = {
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.getConfig.enableObjectReuse()
+    val tEnv = StreamTableEnvironment.create(env)
+
+    val table = StreamTestData.getSmall3TupleDataStream(env)
+      .toTable(tEnv, 'a, 'b, 'c)
+
+    tEnv.registerTableSink(
+      "appendSink",
+      new TestAppendSink().configure(
+        Array[String]("a", "b", "c","d","e"),
+        Array[TypeInformation[_]](Types.INT, Types.LONG, Types.STRING,
+          Types.BOOLEAN, Types.DECIMAL)))
+
+    table.select('a, 'b ,'c)
+      .insertInto("appendSink")
+
+    env.execute()
+
+    val result = RowCollector.getAndClearValues.map(_.f1.toString).sorted
+    val expected = List(
+      "1,1,Hi",
+      "2,2,Hello",
+      "3,2,Hello world")
       .sorted
     assertEquals(expected, result)
   }
@@ -622,11 +651,7 @@ private[flink] class TestAppendSink extends AppendStreamTableSink[Row] {
   var fTypes: Array[TypeInformation[_]] = _
 
   override def emitDataStream(s: DataStream[Row]): Unit = {
-    consumeDataStream(s)
-  }
-
-  override def consumeDataStream(dataStream: DataStream[Row]): DataStreamSink[_] = {
-    dataStream.map(
+    s.map(
       new MapFunction[Row, JTuple2[JBool, Row]] {
         override def map(value: Row): JTuple2[JBool, Row] = new JTuple2(true, value)
       })
@@ -685,19 +710,18 @@ private[flink] class TestUpsertSink(
 
   override def setKeyFields(keys: Array[String]): Unit =
     if (keys != null) {
-      if (!expectedKeys.sorted.mkString(",").equals(keys.sorted.mkString(","))) {
-        throw new AssertionError("Provided key fields do not match expected keys")
-      }
+      assertEquals("Provided key fields do not match expected keys",
+        expectedKeys.sorted.mkString(","),
+        keys.sorted.mkString(","))
     } else {
-      if (expectedKeys != null) {
-        throw new AssertionError("Provided key fields should not be null.")
-      }
+      assertNull("Provided key fields should not be null.", expectedKeys)
     }
 
   override def setIsAppendOnly(isAppendOnly: JBool): Unit =
-    if (expectedIsAppendOnly != isAppendOnly) {
-      throw new AssertionError("Provided isAppendOnly does not match expected isAppendOnly")
-    }
+    assertEquals(
+      "Provided isAppendOnly does not match expected isAppendOnly",
+      expectedIsAppendOnly,
+      isAppendOnly)
 
   override def getRecordType: TypeInformation[Row] = new RowTypeInfo(fTypes, fNames)
 
@@ -755,9 +779,9 @@ object RowCollector {
         }
       }.filter{ case (_, c: Int) => c != 0 }
 
-    if (retracted.exists{ case (_, c: Int) => c < 0}) {
-      throw new AssertionError("Received retracted rows which have not been accumulated.")
-    }
+    assertFalse(
+      "Received retracted rows which have not been accumulated.",
+      retracted.exists{ case (_, c: Int) => c < 0})
 
     retracted.flatMap { case (r: String, c: Int) => (0 until c).map(_ => r) }.toList
   }
