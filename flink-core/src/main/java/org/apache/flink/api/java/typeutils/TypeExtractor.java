@@ -1837,8 +1837,8 @@ public class TypeExtractor {
 		if (parameterizedType != null) {
 			getTypeHierarchy(typeHierarchy, parameterizedType, Object.class);
 		}
-		// create a type hierarchy, if the incoming only contains the most bottom one or none.
-		else if (typeHierarchy.size() <= 1) {
+		// create a type hierarchy, for fields types extraction
+		else {
 			getTypeHierarchy(typeHierarchy, clazz, Object.class);
 		}
 
@@ -2076,7 +2076,7 @@ public class TypeExtractor {
 
 		Class<?> typeInfoClass;
 		try {
-			typeInfoClass = Class.forName(HADOOP_WRITABLE_TYPEINFO_CLASS, false, Thread.currentThread().getContextClassLoader());
+			typeInfoClass = Class.forName(HADOOP_WRITABLE_TYPEINFO_CLASS, false, TypeExtractor.class.getClassLoader());
 		}
 		catch (ClassNotFoundException e) {
 			throw new RuntimeException("Could not load the TypeInformation for the class '"
