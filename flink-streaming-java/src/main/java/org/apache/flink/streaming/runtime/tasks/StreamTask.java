@@ -432,7 +432,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 				// so that we avoid race conditions in the case that initializeState()
 				// registers a timer, that fires before the open() is called.
 
-				initializeStateAndOpen();
+				initializeState();
+				openAllOperators();
 			}
 
 			// final check to exit early before starting to run
@@ -573,10 +574,24 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	}
 
 	/**
+	 * Execute {@link StreamOperator#open()} of each operator in the chain of this
+	 * {@link StreamTask}. Opening happens from <b>tail to head</b> operator in the chain, contrary
+	 * to {@link StreamOperator#close()} which happens <b>head to tail</b>
+	 * (see {@link #closeAllOperators()}.
+	 */
+	private void openAllOperators() throws Exception {
+		for (StreamOperator<?> operator : operatorChain.getAllOperators()) {
+			if (operator != null) {
+				operator.open();
+			}
+		}
+	}
+
+	/**
 	 * Execute {@link StreamOperator#close()} of each operator in the chain of this
 	 * {@link StreamTask}. Closing happens from <b>head to tail</b> operator in the chain,
 	 * contrary to {@link StreamOperator#open()} which happens <b>tail to head</b>
-	 * (see {@link #initializeStateAndOpen()}).
+	 * (see {@link #openAllOperators()}.
 	 */
 	private void closeAllOperators() throws Exception {
 		// We need to close them first to last, since upstream operators in the chain might emit
@@ -700,7 +715,18 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	/**
 	 * Gets the lock object on which all operations that involve data and state mutation have to lock.
 	 * @return The checkpoint lock object.
+	 * @deprecated This method will be removed in future releases. Use {@linkplain MailboxExecutor mailbox executor}
+	 * to run {@link StreamTask} actions that require synchronization (e.g. checkpointing, collecting output).
+	 * <p>
+	 * For other (non-{@link StreamTask}) actions other synchronization means can be used.
+	 * </p>
+	 * MailboxExecutor {@link MailboxExecutor#yield() yield} or {@link MailboxExecutor#tryYield() tryYield} methods can
+	 * be used for actions that should give control to other actions temporarily.
+	 * <p>
+	 * Example use of {@linkplain MailboxExecutor mailbox executor} can be found in {@link org.apache.flink.streaming.api.operators.async.AsyncWaitOperator AsyncWaitOperator}.
+	 * </p>
 	 */
+	@Deprecated
 	public Object getCheckpointLock() {
 		return lock;
 	}
@@ -953,20 +979,13 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		checkpointingOperation.executeCheckpointing();
 	}
 
-	/**
-	 * Execute {@link StreamOperator#initializeState()} followed by {@link StreamOperator#open()} of each operator in
-	 * the chain of this {@link StreamTask}. State initialization and opening happens from <b>tail to head</b> operator
-	 * in the chain, contrary to {@link StreamOperator#close()} which happens <b>head to tail</b>
-	 * (see {@link #closeAllOperators()}.
-	 */
-	private void initializeStateAndOpen() throws Exception {
+	private void initializeState() throws Exception {
 
 		StreamOperator<?>[] allOperators = operatorChain.getAllOperators();
 
 		for (StreamOperator<?> operator : allOperators) {
 			if (null != operator) {
 				operator.initializeState();
-				operator.open();
 			}
 		}
 	}
