@@ -29,7 +29,9 @@ import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.test.TestingServer;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -101,7 +103,7 @@ public class LeaderElectionTest extends TestLogger {
 			assertThat(leaderElectionService.hasLeadership(leaderSessionId), is(true));
 			assertThat(leaderElectionService.hasLeadership(UUID.randomUUID()), is(false));
 
-			leaderElectionService.confirmLeadership(leaderSessionId, "foobar");
+			leaderElectionService.confirmLeaderSessionID(leaderSessionId);
 
 			assertThat(leaderElectionService.hasLeadership(leaderSessionId), is(true));
 
@@ -132,7 +134,7 @@ public class LeaderElectionTest extends TestLogger {
 		}
 
 		@Override
-		public String getDescription() {
+		public String getAddress() {
 			return "foobar";
 		}
 
@@ -168,6 +170,9 @@ public class LeaderElectionTest extends TestLogger {
 
 		private Configuration configuration;
 
+		@Rule
+		public TestName testName = new TestName();
+
 		@Override
 		public void setup() throws Exception {
 			try {
@@ -199,7 +204,7 @@ public class LeaderElectionTest extends TestLogger {
 
 		@Override
 		public LeaderElectionService createLeaderElectionService() throws Exception {
-			return ZooKeeperUtils.createLeaderElectionService(client, configuration);
+			return new ZooKeeperLeaderElectionService(client, testName.getMethodName());
 		}
 	}
 
