@@ -34,6 +34,7 @@ DataStreamScan(table=[[default_catalog, default_database, MyTable1]], fields=[a,
 		ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithAgg[extended=true]">
@@ -72,6 +73,7 @@ Calc(select=[EXPR$0], updateAsRetraction=[false], accMode=[Acc]): rowcount = , c
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainDataStreamScan[extended=true]">
@@ -92,6 +94,7 @@ DataStreamScan(table=[[default_catalog, default_database, MyTable1]], fields=[a,
 		ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainTableSourceScan[extended=false]">
@@ -112,6 +115,7 @@ TableSourceScan(table=[[default_catalog, default_database, MyTable, source: [Tes
 		ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainTableSourceScan[extended=true]">
@@ -132,6 +136,7 @@ TableSourceScan(table=[[default_catalog, default_database, MyTable, source: [Tes
 		ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithAgg[extended=false]">
@@ -170,6 +175,7 @@ Calc(select=[EXPR$0])
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithFilter[extended=false]">
@@ -196,6 +202,7 @@ Calc(select=[a, b, c], where=[=(MOD(a, 2), 0)])
 			ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithFilter[extended=true]">
@@ -222,6 +229,7 @@ Calc(select=[a, b, c], where=[=(MOD(a, 2), 0)], updateAsRetraction=[false], accM
 			ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithJoin[extended=false]">
@@ -265,6 +273,7 @@ Calc(select=[a, b, c, e, f])
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithUnion[extended=true]">
@@ -297,6 +306,7 @@ Union(all=[true], union=[a, b, c], updateAsRetraction=[false], accMode=[Acc]): r
 			ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithJoin[extended=true]">
@@ -340,6 +350,7 @@ Calc(select=[a, b, c, e, f], updateAsRetraction=[false], accMode=[Acc]): rowcoun
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithMultiSinks[extended=false]">
@@ -422,6 +433,7 @@ Sink(name=[`default_catalog`.`default_database`.`upsertSink2`], fields=[a, cnt])
 												ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithMultiSinks[extended=true]">
@@ -504,6 +516,7 @@ Sink(name=[`default_catalog`.`default_database`.`upsertSink2`], fields=[a, cnt],
 												ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithSingleSink[extended=false]">
@@ -540,6 +553,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink`], fields=[a, b, c])
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithSingleSink[extended=true]">
@@ -576,6 +590,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink`], fields=[a, b, c],
 					ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithSort[extended=false]">
@@ -603,6 +618,7 @@ SortLimit(orderBy=[a ASC], offset=[0], fetch=[5])
 			ship_strategy : GLOBAL
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithSort[extended=true]">
@@ -630,6 +646,7 @@ SortLimit(orderBy=[a ASC], offset=[0], fetch=[5], updateAsRetraction=[false], ac
 			ship_strategy : GLOBAL
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testMiniBatchIntervalInfer[extended=true]">
@@ -641,9 +658,9 @@ LogicalSink(name=[`default_catalog`.`default_database`.`appendSink1`], fields=[a
       +- LogicalProject(id1=[$0], $f1=[TUMBLE($2, 8000:INTERVAL SECOND)], text=[$1], $f3=[_UTF-16LE'#'])
          +- LogicalFilter(condition=[AND(=($0, $3), >($2, -($7, 300000:INTERVAL MINUTE)), <($2, +($7, 180000:INTERVAL MINUTE)))])
             +- LogicalJoin(condition=[true], joinType=[inner])
-               :- LogicalWatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               :- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($2, 0:INTERVAL MILLISECOND)])
                :  +- LogicalTableScan(table=[[default_catalog, default_database, T1]])
-               +- LogicalWatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               +- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($4, 0:INTERVAL MILLISECOND)])
                   +- LogicalTableScan(table=[[default_catalog, default_database, T2]])
 
 LogicalSink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b])
@@ -652,18 +669,18 @@ LogicalSink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a
       +- LogicalProject(id1=[$0], $f1=[HOP($2, 12000:INTERVAL SECOND, 6000:INTERVAL SECOND)], text=[$1], $f3=[_UTF-16LE'*'])
          +- LogicalFilter(condition=[AND(=($0, $3), >($2, -($7, 300000:INTERVAL MINUTE)), <($2, +($7, 180000:INTERVAL MINUTE)))])
             +- LogicalJoin(condition=[true], joinType=[inner])
-               :- LogicalWatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               :- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($2, 0:INTERVAL MILLISECOND)])
                :  +- LogicalTableScan(table=[[default_catalog, default_database, T1]])
-               +- LogicalWatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               +- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($4, 0:INTERVAL MILLISECOND)])
                   +- LogicalTableScan(table=[[default_catalog, default_database, T2]])
 
 == Optimized Logical Plan ==
 WindowJoin(joinType=[InnerJoin], windowBounds=[isRowTime=true, leftLowerBound=-299999, leftUpperBound=179999, leftTimeIndex=2, rightTimeIndex=4], where=[AND(=(id1, id2), >(CAST(rowtime), -(CAST(rowtime0), 300000:INTERVAL MINUTE)), <(CAST(rowtime), +(CAST(rowtime0), 180000:INTERVAL MINUTE)))], select=[id1, text, rowtime, id2, cnt, name, goods, rowtime0], updateAsRetraction=[true], accMode=[Acc], reuse_id=[1]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
 :- Exchange(distribution=[hash[id1]], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
-:  +- WatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
+:  +- WatermarkAssigner(rowtime=[rowtime], watermark=[-(rowtime, 0:INTERVAL MILLISECOND)], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
 :     +- DataStreamScan(table=[[default_catalog, default_database, T1]], fields=[id1, text, rowtime], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
 +- Exchange(distribution=[hash[id2]], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
-   +- WatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
+   +- WatermarkAssigner(rowtime=[rowtime], watermark=[-(rowtime, 0:INTERVAL MILLISECOND)], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
       +- DataStreamScan(table=[[default_catalog, default_database, T2]], fields=[id2, cnt, name, goods, rowtime], updateAsRetraction=[true], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
 
 Sink(name=[`default_catalog`.`default_database`.`appendSink1`], fields=[a, b], updateAsRetraction=[false], accMode=[Acc]): rowcount = , cumulative cost = {rows, cpu, io, network, memory}
@@ -690,7 +707,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b], u
 		ship_strategy : FORWARD
 
 		 : Operator
-			content : WatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+			content : WatermarkAssigner(rowtime=[rowtime], watermark=[(rowtime - 0:INTERVAL MILLISECOND)])
 			ship_strategy : FORWARD
 
 			 : Operator
@@ -698,7 +715,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b], u
 				ship_strategy : FORWARD
 
 				 : Operator
-					content : WatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+					content : WatermarkAssigner(rowtime=[rowtime], watermark=[(rowtime - 0:INTERVAL MILLISECOND)])
 					ship_strategy : FORWARD
 
 					 : Operator
@@ -738,6 +755,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b], u
 														ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testExplainWithUnion[extended=false]">
@@ -770,6 +788,7 @@ Union(all=[true], union=[a, b, c])
 			ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testMiniBatchIntervalInfer[extended=false]">
@@ -781,9 +800,9 @@ LogicalSink(name=[`default_catalog`.`default_database`.`appendSink1`], fields=[a
       +- LogicalProject(id1=[$0], $f1=[TUMBLE($2, 8000:INTERVAL SECOND)], text=[$1], $f3=[_UTF-16LE'#'])
          +- LogicalFilter(condition=[AND(=($0, $3), >($2, -($7, 300000:INTERVAL MINUTE)), <($2, +($7, 180000:INTERVAL MINUTE)))])
             +- LogicalJoin(condition=[true], joinType=[inner])
-               :- LogicalWatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               :- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($2, 0:INTERVAL MILLISECOND)])
                :  +- LogicalTableScan(table=[[default_catalog, default_database, T1]])
-               +- LogicalWatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               +- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($4, 0:INTERVAL MILLISECOND)])
                   +- LogicalTableScan(table=[[default_catalog, default_database, T2]])
 
 LogicalSink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b])
@@ -792,18 +811,18 @@ LogicalSink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a
       +- LogicalProject(id1=[$0], $f1=[HOP($2, 12000:INTERVAL SECOND, 6000:INTERVAL SECOND)], text=[$1], $f3=[_UTF-16LE'*'])
          +- LogicalFilter(condition=[AND(=($0, $3), >($2, -($7, 300000:INTERVAL MINUTE)), <($2, +($7, 180000:INTERVAL MINUTE)))])
             +- LogicalJoin(condition=[true], joinType=[inner])
-               :- LogicalWatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               :- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($2, 0:INTERVAL MILLISECOND)])
                :  +- LogicalTableScan(table=[[default_catalog, default_database, T1]])
-               +- LogicalWatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0])
+               +- LogicalWatermarkAssigner(rowtime=[rowtime], watermark=[-($4, 0:INTERVAL MILLISECOND)])
                   +- LogicalTableScan(table=[[default_catalog, default_database, T2]])
 
 == Optimized Logical Plan ==
 WindowJoin(joinType=[InnerJoin], windowBounds=[isRowTime=true, leftLowerBound=-299999, leftUpperBound=179999, leftTimeIndex=2, rightTimeIndex=4], where=[AND(=(id1, id2), >(CAST(rowtime), -(CAST(rowtime0), 300000:INTERVAL MINUTE)), <(CAST(rowtime), +(CAST(rowtime0), 180000:INTERVAL MINUTE)))], select=[id1, text, rowtime, id2, cnt, name, goods, rowtime0], reuse_id=[1])
 :- Exchange(distribution=[hash[id1]])
-:  +- WatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+:  +- WatermarkAssigner(rowtime=[rowtime], watermark=[-(rowtime, 0:INTERVAL MILLISECOND)])
 :     +- DataStreamScan(table=[[default_catalog, default_database, T1]], fields=[id1, text, rowtime])
 +- Exchange(distribution=[hash[id2]])
-   +- WatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+   +- WatermarkAssigner(rowtime=[rowtime], watermark=[-(rowtime, 0:INTERVAL MILLISECOND)])
       +- DataStreamScan(table=[[default_catalog, default_database, T2]], fields=[id2, cnt, name, goods, rowtime])
 
 Sink(name=[`default_catalog`.`default_database`.`appendSink1`], fields=[a, b])
@@ -830,7 +849,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b])
 		ship_strategy : FORWARD
 
 		 : Operator
-			content : WatermarkAssigner(fields=[id1, text, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+			content : WatermarkAssigner(rowtime=[rowtime], watermark=[(rowtime - 0:INTERVAL MILLISECOND)])
 			ship_strategy : FORWARD
 
 			 : Operator
@@ -838,7 +857,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b])
 				ship_strategy : FORWARD
 
 				 : Operator
-					content : WatermarkAssigner(fields=[id2, cnt, name, goods, rowtime], rowtimeField=[rowtime], watermarkDelay=[0], miniBatchInterval=[None])
+					content : WatermarkAssigner(rowtime=[rowtime], watermark=[(rowtime - 0:INTERVAL MILLISECOND)])
 					ship_strategy : FORWARD
 
 					 : Operator
@@ -878,6 +897,7 @@ Sink(name=[`default_catalog`.`default_database`.`appendSink2`], fields=[a, b])
 														ship_strategy : FORWARD
 
 ]]>
+
     </Resource>
   </TestCase>
 </Root>

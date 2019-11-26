@@ -24,6 +24,7 @@ import org.apache.flink.streaming.runtime.streamstatus.StreamStatus;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.dataformat.BaseRow;
 import org.apache.flink.table.dataformat.GenericRow;
+import org.apache.flink.table.runtime.generated.WatermarkGenerator;
 
 import org.junit.Test;
 
@@ -38,11 +39,13 @@ import static org.junit.Assert.assertEquals;
  */
 public class MiniBatchedWatermarkAssignerOperatorTest extends WatermarkAssignerOperatorTestBase {
 
+	private static final WatermarkGenerator WATERMARK_GENERATOR = new BoundedOutOfOrderWatermarkGenerator(0, 1);
+
 	@Test
 	public void testMiniBatchedWatermarkAssignerWithIdleSource() throws Exception {
 		// with timeout 1000 ms
 		final MiniBatchedWatermarkAssignerOperator operator = new MiniBatchedWatermarkAssignerOperator(
-				0, 1, 0, 1000, 50);
+				0, WATERMARK_GENERATOR,  1000, 50);
 		OneInputStreamOperatorTestHarness<BaseRow, BaseRow> testHarness =
 				new OneInputStreamOperatorTestHarness<>(operator);
 		testHarness.open();
@@ -84,7 +87,8 @@ public class MiniBatchedWatermarkAssignerOperatorTest extends WatermarkAssignerO
 
 	@Test
 	public void testMiniBatchedWatermarkAssignerOperator() throws Exception {
-		final MiniBatchedWatermarkAssignerOperator operator = new MiniBatchedWatermarkAssignerOperator(0, 1, 0, -1, 50);
+		final MiniBatchedWatermarkAssignerOperator operator = new MiniBatchedWatermarkAssignerOperator(
+				0, WATERMARK_GENERATOR,  -1, 50);
 
 		OneInputStreamOperatorTestHarness<BaseRow, BaseRow> testHarness =
 				new OneInputStreamOperatorTestHarness<>(operator);

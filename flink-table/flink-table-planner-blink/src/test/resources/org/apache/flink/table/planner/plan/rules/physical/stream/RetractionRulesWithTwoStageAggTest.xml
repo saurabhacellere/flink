@@ -25,6 +25,7 @@ SELECT cnt, COUNT(cnt) AS frequency FROM (
    SELECT word, cnt FROM MyTable2
 ) GROUP BY cnt
       ]]>
+
     </Resource>
     <Resource name="planBefore">
       <![CDATA[
@@ -36,6 +37,7 @@ LogicalAggregate(group=[{0}], frequency=[COUNT($0)])
       +- LogicalProject(word=[$0], cnt=[$1])
          +- LogicalTableScan(table=[[default_catalog, default_database, MyTable2, source: [TestTableSource(word, cnt)]]])
 ]]>
+
     </Resource>
     <Resource name="planAfter">
       <![CDATA[
@@ -47,17 +49,19 @@ GlobalGroupAggregate(groupBy=[cnt], select=[cnt, COUNT_RETRACT(count$0) AS frequ
          :  +- GlobalGroupAggregate(groupBy=[word], select=[word, COUNT(count$0) AS cnt], updateAsRetraction=[true], accMode=[AccRetract])
          :     +- Exchange(distribution=[hash[word]], updateAsRetraction=[true], accMode=[Acc])
          :        +- LocalGroupAggregate(groupBy=[word], select=[word, COUNT(number) AS count$0], updateAsRetraction=[true], accMode=[Acc])
-         :           +- WatermarkAssigner(fields=[word, number], miniBatchInterval=[Proctime, 1000ms], updateAsRetraction=[true], accMode=[Acc])
+         :           +- MiniBatchAssigner(interval=[1000ms], updateAsRetraction=[true], accMode=[Acc])
          :              +- TableSourceScan(table=[[default_catalog, default_database, MyTable, source: [TestTableSource(word, number)]]], fields=[word, number], updateAsRetraction=[true], accMode=[Acc])
          +- Calc(select=[cnt], updateAsRetraction=[true], accMode=[Acc])
-            +- WatermarkAssigner(fields=[word, cnt], miniBatchInterval=[Proctime, 1000ms], updateAsRetraction=[true], accMode=[Acc])
+            +- MiniBatchAssigner(interval=[1000ms], updateAsRetraction=[true], accMode=[Acc])
                +- TableSourceScan(table=[[default_catalog, default_database, MyTable2, source: [TestTableSource(word, cnt)]]], fields=[word, cnt], updateAsRetraction=[true], accMode=[Acc])
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testOneLevelGroupBy">
     <Resource name="sql">
       <![CDATA[SELECT COUNT(number) FROM MyTable GROUP BY word]]>
+
     </Resource>
     <Resource name="planBefore">
       <![CDATA[
@@ -65,6 +69,7 @@ LogicalProject(EXPR$0=[$1])
 +- LogicalAggregate(group=[{0}], EXPR$0=[COUNT($1)])
    +- LogicalTableScan(table=[[default_catalog, default_database, MyTable, source: [TestTableSource(word, number)]]])
 ]]>
+
     </Resource>
     <Resource name="planAfter">
       <![CDATA[
@@ -72,9 +77,10 @@ Calc(select=[EXPR$0], updateAsRetraction=[false], accMode=[Acc])
 +- GlobalGroupAggregate(groupBy=[word], select=[word, COUNT(count$0) AS EXPR$0], updateAsRetraction=[false], accMode=[Acc])
    +- Exchange(distribution=[hash[word]], updateAsRetraction=[true], accMode=[Acc])
       +- LocalGroupAggregate(groupBy=[word], select=[word, COUNT(number) AS count$0], updateAsRetraction=[true], accMode=[Acc])
-         +- WatermarkAssigner(fields=[word, number], miniBatchInterval=[Proctime, 1000ms], updateAsRetraction=[true], accMode=[Acc])
+         +- MiniBatchAssigner(interval=[1000ms], updateAsRetraction=[true], accMode=[Acc])
             +- TableSourceScan(table=[[default_catalog, default_database, MyTable, source: [TestTableSource(word, number)]]], fields=[word, number], updateAsRetraction=[true], accMode=[Acc])
 ]]>
+
     </Resource>
   </TestCase>
   <TestCase name="testTwoLevelGroupBy">
@@ -84,6 +90,7 @@ SELECT cnt, COUNT(cnt) AS frequency FROM (
   SELECT word, COUNT(number) as cnt FROM MyTable GROUP BY word
 ) GROUP BY cnt
       ]]>
+
     </Resource>
     <Resource name="planBefore">
       <![CDATA[
@@ -92,6 +99,7 @@ LogicalAggregate(group=[{0}], frequency=[COUNT()])
    +- LogicalAggregate(group=[{0}], cnt=[COUNT($1)])
       +- LogicalTableScan(table=[[default_catalog, default_database, MyTable, source: [TestTableSource(word, number)]]])
 ]]>
+
     </Resource>
     <Resource name="planAfter">
       <![CDATA[
@@ -102,9 +110,10 @@ GlobalGroupAggregate(groupBy=[cnt], select=[cnt, COUNT_RETRACT(count1$0) AS freq
          +- GlobalGroupAggregate(groupBy=[word], select=[word, COUNT(count$0) AS cnt], updateAsRetraction=[true], accMode=[AccRetract])
             +- Exchange(distribution=[hash[word]], updateAsRetraction=[true], accMode=[Acc])
                +- LocalGroupAggregate(groupBy=[word], select=[word, COUNT(number) AS count$0], updateAsRetraction=[true], accMode=[Acc])
-                  +- WatermarkAssigner(fields=[word, number], miniBatchInterval=[Proctime, 1000ms], updateAsRetraction=[true], accMode=[Acc])
+                  +- MiniBatchAssigner(interval=[1000ms], updateAsRetraction=[true], accMode=[Acc])
                      +- TableSourceScan(table=[[default_catalog, default_database, MyTable, source: [TestTableSource(word, number)]]], fields=[word, number], updateAsRetraction=[true], accMode=[Acc])
 ]]>
+
     </Resource>
   </TestCase>
 </Root>

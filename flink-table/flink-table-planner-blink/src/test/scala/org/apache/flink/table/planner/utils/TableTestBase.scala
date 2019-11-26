@@ -17,6 +17,7 @@
  */
 package org.apache.flink.table.planner.utils
 
+import org.apache.calcite.avatica.util.TimeUnit
 import org.apache.flink.api.common.JobExecutionResult
 import org.apache.flink.api.common.typeinfo.{AtomicType, TypeInformation}
 import org.apache.flink.api.java.typeutils.{PojoTypeInfo, RowTypeInfo, TupleTypeInfo}
@@ -58,15 +59,18 @@ import org.apache.flink.table.types.utils.TypeConversions
 import org.apache.flink.table.typeutils.FieldInfoUtils
 import org.apache.flink.types.Row
 import org.apache.calcite.rel.RelNode
-import org.apache.calcite.sql.SqlExplainLevel
+import org.apache.calcite.sql.parser.SqlParserPos
+import org.apache.calcite.sql.{SqlExplainLevel, SqlIntervalQualifier}
 import org.apache.commons.lang3.SystemUtils
 import org.junit.Assert.{assertEquals, assertTrue}
 import org.junit.Rule
 import org.junit.rules.{ExpectedException, TestName}
 
 import _root_.java.util
+import _root_.java.math.{BigDecimal => JBigDecimal}
 import org.apache.flink.table.module.ModuleManager
 import org.apache.flink.table.operations.ddl.CreateTableOperation
+import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable
 
 import _root_.scala.collection.JavaConversions._
 import _root_.scala.io.Source
@@ -734,12 +738,18 @@ case class StreamTableTestUtil(
     if (rowtimeFieldIdx < 0) {
       throw new TableException(s"$rowtimeField does not exist, please check it")
     }
+    val rexBuilder = sourceRel.getCluster.getRexBuilder
+    val inputRef = rexBuilder.makeInputRef(sourceRel, rowtimeFieldIdx)
+    val offsetLiteral = rexBuilder.makeIntervalLiteral(
+      JBigDecimal.valueOf(offset),
+      new SqlIntervalQualifier(TimeUnit.MILLISECOND, null, SqlParserPos.ZERO))
+    val expr = rexBuilder.makeCall(FlinkSqlOperatorTable.MINUS, inputRef, offsetLiteral)
     val watermarkAssigner = new LogicalWatermarkAssigner(
       sourceRel.getCluster,
       sourceRel.getTraitSet,
       sourceRel,
-      Some(rowtimeFieldIdx),
-      Option(offset)
+      rowtimeFieldIdx,
+      expr
     )
     val queryOperation = new PlannerQueryOperation(watermarkAssigner)
     testingTableEnv.registerTable(tableName, testingTableEnv.createTable(queryOperation))

@@ -274,8 +274,10 @@ class MiniBatchIntervalInferTest extends TableTestBase {
     */
   @Test
   def testMultipleWindowAggregates(): Unit = {
-    util.addDataStream[(Int, Long, String)]("T1", 'id1, 'rowtime, 'text)
-    util.addDataStream[(Int, Long, Int, String, String)]("T2", 'id2, 'rowtime, 'cnt, 'name, 'goods)
+    util.addDataStream[(Int, Long, String)]("T1", 'id1, 'rowtime.rowtime, 'text)
+    util.addDataStream[(Int, Long, Int, String, String)](
+      "T2",
+      'id2, 'rowtime.rowtime, 'cnt, 'name, 'goods)
     util.addTableWithWatermark("T3", util.tableEnv.scan("T1"), "rowtime", 0)
     util.addTableWithWatermark("T4", util.tableEnv.scan("T2"), "rowtime", 0)
 
