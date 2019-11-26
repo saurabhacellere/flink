@@ -16,31 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.flink.runtime.rest.messages.taskmanager;
+package org.apache.flink.runtime.rest.messages;
 
 import org.apache.flink.runtime.rest.HttpMethodWrapper;
-import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerLogFileHandler;
-import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
-import org.apache.flink.runtime.rest.messages.LogFilenameQueryParameter;
-import org.apache.flink.runtime.rest.messages.LogSizeQueryParameter;
-import org.apache.flink.runtime.rest.messages.LogStartOffsetQueryParameter;
-import org.apache.flink.runtime.rest.messages.MessageQueryParameter;
-import org.apache.flink.runtime.rest.messages.UntypedResponseMessageHeaders;
 
 import org.apache.flink.shaded.guava18.com.google.common.collect.Lists;
 
 import java.util.Collection;
+import java.util.Collections;
 
 /**
- * Headers for the {@link TaskManagerLogFileHandler}.
+ * Message headers for the {@link org.apache.flink.runtime.rest.handler.files.JobManagerLogFileHandler}..
  */
-public class TaskManagerLogFileHeaders implements UntypedResponseMessageHeaders<EmptyRequestBody, TaskManagerMessageParameters> {
+public class JobManagerStdoutFileHeaders implements UntypedResponseMessageHeaders<EmptyRequestBody, MessageParameters>  {
+	private static final JobManagerStdoutFileHeaders INSTANCE = new JobManagerStdoutFileHeaders();
 
-	private static final TaskManagerLogFileHeaders INSTANCE = new TaskManagerLogFileHeaders();
-
-	private static final String URL = String.format("/taskmanagers/:%s/log", TaskManagerIdPathParameter.KEY);
-
-	private TaskManagerLogFileHeaders() {}
+	private static final String URL = String.format("/jobmanager/stdout");
 
 	@Override
 	public Class<EmptyRequestBody> getRequestClass() {
@@ -48,15 +39,19 @@ public class TaskManagerLogFileHeaders implements UntypedResponseMessageHeaders<
 	}
 
 	@Override
-	public TaskManagerMessageParameters getUnresolvedMessageParameters() {
-		return new TaskManagerMessageParameters(){
-			private final LogFilenameQueryParameter logFileHandlerSpecification = new LogFilenameQueryParameter();
+	public MessageParameters getUnresolvedMessageParameters() {
+		return new MessageParameters() {
 			private final LogStartOffsetQueryParameter logStartOffsetQueryParameter = new LogStartOffsetQueryParameter();
 			private final LogSizeQueryParameter logSizeQueryParameter = new LogSizeQueryParameter();
 
 			@Override
+			public Collection<MessagePathParameter<?>> getPathParameters() {
+				return Collections.emptySet();
+			}
+
+			@Override
 			public Collection<MessageQueryParameter<?>> getQueryParameters() {
-				return Lists.newArrayList(logFileHandlerSpecification, logStartOffsetQueryParameter, logSizeQueryParameter);
+				return Lists.newArrayList(logStartOffsetQueryParameter, logSizeQueryParameter);
 			}
 		};
 	}
@@ -71,7 +66,7 @@ public class TaskManagerLogFileHeaders implements UntypedResponseMessageHeaders<
 		return URL;
 	}
 
-	public static TaskManagerLogFileHeaders getInstance() {
+	public static JobManagerStdoutFileHeaders getInstance() {
 		return INSTANCE;
 	}
 }

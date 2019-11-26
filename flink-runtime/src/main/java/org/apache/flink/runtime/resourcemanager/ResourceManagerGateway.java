@@ -34,13 +34,13 @@ import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.metrics.dump.MetricQueryService;
 import org.apache.flink.runtime.registration.RegistrationResponse;
+import org.apache.flink.runtime.util.FileOffsetRange;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.FencedRpcGateway;
 import org.apache.flink.runtime.rpc.RpcTimeout;
 import org.apache.flink.runtime.taskexecutor.FileType;
 import org.apache.flink.runtime.taskexecutor.SlotReport;
 import org.apache.flink.runtime.taskexecutor.TaskExecutor;
-import org.apache.flink.runtime.taskexecutor.TaskExecutorHeartbeatPayload;
 
 import javax.annotation.Nullable;
 
@@ -133,6 +133,21 @@ public interface ResourceManagerGateway extends FencedRpcGateway<ResourceManager
 		AllocationID oldAllocationId);
 
 	/**
+	 * Registers an infoMessage listener
+	 *
+	 * @param infoMessageListenerAddress address of infoMessage listener to register to this resource manager
+	 */
+	void registerInfoMessageListener(String infoMessageListenerAddress);
+
+	/**
+	 * Unregisters an infoMessage listener
+	 *
+	 * @param infoMessageListenerAddress address of infoMessage listener to unregister from this resource manager
+	 *
+	 */
+	void unRegisterInfoMessageListener(String infoMessageListenerAddress);
+
+	/**
 	 * Deregister Flink from the underlying resource management system.
 	 *
 	 * @param finalStatus final status with which to deregister the Flink application
@@ -151,9 +166,9 @@ public interface ResourceManagerGateway extends FencedRpcGateway<ResourceManager
 	 * Sends the heartbeat to resource manager from task manager
 	 *
 	 * @param heartbeatOrigin unique id of the task manager
-	 * @param heartbeatPayload payload from the originating TaskManager
+	 * @param slotReport Current slot allocation on the originating TaskManager
 	 */
-	void heartbeatFromTaskManager(final ResourceID heartbeatOrigin, final TaskExecutorHeartbeatPayload heartbeatPayload);
+	void heartbeatFromTaskManager(final ResourceID heartbeatOrigin, final SlotReport slotReport);
 
 	/**
 	 * Sends the heartbeat to resource manager from job manager
@@ -210,7 +225,7 @@ public interface ResourceManagerGateway extends FencedRpcGateway<ResourceManager
 	 * @param timeout for the asynchronous operation
 	 * @return Future containing the collection of resource ids and the corresponding metric query service path
 	 */
-	CompletableFuture<Collection<Tuple2<ResourceID, String>>> requestTaskManagerMetricQueryServiceAddresses(@RpcTimeout Time timeout);
+	CompletableFuture<Collection<Tuple2<ResourceID, String>>> requestTaskManagerMetricQueryServicePaths(@RpcTimeout Time timeout);
 
 	/**
 	 * Request the file upload from the given {@link TaskExecutor} to the cluster's {@link BlobServer}. The
@@ -222,5 +237,19 @@ public interface ResourceManagerGateway extends FencedRpcGateway<ResourceManager
 	 * @return Future which is completed with the {@link TransientBlobKey} after uploading the file to the
 	 * {@link BlobServer}.
 	 */
-	CompletableFuture<TransientBlobKey> requestTaskManagerFileUpload(ResourceID taskManagerId, FileType fileType, @RpcTimeout Time timeout);
+	CompletableFuture<TransientBlobKey> requestTaskManagerFileUpload(
+		ResourceID taskManagerId,
+		FileType fileType,
+		@RpcTimeout Time timeout,
+		String filename,
+		FileOffsetRange range);
+
+	/**
+	 * Request historical loglist from from the given {@link TaskExecutor}
+	 *
+	 * @param taskManagerId identifying the {@link TaskExecutor} to get loglist from
+	 * @param timeout for the asynchronous operation
+	 * @return Future which is completed with the historical log list
+	 */
+	CompletableFuture<String[]> requestTaskManagerLogList(ResourceID taskManagerId, @RpcTimeout Time timeout);
 }
