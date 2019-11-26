@@ -120,32 +120,18 @@ parallelism.default: 1
 #
 # state.backend.incremental: false
 
-# The failover strategy, i.e., how the job computation recovers from task failures.
-# Only restart tasks that may have been affected by the task failure, which typically includes
-# downstream tasks and potentially upstream tasks if their produced data is no longer available for consumption.
-
-jobmanager.execution.failover-strategy: region
-
 #==============================================================================
-# Rest & web frontend
+# Web Frontend
 #==============================================================================
 
-# The port to which the REST client connects to. If rest.bind-port has
-# not been specified, then the server will bind to this port as well.
+# The address under which the web-based runtime monitor listens.
 #
-#rest.port: 8081
+#web.address: 0.0.0.0
 
-# The address to which the REST client will connect to
-#
-#rest.address: 0.0.0.0
+# The port under which the web-based runtime monitor listens.
+# A value of -1 deactivates the web server.
 
-# Port range for the REST and web server to bind to.
-#
-#rest.bind-port: 8080-8090
-
-# The address that the REST & web server binds to
-#
-#rest.bind-address: 0.0.0.0
+rest.port: 8081
 
 # Flag to specify whether job submission is enabled from the web-based
 # runtime monitor. Uncomment to disable.
@@ -172,6 +158,17 @@ jobmanager.execution.failover-strategy: region
 # high-throughput RAIDs.
 #
 # io.tmp.dirs: /tmp
+
+# Specify whether TaskManager's managed memory should be allocated when starting
+# up (true) or when memory is requested.
+#
+# We recommend to set this value to 'true' only in setups for pure batch
+# processing (DataSet API). Streaming setups currently do not use the TaskManager's
+# managed memory: The 'rocksdb' state backend uses RocksDB's own memory management,
+# while the 'memory' and 'filesystem' backends explicitly keep data as objects
+# to save on serialization cost.
+#
+# taskmanager.memory.preallocate: false
 
 # The classloading resolve order. Possible values are 'child-first' (Flink's default)
 # and 'parent-first' (Java's default).
@@ -246,3 +243,5 @@ jobmanager.execution.failover-strategy: region
 # Interval in milliseconds for refreshing the monitored directories.
 #historyserver.archive.fs.refresh-interval: 10000
 
+# How long you want to retain archived job in milliseconds. The default value of -1 means no cleanup.
+#historyserver.archive.fs.retained-application-millis: -1
