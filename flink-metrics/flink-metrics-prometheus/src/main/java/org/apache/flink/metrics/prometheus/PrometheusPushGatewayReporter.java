@@ -24,18 +24,16 @@ import org.apache.flink.metrics.MetricConfig;
 import org.apache.flink.metrics.reporter.MetricReporter;
 import org.apache.flink.metrics.reporter.Scheduled;
 import org.apache.flink.util.AbstractID;
-import org.apache.flink.util.StringUtils;
 
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.exporter.PushGateway;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporterOptions.DELETE_ON_SHUTDOWN;
-import static org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporterOptions.GROUPING_KEY;
 import static org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporterOptions.HOST;
 import static org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporterOptions.JOB_NAME;
 import static org.apache.flink.metrics.prometheus.PrometheusPushGatewayReporterOptions.PORT;
@@ -50,7 +48,7 @@ public class PrometheusPushGatewayReporter extends AbstractPrometheusReporter im
 	private PushGateway pushGateway;
 	private String jobName;
 	private boolean deleteOnShutdown;
-	private Map<String, String> groupingKey;
+	private Map<String, String> instance;
 
 	@Override
 	public void open(MetricConfig config) {
@@ -61,7 +59,6 @@ public class PrometheusPushGatewayReporter extends AbstractPrometheusReporter im
 		String configuredJobName = config.getString(JOB_NAME.key(), JOB_NAME.defaultValue());
 		boolean randomSuffix = config.getBoolean(RANDOM_JOB_NAME_SUFFIX.key(), RANDOM_JOB_NAME_SUFFIX.defaultValue());
 		deleteOnShutdown = config.getBoolean(DELETE_ON_SHUTDOWN.key(), DELETE_ON_SHUTDOWN.defaultValue());
-		groupingKey = parseGroupingKey(config.getString(GROUPING_KEY.key(), GROUPING_KEY.defaultValue()));
 
 		if (host == null || host.isEmpty() || port < 1) {
 			throw new IllegalArgumentException("Invalid host/port configuration. Host: " + host + " Port: " + port);
@@ -73,42 +70,18 @@ public class PrometheusPushGatewayReporter extends AbstractPrometheusReporter im
 			this.jobName = configuredJobName;
 		}
 
+		instance = Collections.singletonMap("instance", this.jobName + "-" + UUID.randomUUID().toString().replace("-", ""));
+
 		pushGateway = new PushGateway(host + ':' + port);
-		log.info("Configured PrometheusPushGatewayReporter with {host:{}, port:{}, jobName:{}, randomJobNameSuffix:{}, deleteOnShutdown:{}, groupingKey:{}}",
-			host, port, jobName, randomSuffix, deleteOnShutdown, groupingKey);
-	}
-
-	Map<String, String> parseGroupingKey(final String groupingKeyConfig) {
-		if (!groupingKeyConfig.isEmpty()) {
-			Map<String, String> groupingKey = new HashMap<>();
-			String[] kvs = groupingKeyConfig.split(";");
-			for (String kv : kvs) {
-				int idx = kv.indexOf("=");
-				if (idx < 0) {
-					log.warn("Invalid prometheusPushGateway groupingKey:{}, will be ignored", kv);
-					continue;
-				}
-
-				String labelKey = kv.substring(0, idx);
-				String labelValue = kv.substring(idx + 1);
-				if (StringUtils.isNullOrWhitespaceOnly(labelKey) || StringUtils.isNullOrWhitespaceOnly(labelValue)) {
-					log.warn("Invalid groupingKey {labelKey:{}, labelValue:{}} must not be empty", labelKey, labelValue);
-					continue;
-				}
-				groupingKey.put(labelKey, labelValue);
-			}
-
-			return groupingKey;
-		}
-		return Collections.emptyMap();
+		log.info("Configured PrometheusPushGatewayReporter with {host:{}, port:{}, jobName: {}, randomJobNameSuffix:{}, deleteOnShutdown:{}}", host, port, jobName, randomSuffix, deleteOnShutdown);
 	}
 
 	@Override
 	public void report() {
 		try {
-			pushGateway.push(CollectorRegistry.defaultRegistry, jobName, groupingKey);
+			pushGateway.push(CollectorRegistry.defaultRegistry, jobName, instance);
 		} catch (Exception e) {
-			log.warn("Failed to push metrics to PushGateway with jobName {}, groupingKey {}.", jobName, groupingKey, e);
+			log.warn("Failed to push metrics to PushGateway with jobName {}.", jobName, e);
 		}
 	}
 
@@ -116,9 +89,9 @@ public class PrometheusPushGatewayReporter extends AbstractPrometheusReporter im
 	public void close() {
 		if (deleteOnShutdown && pushGateway != null) {
 			try {
-				pushGateway.delete(jobName, groupingKey);
+				pushGateway.delete(jobName);
 			} catch (IOException e) {
-				log.warn("Failed to delete metrics from PushGateway with jobName {}, groupingKey {}.", jobName, groupingKey, e);
+				log.warn("Failed to delete metrics from PushGateway with jobName {}.", jobName, e);
 			}
 		}
 		super.close();
