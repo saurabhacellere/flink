@@ -29,14 +29,13 @@ import org.apache.flink.streaming.api.scala.{DataStream, StreamExecutionEnvironm
 import org.apache.flink.table.api._
 import org.apache.flink.table.api.internal.TableEnvironmentImpl
 import org.apache.flink.table.api.scala.StreamTableEnvironment
-import org.apache.flink.table.catalog.{CatalogManager, FunctionCatalog, GenericInMemoryCatalog, ObjectIdentifier}
+import org.apache.flink.table.catalog.{CatalogManager, FunctionCatalog, GenericInMemoryCatalog}
 import org.apache.flink.table.delegation.{Executor, ExecutorFactory, Planner, PlannerFactory}
 import org.apache.flink.table.descriptors.{ConnectorDescriptor, StreamTableDescriptor}
 import org.apache.flink.table.expressions.Expression
 import org.apache.flink.table.factories.ComponentFactoryService
 import org.apache.flink.table.functions.{AggregateFunction, TableAggregateFunction, TableFunction, UserFunctionsTypeHelper}
-import org.apache.flink.table.module.ModuleManager
-import org.apache.flink.table.operations.{OutputConversionModifyOperation, QueryOperation, ScalaDataStreamQueryOperation}
+import org.apache.flink.table.operations.{OutputConversionModifyOperation, ScalaDataStreamQueryOperation}
 import org.apache.flink.table.sources.{TableSource, TableSourceValidation}
 import org.apache.flink.table.types.utils.TypeConversions
 import org.apache.flink.table.typeutils.FieldInfoUtils
@@ -53,7 +52,6 @@ import _root_.scala.collection.JavaConverters._
 @Internal
 class StreamTableEnvironmentImpl (
     catalogManager: CatalogManager,
-    moduleManager: ModuleManager,
     functionCatalog: FunctionCatalog,
     config: TableConfig,
     scalaExecutionEnvironment: StreamExecutionEnvironment,
@@ -62,7 +60,6 @@ class StreamTableEnvironmentImpl (
     isStreaming: Boolean)
   extends TableEnvironmentImpl(
     catalogManager,
-    moduleManager,
     config,
     executor,
     functionCatalog,
@@ -104,7 +101,7 @@ class StreamTableEnvironmentImpl (
       table.getQueryOperation,
       TypeConversions.fromLegacyInfoToDataType(returnType),
       OutputConversionModifyOperation.UpdateMode.APPEND)
-    toDataStream[T](table, modifyOperation)
+    toDataStream(table, modifyOperation)
   }
 
   override def toAppendStream[T: TypeInformation](
@@ -140,7 +137,7 @@ class StreamTableEnvironmentImpl (
   override def registerFunction[T: TypeInformation](name: String, tf: TableFunction[T]): Unit = {
     val typeInfo = UserFunctionsTypeHelper
       .getReturnTypeOfTableFunction(tf, implicitly[TypeInformation[T]])
-    functionCatalog.registerTempSystemTableFunction(
+    functionCatalog.registerTableFunction(
       name,
       tf,
       typeInfo
@@ -155,7 +152,7 @@ class StreamTableEnvironmentImpl (
       .getReturnTypeOfAggregateFunction(f, implicitly[TypeInformation[T]])
     val accTypeInfo = UserFunctionsTypeHelper
       .getAccumulatorTypeOfAggregateFunction(f, implicitly[TypeInformation[ACC]])
-    functionCatalog.registerTempSystemAggregateFunction(
+    functionCatalog.registerAggregateFunction(
       name,
       f,
       typeInfo,
@@ -171,7 +168,7 @@ class StreamTableEnvironmentImpl (
       .getReturnTypeOfAggregateFunction(f, implicitly[TypeInformation[T]])
     val accTypeInfo = UserFunctionsTypeHelper
       .getAccumulatorTypeOfAggregateFunction(f, implicitly[TypeInformation[ACC]])
-    functionCatalog.registerTempSystemAggregateFunction(
+    functionCatalog.registerAggregateFunction(
       name,
       f,
       typeInfo,
@@ -195,12 +192,6 @@ class StreamTableEnvironmentImpl (
   }
 
   override protected def isEagerOperationTranslation(): Boolean = true
-
-  override def explain(extended: Boolean): String = {
-    // throw exception directly, because the operations to explain are always empty
-    throw new TableException(
-      "'explain' method without any tables is unsupported in StreamTableEnvironment.")
-  }
 
   private def toDataStream[T](
       table: Table,
@@ -254,20 +245,6 @@ class StreamTableEnvironmentImpl (
       typeInfoSchema.toTableSchema)
   }
 
-  override protected def qualifyQueryOperation(
-    identifier: ObjectIdentifier,
-    queryOperation: QueryOperation): QueryOperation = queryOperation match {
-    case qo: ScalaDataStreamQueryOperation[Any] =>
-      new ScalaDataStreamQueryOperation[Any](
-        identifier,
-        qo.getDataStream,
-        qo.getFieldIndices,
-        qo.getTableSchema
-      )
-    case _ =>
-      queryOperation
-  }
-
   override def sqlUpdate(stmt: String, config: StreamQueryConfig): Unit = {
     tableConfig
       .setIdleStateRetentionTime(
@@ -287,19 +264,6 @@ class StreamTableEnvironmentImpl (
         Time.milliseconds(queryConfig.getMaxIdleStateRetentionTime))
     insertInto(table, sinkPath, sinkPathContinued: _*)
   }
-
-  override def createTemporaryView[T](
-      path: String,
-      dataStream: DataStream[T]): Unit = {
-    createTemporaryView(path, fromDataStream(dataStream))
-  }
-
-  override def createTemporaryView[T](
-      path: String,
-      dataStream: DataStream[T],
-      fields: Expression*): Unit = {
-    createTemporaryView(path, fromDataStream(dataStream, fields: _*))
-  }
 }
 
 object StreamTableEnvironmentImpl {
@@ -310,12 +274,12 @@ object StreamTableEnvironmentImpl {
       tableConfig: TableConfig)
     : StreamTableEnvironmentImpl = {
 
+    val functionCatalog = new FunctionCatalog(
+      settings.getBuiltInCatalogName,
+      settings.getBuiltInDatabaseName)
     val catalogManager = new CatalogManager(
       settings.getBuiltInCatalogName,
       new GenericInMemoryCatalog(settings.getBuiltInCatalogName, settings.getBuiltInDatabaseName))
-
-    val moduleManager = new ModuleManager
-    val functionCatalog = new FunctionCatalog(catalogManager, moduleManager)
 
     val executorProperties = settings.toExecutorProperties
     val executor = lookupExecutor(executorProperties, executionEnvironment)
@@ -331,13 +295,12 @@ object StreamTableEnvironmentImpl {
 
     new StreamTableEnvironmentImpl(
       catalogManager,
-      moduleManager,
       functionCatalog,
       tableConfig,
       executionEnvironment,
       planner,
       executor,
-      settings.isStreamingMode
+      !settings.isBatchMode
     )
   }
 
