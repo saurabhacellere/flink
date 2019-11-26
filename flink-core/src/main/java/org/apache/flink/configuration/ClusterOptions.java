@@ -19,9 +19,6 @@
 package org.apache.flink.configuration;
 
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.configuration.description.Description;
-
-import static org.apache.flink.configuration.description.TextElement.code;
 
 /**
  * Options which control the cluster behaviour.
@@ -54,12 +51,8 @@ public class ClusterOptions {
 		.defaultValue(30000L)
 		.withDescription("The shutdown timeout for cluster services like executors in milliseconds.");
 
-	public static final ConfigOption<Boolean> EVENLY_SPREAD_OUT_SLOTS_STRATEGY = ConfigOptions
-		.key("cluster.evenly-spread-out-slots")
-		.defaultValue(false)
-		.withDescription(
-			Description.builder()
-				.text("Enable the slot spread out allocation strategy. This strategy tries to spread out " +
-					"the slots evenly across all available %s.", code("TaskExecutors"))
-				.build());
+	public static final ConfigOption<String> CLUSTER_FS_SERVERS = ConfigOptions
+		.key("cluster.fs-servers")
+		.noDefaultValue()
+        .withDescription("Multi filesystem list to obtain hdfs delegation tokens.");
 }
