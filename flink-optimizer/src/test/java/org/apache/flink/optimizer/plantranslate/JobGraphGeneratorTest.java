@@ -23,11 +23,13 @@ import org.apache.flink.api.common.aggregators.LongSumAggregator;
 import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.operators.ResourceSpec;
+import org.apache.flink.api.common.operators.util.UserCodeWrapper;
 import org.apache.flink.api.java.DataSet;
 import org.apache.flink.api.java.ExecutionEnvironment;
-import org.apache.flink.api.java.io.BlockingShuffleOutputFormat;
 import org.apache.flink.api.java.io.DiscardingOutputFormat;
+import org.apache.flink.api.java.io.BlockingShuffleOutputFormat;
 import org.apache.flink.api.java.operators.DataSink;
 import org.apache.flink.api.java.operators.DeltaIteration;
 import org.apache.flink.api.java.operators.IterativeDataSet;
@@ -36,11 +38,14 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.optimizer.Optimizer;
 import org.apache.flink.optimizer.plan.OptimizedPlan;
-import org.apache.flink.optimizer.testfunctions.IdentityMapper;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
+import org.apache.flink.runtime.jobgraph.InputFormatVertex;
 import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobVertex;
+
+import org.apache.flink.runtime.jobgraph.OutputFormatVertex;
+import org.apache.flink.runtime.operators.util.TaskConfig;
 import org.apache.flink.util.AbstractID;
 
 import org.hamcrest.Matchers;
@@ -73,13 +78,13 @@ public class JobGraphGeneratorTest {
 	 */
 	@Test
 	public void testResourcesForChainedOperators() throws Exception {
-		ResourceSpec resource1 = ResourceSpec.newBuilder(0.1, 100).build();
-		ResourceSpec resource2 = ResourceSpec.newBuilder(0.2, 200).build();
-		ResourceSpec resource3 = ResourceSpec.newBuilder(0.3, 300).build();
-		ResourceSpec resource4 = ResourceSpec.newBuilder(0.4, 400).build();
-		ResourceSpec resource5 = ResourceSpec.newBuilder(0.5, 500).build();
-		ResourceSpec resource6 = ResourceSpec.newBuilder(0.6, 600).build();
-		ResourceSpec resource7 = ResourceSpec.newBuilder(0.7, 700).build();
+		ResourceSpec resource1 = ResourceSpec.newBuilder().setCpuCores(0.1).setHeapMemoryInMB(100).build();
+		ResourceSpec resource2 = ResourceSpec.newBuilder().setCpuCores(0.2).setHeapMemoryInMB(200).build();
+		ResourceSpec resource3 = ResourceSpec.newBuilder().setCpuCores(0.3).setHeapMemoryInMB(300).build();
+		ResourceSpec resource4 = ResourceSpec.newBuilder().setCpuCores(0.4).setHeapMemoryInMB(400).build();
+		ResourceSpec resource5 = ResourceSpec.newBuilder().setCpuCores(0.5).setHeapMemoryInMB(500).build();
+		ResourceSpec resource6 = ResourceSpec.newBuilder().setCpuCores(0.6).setHeapMemoryInMB(600).build();
+		ResourceSpec resource7 = ResourceSpec.newBuilder().setCpuCores(0.7).setHeapMemoryInMB(700).build();
 
 		Method opMethod = Operator.class.getDeclaredMethod("setResources", ResourceSpec.class);
 		opMethod.setAccessible(true);
@@ -126,7 +131,12 @@ public class JobGraphGeneratorTest {
 		DataSink<Long> sink = startOfIteration.closeWith(feedback).output(new DiscardingOutputFormat<Long>());
 		sinkMethod.invoke(sink, resource7);
 
-		JobGraph jobGraph = compileJob(env);
+		Plan plan = env.createProgramPlan();
+		Optimizer pc = new Optimizer(new Configuration());
+		OptimizedPlan op = pc.compile(plan);
+
+		JobGraphGenerator jgg = new JobGraphGenerator();
+		JobGraph jobGraph = jgg.compileJobGraph(op);
 
 		JobVertex sourceMapFilterVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(0);
 		JobVertex iterationHeadVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(1);
@@ -147,12 +157,12 @@ public class JobGraphGeneratorTest {
 	 */
 	@Test
 	public void testResourcesForDeltaIteration() throws Exception{
-		ResourceSpec resource1 = ResourceSpec.newBuilder(0.1, 100).build();
-		ResourceSpec resource2 = ResourceSpec.newBuilder(0.2, 200).build();
-		ResourceSpec resource3 = ResourceSpec.newBuilder(0.3, 300).build();
-		ResourceSpec resource4 = ResourceSpec.newBuilder(0.4, 400).build();
-		ResourceSpec resource5 = ResourceSpec.newBuilder(0.5, 500).build();
-		ResourceSpec resource6 = ResourceSpec.newBuilder(0.6, 600).build();
+		ResourceSpec resource1 = ResourceSpec.newBuilder().setCpuCores(0.1).setHeapMemoryInMB(100).build();
+		ResourceSpec resource2 = ResourceSpec.newBuilder().setCpuCores(0.2).setHeapMemoryInMB(200).build();
+		ResourceSpec resource3 = ResourceSpec.newBuilder().setCpuCores(0.3).setHeapMemoryInMB(300).build();
+		ResourceSpec resource4 = ResourceSpec.newBuilder().setCpuCores(0.4).setHeapMemoryInMB(400).build();
+		ResourceSpec resource5 = ResourceSpec.newBuilder().setCpuCores(0.5).setHeapMemoryInMB(500).build();
+		ResourceSpec resource6 = ResourceSpec.newBuilder().setCpuCores(0.6).setHeapMemoryInMB(600).build();
 
 		Method opMethod = Operator.class.getDeclaredMethod("setResources", ResourceSpec.class);
 		opMethod.setAccessible(true);
@@ -200,7 +210,12 @@ public class JobGraphGeneratorTest {
 				output(new DiscardingOutputFormat<Tuple2<Long, Long>>());
 		sinkMethod.invoke(sink, resource6);
 
-		JobGraph jobGraph = compileJob(env);
+		Plan plan = env.createProgramPlan();
+		Optimizer pc = new Optimizer(new Configuration());
+		OptimizedPlan op = pc.compile(plan);
+
+		JobGraphGenerator jgg = new JobGraphGenerator();
+		JobGraph jobGraph = jgg.compileJobGraph(op);
 
 		JobVertex sourceMapVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(0);
 		JobVertex iterationHeadVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(1);
@@ -270,7 +285,7 @@ public class JobGraphGeneratorTest {
 		DataSet<Tuple2<Long, Long>> input = env.fromElements(new Tuple2<>(1L, 2L))
 			.setParallelism(1);
 
-		DataSet<Tuple2<Long, Long>> ds = input.map(new IdentityMapper<>())
+		DataSet ds = input.map((MapFunction<Tuple2<Long, Long>, Object>) value -> new Tuple2<>(value.f0 + 1, value.f1))
 			.setParallelism(3);
 
 		AbstractID intermediateDataSetID = new AbstractID();
@@ -280,15 +295,32 @@ public class JobGraphGeneratorTest {
 			.setParallelism(1);
 
 		// this is the normal output branch.
-		ds.output(new DiscardingOutputFormat<>())
+		ds.output(new DiscardingOutputFormat())
 			.setParallelism(1);
 
-		JobGraph jobGraph = compileJob(env);
+		Plan plan = env.createProgramPlan();
+		Optimizer pc = new Optimizer(new Configuration());
+		OptimizedPlan op = pc.compile(plan);
+
+		JobGraphGenerator jgg = new JobGraphGenerator();
+		JobGraph jobGraph = jgg.compileJobGraph(op);
 
 		Assert.assertEquals(3, jobGraph.getVerticesSortedTopologicallyFromSources().size());
 
+		JobVertex inputVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(0);
 		JobVertex mapVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(1);
+		JobVertex outputVertex = jobGraph.getVerticesSortedTopologicallyFromSources().get(2);
+
+		Assert.assertThat(inputVertex, Matchers.instanceOf(InputFormatVertex.class));
 		Assert.assertThat(mapVertex, Matchers.instanceOf(JobVertex.class));
+		Assert.assertThat(outputVertex, Matchers.instanceOf(OutputFormatVertex.class));
+
+		TaskConfig cfg = new TaskConfig(outputVertex.getConfiguration());
+		UserCodeWrapper<OutputFormat<?>> wrapper = cfg.getStubWrapper(this.getClass().getClassLoader());
+		OutputFormat<?> outputFormat = wrapper.getUserCodeObject(OutputFormat.class, this.getClass().getClassLoader());
+
+		// the only OutputFormatVertex is DiscardingOutputFormat
+		Assert.assertThat(outputFormat, Matchers.instanceOf(DiscardingOutputFormat.class));
 
 		// there are 2 output result with one of them is ResultPartitionType.BLOCKING_PERSISTENT
 		Assert.assertEquals(2, mapVertex.getProducedDataSets().size());
@@ -296,6 +328,7 @@ public class JobGraphGeneratorTest {
 		Assert.assertTrue(mapVertex.getProducedDataSets().stream()
 			.anyMatch(dataSet -> dataSet.getId().equals(new IntermediateDataSetID(intermediateDataSetID)) &&
 				dataSet.getResultType() == ResultPartitionType.BLOCKING_PERSISTENT));
+
 	}
 
 	private static void assertState(DistributedCache.DistributedCacheEntry entry, boolean isExecutable, boolean isZipped) throws IOException {
@@ -305,14 +338,5 @@ public class JobGraphGeneratorTest {
 		org.apache.flink.core.fs.Path filePath = new org.apache.flink.core.fs.Path(entry.filePath);
 		assertTrue(filePath.getFileSystem().exists(filePath));
 		assertFalse(filePath.getFileSystem().getFileStatus(filePath).isDir());
-	}
-
-	private static JobGraph compileJob(ExecutionEnvironment env) {
-		Plan plan = env.createProgramPlan();
-		Optimizer pc = new Optimizer(new Configuration());
-		OptimizedPlan op = pc.compile(plan);
-
-		JobGraphGenerator jgg = new JobGraphGenerator();
-		return jgg.compileJobGraph(op);
 	}
 }
