@@ -69,4 +69,17 @@ public final class TableStats {
 		return copy;
 	}
 
+	public TableStats merge(TableStats other) {
+		Map<String, ColumnStats> colStats = new HashMap<>();
+		HashMap<String, ColumnStats> otherColStats = new HashMap<>(other.colStats);
+		for (Map.Entry<String, ColumnStats> entry : this.colStats.entrySet()) {
+			String col = entry.getKey();
+			ColumnStats stats = entry.getValue();
+			ColumnStats otherStats = otherColStats.remove(col);
+			stats = otherStats == null ? stats : stats.merge(otherStats);
+			colStats.put(col, stats);
+		}
+		colStats.putAll(otherColStats);
+		return new TableStats(this.rowCount + other.rowCount, colStats);
+	}
 }

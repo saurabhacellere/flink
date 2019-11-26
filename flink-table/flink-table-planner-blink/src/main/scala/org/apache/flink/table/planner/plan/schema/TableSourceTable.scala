@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.planner.plan.schema
 
-import org.apache.flink.table.catalog.CatalogTable
+import org.apache.flink.table.catalog.{CatalogTable, ObjectIdentifier}
 import org.apache.flink.table.planner.plan.stats.FlinkStatistic
 import org.apache.flink.table.sources.{TableSource, TableSourceValidation}
 
@@ -42,6 +42,7 @@ import scala.collection.JavaConverters._
   * @param tableSource The [[TableSource]] for which is converted to a Calcite Table
   * @param isStreamingMode A flag that tells if the current table is in stream mode
   * @param catalogTable Catalog table where this table source table comes from
+  * @param tableIdentifier full path of the table to retrieve
   */
 class TableSourceTable[T](
     relOptSchema: RelOptSchema,
@@ -50,7 +51,8 @@ class TableSourceTable[T](
     statistic: FlinkStatistic,
     val tableSource: TableSource[T],
     val isStreamingMode: Boolean,
-    val catalogTable: CatalogTable)
+    val catalogTable: CatalogTable,
+    val tableIdentifier: Option[ObjectIdentifier])
   extends FlinkPreparingTableBase(relOptSchema, rowType, names, statistic) {
 
   Preconditions.checkNotNull(tableSource)
@@ -79,8 +81,15 @@ class TableSourceTable[T](
     * @return New TableSourceTable instance with specified table source and [[FlinkStatistic]]
     */
   def copy(tableSource: TableSource[_], statistic: FlinkStatistic): TableSourceTable[T] = {
-    new TableSourceTable[T](relOptSchema, names, rowType, statistic,
-      tableSource.asInstanceOf[TableSource[T]], isStreamingMode, catalogTable)
+    new TableSourceTable[T](
+      relOptSchema,
+      names,
+      rowType,
+      statistic,
+      tableSource.asInstanceOf[TableSource[T]],
+      isStreamingMode,
+      catalogTable,
+      tableIdentifier)
   }
 
   /**
@@ -100,7 +109,14 @@ class TableSourceTable[T](
           .map(idx => rowType.getFieldList.get(idx))
           .toList
           .asJava)
-    new TableSourceTable[T](relOptSchema, names, newRowType, statistic,
-      tableSource.asInstanceOf[TableSource[T]], isStreamingMode, catalogTable)
+    new TableSourceTable[T](
+      relOptSchema,
+      names,
+      newRowType,
+      statistic,
+      tableSource.asInstanceOf[TableSource[T]],
+      isStreamingMode,
+      catalogTable,
+      tableIdentifier)
   }
 }

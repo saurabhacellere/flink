@@ -19,7 +19,7 @@
 package org.apache.flink.table.planner.plan.schema
 
 import org.apache.flink.table.api.TableException
-import org.apache.flink.table.catalog.CatalogTable
+import org.apache.flink.table.catalog.{CatalogTable, ObjectIdentifier}
 import org.apache.flink.table.factories.{TableFactoryUtil, TableSourceFactory}
 import org.apache.flink.table.sources.{StreamTableSource, TableSource}
 
@@ -75,7 +75,8 @@ class CatalogSourceTable[T](
       statistic,
       tableSource,
       schemaTable.isStreamingMode,
-      catalogTable)
+      catalogTable,
+      Some(schemaTable.getTableIdentifier))
     if (columnExprs.isEmpty) {
       LogicalTableScan.create(cluster, tableSourceTable)
     } else {

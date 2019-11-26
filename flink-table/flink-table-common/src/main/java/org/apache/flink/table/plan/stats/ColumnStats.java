@@ -22,6 +22,8 @@ import org.apache.flink.annotation.PublicEvolving;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * Column statistics.
@@ -214,6 +216,55 @@ public final class ColumnStats {
 		} else {
 			return new ColumnStats(this.ndv, this.nullCount, this.avgLen, this.maxLen,
 					this.max, this.min);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	public ColumnStats merge(ColumnStats other) {
+		Long ndv = Stream.of(this.ndv, other.ndv).filter(Objects::nonNull).reduce(Long::sum).orElse(null);
+		Long nullCount = Stream.of(this.nullCount, other.nullCount).filter(Objects::nonNull).reduce(Long::sum).orElse(null);
+		Double avgLen = Stream.of(this.avgLen, other.avgLen)
+				.filter(Objects::nonNull)
+				.reduce((a1, a2) -> (a1 + a2) / 2)
+				.orElse(null);
+		Integer maxLen = Stream.of(this.maxLen, other.maxLen).filter(Objects::nonNull).reduce(Math::max).orElse(null);
+
+		Number maxValue = Stream.of(this.maxValue, other.maxValue)
+				.filter(Objects::nonNull)
+				.reduce((n1, n2) -> Math.max(n1.doubleValue(), n2.doubleValue()))
+				.orElse(null);
+		Number minValue = Stream.of(this.minValue, other.minValue)
+				.filter(Objects::nonNull)
+				.reduce((n1, n2) -> Math.min(n1.doubleValue(), n2.doubleValue()))
+				.orElse(null);
+
+		Comparable max = Stream.of(this.max, other.max)
+				.filter(Objects::nonNull)
+				.reduce((c1, c2) -> ((Comparable) c1).compareTo(c2) > 0 ? c1 : c2)
+				.orElse(null);
+		Comparable min = Stream.of(this.min, other.min)
+				.filter(Objects::nonNull)
+				.reduce((c1, c2) -> ((Comparable) c1).compareTo(c2) < 0 ? c1 : c2)
+				.orElse(null);
+
+		if (max != null || min != null) {
+			return new ColumnStats(
+					ndv,
+					nullCount,
+					avgLen,
+					maxLen,
+					max,
+					min
+			);
+		} else {
+			return new ColumnStats(
+					ndv,
+					nullCount,
+					avgLen,
+					maxLen,
+					maxValue,
+					minValue
+			);
 		}
 	}
 
