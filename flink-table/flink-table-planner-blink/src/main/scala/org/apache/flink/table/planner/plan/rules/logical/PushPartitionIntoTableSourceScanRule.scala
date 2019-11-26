@@ -18,18 +18,25 @@
 
 package org.apache.flink.table.planner.plan.rules.logical
 
-import org.apache.flink.table.api.TableException
+import org.apache.flink.table.api.{TableException, ValidationException}
+import org.apache.flink.table.catalog.exceptions.TableNotExistException
+import org.apache.flink.table.catalog.{Catalog, CatalogPartitionSpec, ObjectIdentifier}
 import org.apache.flink.table.planner.calcite.{FlinkContext, FlinkTypeFactory}
-import org.apache.flink.table.planner.plan.schema.{FlinkPreparingTableBase, TableSourceTable}
+import org.apache.flink.table.planner.plan.schema.TableSourceTable
 import org.apache.flink.table.planner.plan.stats.FlinkStatistic
 import org.apache.flink.table.planner.plan.utils.{FlinkRelOptUtil, PartitionPruner, RexNodeExtractor}
+import org.apache.flink.table.planner.utils.JavaScalaConversionUtil.toScala
 import org.apache.flink.table.sources.PartitionableTableSource
+import org.apache.flink.table.util.CatalogTableStatisticsConverter.convertToTableStats
 
 import org.apache.calcite.plan.RelOptRule.{none, operand}
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall}
 import org.apache.calcite.rel.core.Filter
 import org.apache.calcite.rel.logical.LogicalTableScan
 import org.apache.calcite.rex.{RexInputRef, RexNode, RexShuttle}
+
+import java.lang.String.format
+import java.util
 
 import scala.collection.JavaConversions._
 
@@ -94,9 +101,11 @@ class PushPartitionIntoTableSourceScanRule extends RelOptRule(
       inputFieldType.getFieldList.get(index).getType
     }.map(FlinkTypeFactory.toLogicalType)
 
+    val context = call.getPlanner.getContext.asInstanceOf[FlinkContext]
+
     val allPartitions = tableSource.getPartitions
     val remainingPartitions = PartitionPruner.prunePartitions(
-      call.getPlanner.getContext.asInstanceOf[FlinkContext].getTableConfig,
+      context.getTableConfig,
       partitionFieldNames,
       partitionFieldTypes,
       allPartitions,
@@ -115,11 +124,19 @@ class PushPartitionIntoTableSourceScanRule extends RelOptRule(
     val newStatistic = if (remainingPartitions.size() == allPartitions.size()) {
       // Keep all Statistics if no predicates can be pushed down
       statistic
-    } else if (statistic == FlinkStatistic.UNKNOWN) {
-      statistic
     } else {
-      // Remove tableStats after predicates pushed down
-      FlinkStatistic.builder().statistic(statistic).tableStats(null).build()
+      val catalogManager = context.getCatalogManager
+      val tableStats = tableSourceTable.tableIdentifier match {
+        case Some(id) => toScala(catalogManager.getCatalog(id.getCatalogName)) match {
+          case Some(catalog) =>
+            remainingPartitions
+                .map(extractPartitionStats(catalog, id, _))
+                .reduce((s1, s2) => s1.merge(s2))
+          case None => null
+        }
+        case None => null
+      }
+      FlinkStatistic.builder().statistic(statistic).tableStats(tableStats).build()
     }
     val newTableSourceTable = tableSourceTable.copy(newTableSource, newStatistic)
 
@@ -133,6 +150,27 @@ class PushPartitionIntoTableSourceScanRule extends RelOptRule(
     }
   }
 
+  private def extractPartitionStats(
+      catalog: Catalog,
+      objectIdentifier: ObjectIdentifier,
+      partSpec: java.util.Map[String, String]) = {
+    val tablePath = objectIdentifier.toObjectPath
+    val spec = new CatalogPartitionSpec(new util.LinkedHashMap[String, String](partSpec))
+    try {
+      val tableStatistics = catalog.getPartitionStatistics(tablePath, spec)
+      val columnStatistics = catalog.getPartitionColumnStatistics(tablePath, spec)
+      convertToTableStats(tableStatistics, columnStatistics)
+    } catch {
+      case e: TableNotExistException =>
+        throw new ValidationException(format(
+          "Could not get statistic for table: [%s, %s, %s]",
+          objectIdentifier.getCatalogName,
+          tablePath.getDatabaseName,
+          tablePath.getObjectName),
+          e)
+    }
+  }
+
   /**
     * adjust the partition field reference index to evaluate the partition values.
     * e.g. the original input fields is: a, b, c, p, and p is partition field. the partition values
@@ -143,7 +181,7 @@ class PushPartitionIntoTableSourceScanRule extends RelOptRule(
   private def adjustPartitionPredicate(
       inputFieldNames: Array[String],
       partitionFieldNames: Array[String],
-      partitionPredicate: RexNode): RexNode = {
+      partitionPredicate: RexNode) = {
     partitionPredicate.accept(new RexShuttle() {
       override def visitInputRef(inputRef: RexInputRef): RexNode = {
         val index = inputRef.getIndex

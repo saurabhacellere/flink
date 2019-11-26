@@ -22,7 +22,10 @@ import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.Catalog;
+import org.apache.flink.table.catalog.CatalogPartitionImpl;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.ConnectorCatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
@@ -38,19 +41,23 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatisticsDataString;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.catalog.stats.Date;
 import org.apache.flink.table.descriptors.DescriptorProperties;
+import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.metadata.FlinkRelMetadataQuery;
 import org.apache.flink.table.planner.plan.stats.ValueInterval$;
 import org.apache.flink.table.planner.utils.TableTestUtil;
+import org.apache.flink.table.planner.utils.TestPartitionableSourceFactory;
 import org.apache.flink.table.planner.utils.TestTableSource;
 import org.apache.flink.table.types.DataType;
 
 import org.apache.calcite.avatica.util.DateTimeUtils;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.util.ImmutableBitSet;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
@@ -62,35 +69,36 @@ import static org.junit.Assert.assertNull;
  */
 public class CatalogStatisticsTest {
 
+	private EnvironmentSettings settings;
+	private TableEnvironment tEnv;
+	private Catalog catalog;
+
 	private TableSchema tableSchema = TableSchema.builder().fields(
 			new String[] { "b1", "l2", "s3", "d4", "dd5" },
 			new DataType[] { DataTypes.BOOLEAN(), DataTypes.BIGINT(), DataTypes.STRING(), DataTypes.DATE(),
 					DataTypes.DOUBLE() }
 	).build();
 
+	@Before
+	public void before() {
+		settings = EnvironmentSettings.newInstance().useBlinkPlanner().inBatchMode().build();
+		tEnv = TableEnvironment.create(settings);
+		catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).orElse(null);
+		assertNotNull(catalog);
+	}
+
 	@Test
 	public void testGetStatsFromCatalogForConnectorCatalogTable() throws Exception {
-		EnvironmentSettings settings = EnvironmentSettings.newInstance().useBlinkPlanner().inBatchMode().build();
-		TableEnvironment tEnv = TableEnvironment.create(settings);
-		Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).orElse(null);
-		assertNotNull(catalog);
 		catalog.createTable(
 				ObjectPath.fromString("default_database.T1"),
 				ConnectorCatalogTable.source(new TestTableSource(true, tableSchema), true),
 				false);
-
 		alterTableStatistics(catalog);
-
 		assertStatistics(tEnv);
 	}
 
 	@Test
 	public void testGetStatsFromCatalogForCatalogTableImpl() throws Exception {
-		EnvironmentSettings settings = EnvironmentSettings.newInstance().useBlinkPlanner().inBatchMode().build();
-		TableEnvironment tEnv = TableEnvironment.create(settings);
-		Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).orElse(null);
-		assertNotNull(catalog);
-
 		Map<String, String> properties = new HashMap<>();
 		properties.put("connector.type", "filesystem");
 		properties.put("connector.property-version", "1");
@@ -111,8 +119,60 @@ public class CatalogStatisticsTest {
 				false);
 
 		alterTableStatistics(catalog);
-
 		assertStatistics(tEnv);
+	}
+
+	@Test
+	public void testGetPartitionStatsFromCatalog() throws Exception {
+		TestPartitionableSourceFactory.registerTableSource(tEnv, "PartT", true);
+		createPartitionStats("A", 1);
+		createPartitionStats("A", 2);
+
+		RelNode t1 = ((PlannerBase) ((TableEnvironmentImpl) tEnv).getPlanner()).optimize(
+				TableTestUtil.toRelNode(tEnv.sqlQuery("select id, name from PartT where part1 = 'A'")));
+		FlinkRelMetadataQuery mq = FlinkRelMetadataQuery.reuseOrCreate(t1.getCluster().getMetadataQuery());
+		assertEquals(200.0, mq.getRowCount(t1), 0.0);
+		assertEquals(Arrays.asList(8.0, 43.5), mq.getAverageColumnSizes(t1));
+
+		// long type
+		assertEquals(46.0, mq.getDistinctRowCount(t1, ImmutableBitSet.of(0), null), 0.0);
+		assertEquals(154.0, mq.getColumnNullCount(t1, 0), 0.0);
+		assertEquals(ValueInterval$.MODULE$.apply(-123L, 763322L, true, true), mq.getColumnInterval(t1, 0));
+
+		// string type
+		assertEquals(40.0, mq.getDistinctRowCount(t1, ImmutableBitSet.of(1), null), 0.0);
+		assertEquals(0.0, mq.getColumnNullCount(t1, 1), 0.0);
+		assertNull(mq.getColumnInterval(t1, 1));
+	}
+
+	private void createPartitionStats(String part1, int part2) throws Exception {
+		ObjectPath path = ObjectPath.fromString("default_database.PartT");
+
+		LinkedHashMap<String, String> partSpecMap = new LinkedHashMap<>();
+		partSpecMap.put("part1", part1);
+		partSpecMap.put("part2", String.valueOf(part2));
+		CatalogPartitionSpec partSpec = new CatalogPartitionSpec(partSpecMap);
+		catalog.createPartition(
+				path,
+				partSpec,
+				new CatalogPartitionImpl(new HashMap<>(), ""),
+				true);
+		catalog.alterPartitionStatistics(
+				path,
+				partSpec,
+				new CatalogTableStatistics(100, 10, 1000L, 2000L),
+				true);
+
+		CatalogColumnStatisticsDataLong longColStats = new CatalogColumnStatisticsDataLong(-123L, 763322L, 23L, 77L);
+		CatalogColumnStatisticsDataString stringColStats = new CatalogColumnStatisticsDataString(152L, 43.5D, 20L, 0L);
+		Map<String, CatalogColumnStatisticsDataBase> colStatsMap = new HashMap<>();
+		colStatsMap.put("id", longColStats);
+		colStatsMap.put("name", stringColStats);
+		catalog.alterPartitionColumnStatistics(
+				path,
+				partSpec,
+				new CatalogColumnStatistics(colStatsMap),
+				true);
 	}
 
 	private void alterTableStatistics(Catalog catalog) throws TableNotExistException, TablePartitionedException {

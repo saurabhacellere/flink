@@ -22,6 +22,7 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ConnectorCatalogTable;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.QueryOperationCatalogView;
 import org.apache.flink.table.planner.catalog.CatalogSchemaTable;
 import org.apache.flink.table.planner.catalog.QueryOperationCatalogViewTable;
@@ -109,6 +110,7 @@ public class FlinkCalciteCatalogReader extends CalciteCatalogReader {
 				return convertSourceTable(relOptSchema,
 					names,
 					rowType,
+					schemaTable.getTableIdentifier(),
 					connectorTable,
 					schemaTable.getStatistic(),
 					schemaTable.isStreamingMode());
@@ -139,6 +141,7 @@ public class FlinkCalciteCatalogReader extends CalciteCatalogReader {
 			RelOptSchema relOptSchema,
 			List<String> names,
 			RelDataType rowType,
+			ObjectIdentifier tableIdentifier,
 			ConnectorCatalogTable<?, ?> table,
 			FlinkStatistic statistic,
 			boolean isStreamingMode) {
@@ -160,7 +163,8 @@ public class FlinkCalciteCatalogReader extends CalciteCatalogReader {
 			statistic,
 			tableSource,
 			isStreamingMode,
-			table);
+			table,
+			new scala.Some<>(tableIdentifier));
 	}
 
 	private static FlinkPreparingTableBase convertCatalogTable(
