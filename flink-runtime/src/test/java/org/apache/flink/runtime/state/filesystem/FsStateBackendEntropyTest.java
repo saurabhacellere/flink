@@ -45,6 +45,7 @@ import static org.junit.Assert.assertThat;
 public class FsStateBackendEntropyTest {
 
 	static final String ENTROPY_MARKER = "__ENTROPY__";
+	static final String ENTROPY_REPLACEMENT = "+REPLACEMENT+";
 	static final String RESOLVED_MARKER = "+RESOLVED+";
 
 	@Rule
@@ -57,11 +58,10 @@ public class FsStateBackendEntropyTest {
 		final Path checkpointDir = new Path(Path.fromLocalFile(tmp.newFolder()), ENTROPY_MARKER + "/checkpoints");
 		final String checkpointDirStr = checkpointDir.toString();
 
-		final FsCheckpointStorage storage = new FsCheckpointStorage(
-				fs, checkpointDir, null, new JobID(), 1024, 4096);
-		storage.initializeBaseLocations();
+		FsCheckpointStorage storage = new FsCheckpointStorage(
+				fs, checkpointDir, null, new JobID(), 1024);
 
-		final FsCheckpointStorageLocation location = (FsCheckpointStorageLocation)
+		FsCheckpointStorageLocation location = (FsCheckpointStorageLocation)
 				storage.initializeLocationForCheckpoint(96562);
 
 		assertThat(location.getCheckpointDirectory().toString(), startsWith(checkpointDirStr));
@@ -114,6 +114,11 @@ public class FsStateBackendEntropyTest {
 		@Override
 		public String getEntropyInjectionKey() {
 			return ENTROPY_MARKER;
+		}
+
+		@Override
+		public String getEntropyKeyReplacement() {
+			return ENTROPY_REPLACEMENT;
 		}
 
 		@Override

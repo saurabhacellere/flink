@@ -21,13 +21,11 @@ package org.apache.flink.fs.s3.common;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ConfigurationUtils;
+import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
 import org.apache.flink.fs.s3.common.writer.S3AccessHelper;
-import org.apache.flink.runtime.util.HadoopConfigLoader;
-import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +67,18 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 			.withDescription(
 					"This option can be used to improve performance due to sharding issues on Amazon S3. " +
 					"For file creations with entropy injection, this key will be replaced by random " +
-					"alphanumeric characters. For other file creations, the key will be filtered out.");
+					"alphanumeric characters. For other file creations, the key will be replaced.");
+
+	/**
+	 * The replacement string to replace the entropy key with, when creating files that do not require
+	 * entropy while entropy injection is configured.
+	 */
+	public static final ConfigOption<String> ENTROPY_INJECT_KEY_REPLACEMENT_OPTION = ConfigOptions
+			.key("s3.entropy.replacement")
+			.defaultValue("")
+			.withDescription(
+					"When '" + ENTROPY_INJECT_KEY_OPTION.key() + "' is set, this option defines the replacement " +
+					"string for entropy key when creating files that do not require entropy injection.");
 
 	/**
 	 * The number of entropy characters, in case entropy injection is configured.
@@ -127,6 +136,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 
 			// load the entropy injection settings
 			String entropyInjectionKey = flinkConfig.getString(ENTROPY_INJECT_KEY_OPTION);
+			String entropyKeyReplacement = flinkConfig.getString(ENTROPY_INJECT_KEY_REPLACEMENT_OPTION);
 			int numEntropyChars = -1;
 			if (entropyInjectionKey != null) {
 				if (entropyInjectionKey.matches(INVALID_ENTROPY_KEY_CHARS)) {
@@ -140,9 +150,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 				}
 			}
 
-			final String[] localTmpDirectories = ConfigurationUtils.parseTempDirectories(flinkConfig);
-			Preconditions.checkArgument(localTmpDirectories.length > 0);
-			final String localTmpDirectory = localTmpDirectories[0];
+			final String localTmpDirectory = flinkConfig.getString(CoreOptions.TMP_DIRS);
 			final long s3minPartSize = flinkConfig.getLong(PART_UPLOAD_MIN_SIZE);
 			final int maxConcurrentUploads = flinkConfig.getInteger(MAX_CONCURRENT_UPLOADS);
 			final S3AccessHelper s3AccessHelper = getS3AccessHelper(fs);
@@ -151,6 +159,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 					fs,
 					localTmpDirectory,
 					entropyInjectionKey,
+					entropyKeyReplacement,
 					numEntropyChars,
 					s3AccessHelper,
 					s3minPartSize,
