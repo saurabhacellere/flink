@@ -18,43 +18,33 @@
 
 package org.apache.flink.runtime.executiongraph.failover;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.configuration.JobManagerOptions;
 import org.apache.flink.util.StringUtils;
-
 import org.slf4j.Logger;
 
 import javax.annotation.Nullable;
 
 /**
- * A utility class to load failover strategies from the configuration.
+ * A utility class to load failover strategies from the configuration. 
  */
 public class FailoverStrategyLoader {
 
-	/** Config name for the {@link RestartAllStrategy}. */
+	/** Config name for the {@link RestartAllStrategy} */
 	public static final String FULL_RESTART_STRATEGY_NAME = "full";
 
-	/** Config name for the {@link RestartIndividualStrategy}. */
+	/** Config name for the {@link RestartIndividualStrategy} */
 	public static final String INDIVIDUAL_RESTART_STRATEGY_NAME = "individual";
 
-	/** Config name for the {@link AdaptedRestartPipelinedRegionStrategyNG}. */
+	/** Config name for the {@link RestartPipelinedRegionStrategy} */
 	public static final String PIPELINED_REGION_RESTART_STRATEGY_NAME = "region";
-
-	/** Config name for the {@link NoOpFailoverStrategy}. */
-	public static final String NO_OP_FAILOVER_STRATEGY = "noop";
 
 	// ------------------------------------------------------------------------
 
 	/**
 	 * Loads a FailoverStrategy Factory from the given configuration.
 	 */
-	public static FailoverStrategy.Factory loadFailoverStrategy(Configuration config, @Nullable Logger logger) {
-		// The new generation scheduler does not depend on the FailoverStrategy loaded here.
-		// Therefore, we load a noop failover strategy if the new generation scheduler is configured.
-		final String strategyParam = config.getString(JobManagerOptions.SCHEDULER).equals("ng") ?
-			NO_OP_FAILOVER_STRATEGY :
-			config.getString(JobManagerOptions.EXECUTION_FAILOVER_STRATEGY);
+	public static FailoverStrategy.Factory loadFailoverStrategy(String strategyParam, @Nullable Logger logger) {
 
 		if (StringUtils.isNullOrWhitespaceOnly(strategyParam)) {
 			if (logger != null) {
@@ -70,13 +60,10 @@ public class FailoverStrategyLoader {
 					return new RestartAllStrategy.Factory();
 
 				case PIPELINED_REGION_RESTART_STRATEGY_NAME:
-					return new AdaptedRestartPipelinedRegionStrategyNG.Factory();
+					return new RestartPipelinedRegionStrategy.Factory();
 
 				case INDIVIDUAL_RESTART_STRATEGY_NAME:
 					return new RestartIndividualStrategy.Factory();
-
-				case NO_OP_FAILOVER_STRATEGY:
-					return new NoOpFailoverStrategy.Factory();
 
 				default:
 					// we could interpret the parameter as a factory class name and instantiate that
