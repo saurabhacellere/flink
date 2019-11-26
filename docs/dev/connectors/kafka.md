@@ -88,10 +88,16 @@ For most users, the `FlinkKafkaConsumer08` (part of `flink-connector-kafka`) is 
         <td>>= 1.0.0</td>
         <td>
         This universal Kafka connector attempts to track the latest version of the Kafka client.
-        The version of the client it uses may change between Flink releases. Starting with Flink 1.9 release, it uses the Kafka 2.2.0 client.
+        The version of the client it uses may change between Flink releases. As of this release, it uses the Kafka 2.2.0 client.
         Modern Kafka clients are backwards compatible with broker versions 0.10.0 or later.
         However for Kafka 0.11.x and 0.10.x versions, we recommend using dedicated
         flink-connector-kafka-0.11{{ site.scala_version_suffix }} and flink-connector-kafka-0.10{{ site.scala_version_suffix }} respectively.
+        <div class="alert alert-warning">
+          <strong>Attention:</strong> as of Flink 1.7 the universal Kafka connector is considered to be
+          in a <strong>BETA</strong> status and might not be as stable as the 0.11 connector.
+          In case of problems with the universal connector, you can try to use flink-connector-kafka-0.11{{ site.scala_version_suffix }}
+          which should be compatible with all of the Kafka versions starting from 0.11.
+        </div>
         </td>
     </tr>
   </tbody>
@@ -128,15 +134,6 @@ If you use an older version of Kafka (0.11, 0.10, 0.9, or 0.8), you should use t
 The universal Kafka connector is compatible with older and newer Kafka brokers through the compatibility guarantees of the Kafka client API and broker.
 It is compatible with broker versions 0.11.0 or newer, depending on the features used.
 For details on Kafka compatibility, please refer to the [Kafka documentation](https://kafka.apache.org/protocol.html#protocol_compatibility).
-
-### Migrating Kafka Connector from 0.11 to universal
-
-In order to perform the migration, see the [upgrading jobs and Flink versions guide]({{ site.baseurl }}/ops/upgrading.html)
-and:
-* Use Flink 1.9 or newer for the whole process.
-* Do not upgrade the Flink and operators at the same time.
-* Make sure that Kafka Consumer and/or Kafka Producer used in your job have assigned unique identifiers (`uid`):
-* Use stop with savepoint feature to take the savepoint (for example by using `stop --withSavepoint`)[CLI command]({{ site.baseurl }}/ops/cli.html).
 
 ### Usage
 
@@ -216,7 +213,7 @@ For convenience, Flink provides the following schemas:
     a schema based on a Flink's `TypeInformation`. This is useful if the data is both written and read by Flink.
     This schema is a performant Flink-specific alternative to other generic serialization approaches.
 
-2. `JsonDeserializationSchema` (and `JSONKeyValueDeserializationSchema`) which turns the serialized JSON
+2. `JSONDeserializationSchema` (and `JSONKeyValueDeserializationSchema`) which turns the serialized JSON
     into an ObjectNode object, from which fields can be accessed using `objectNode.get("field").as(Int/String/...)()`.
     The KeyValue objectNode contains a "key" and "value" field which contain all fields, as well as
     an optional "metadata" field that exposes the offset/partition/topic for this message.
