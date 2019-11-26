@@ -35,12 +35,12 @@ import java.io.Closeable;
 import java.io.EOFException;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -86,14 +86,14 @@ public final class BlobClient implements Closeable {
 			if (SSLUtils.isInternalSSLEnabled(clientConfig) && clientConfig.getBoolean(BlobServerOptions.SSL_ENABLED)) {
 				LOG.info("Using ssl connection to the blob server");
 
-				socket = SSLUtils.createSSLClientSocketFactory(clientConfig).createSocket();
+				socket = SSLUtils.createSSLClientSocketFactory(clientConfig).createSocket(
+					serverAddress.getAddress(),
+					serverAddress.getPort());
 			}
 			else {
 				socket = new Socket();
+				socket.connect(serverAddress);
 			}
-
-			socket.connect(serverAddress, clientConfig.getInteger(BlobServerOptions.CONNECT_TIMEOUT));
-			socket.setSoTimeout(clientConfig.getInteger(BlobServerOptions.SO_TIMEOUT));
 		}
 		catch (Exception e) {
 			BlobUtils.closeSilently(socket, LOG);
@@ -142,7 +142,7 @@ public final class BlobClient implements Closeable {
 			try (
 				final BlobClient bc = new BlobClient(serverAddress, blobClientConfig);
 				final InputStream is = bc.getInternal(jobId, blobKey);
-				final OutputStream os = new FileOutputStream(localJarFile)
+				final OutputStream os = Files.newOutputStream(localJarFile.toPath())
 			) {
 				while (true) {
 					final int read = is.read(buf);

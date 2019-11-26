@@ -28,9 +28,9 @@ import javax.annotation.Nullable;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
 
 /**
  * Global configuration object for Flink. Similar to Java properties configuration
@@ -63,23 +63,11 @@ public final class GlobalConfiguration {
 	 * @return Returns the Configuration
 	 */
 	public static Configuration loadConfiguration() {
-		return loadConfiguration(new Configuration());
-	}
-
-	/**
-	 * Loads the global configuration and adds the given dynamic properties
-	 * configuration.
-	 *
-	 * @param dynamicProperties The given dynamic properties
-	 * @return Returns the loaded global configuration with dynamic properties
-	 */
-	public static Configuration loadConfiguration(Configuration dynamicProperties) {
 		final String configDir = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
 		if (configDir == null) {
-			return new Configuration(dynamicProperties);
+			return new Configuration();
 		}
-
-		return loadConfiguration(configDir, dynamicProperties);
+		return loadConfiguration(configDir, null);
 	}
 
 	/**
@@ -134,6 +122,22 @@ public final class GlobalConfiguration {
 	}
 
 	/**
+	 * Loads the global configuration and adds the given dynamic properties
+	 * configuration.
+	 *
+	 * @param dynamicProperties The given dynamic properties
+	 * @return Returns the loaded global configuration with dynamic properties
+	 */
+	public static Configuration loadConfigurationWithDynamicProperties(Configuration dynamicProperties) {
+		final String configDir = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
+		if (configDir == null) {
+			return new Configuration(dynamicProperties);
+		}
+
+		return loadConfiguration(configDir, dynamicProperties);
+	}
+
+	/**
 	 * Loads a YAML-file of key-value pairs.
 	 *
 	 * <p>Colon and whitespace ": " separate key and value (one per line). The hash tag "#" starts a single-line comment.
@@ -156,7 +160,7 @@ public final class GlobalConfiguration {
 	private static Configuration loadYAMLResource(File file) {
 		final Configuration config = new Configuration();
 
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)))){
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(Files.newInputStream(file.toPath())))){
 
 			String line;
 			int lineNo = 0;

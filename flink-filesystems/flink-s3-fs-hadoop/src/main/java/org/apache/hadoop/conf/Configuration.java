@@ -40,7 +40,12 @@ import org.apache.hadoop.util.StringInterner;
 import org.apache.hadoop.util.StringUtils;
 import org.codehaus.jackson.JsonFactory;
 import org.codehaus.jackson.JsonGenerator;
-import org.w3c.dom.*;
+import org.w3c.dom.DOMException;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.w3c.dom.Text;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -51,15 +56,41 @@ import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-import java.io.*;
+
+import java.io.BufferedInputStream;
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Reader;
+import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.net.InetSocketAddress;
 import java.net.JarURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Properties;
+import java.util.Set;
+import java.util.StringTokenizer;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -147,7 +178,7 @@ import java.util.regex.PatternSyntaxException;
  */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
-public class Configuration implements Iterable<Entry<String,String>>,
+public class Configuration implements Iterable<Map.Entry<String,String>>,
                                       Writable {
   private static final Log LOG =
     LogFactory.getLog(Configuration.class);
@@ -161,39 +192,39 @@ public class Configuration implements Iterable<Entry<String,String>>,
     "testingforemptydefaultvalue";
 
   private boolean allowNullValueProperties = false;
-
+  
   private static class Resource {
     private final Object resource;
     private final String name;
-
+    
     public Resource(Object resource) {
       this(resource, resource.toString());
     }
-
+    
     public Resource(Object resource, String name) {
       this.resource = resource;
       this.name = name;
     }
-
+    
     public String getName(){
       return name;
     }
-
+    
     public Object getResource() {
       return resource;
     }
-
+    
     @Override
     public String toString() {
       return name;
     }
   }
-
+  
   /**
    * List of configuration resources.
    */
   private ArrayList<Resource> resources = new ArrayList<Resource>();
-
+  
   /**
    * The value reported as the setting resource when a key is set
    * by code rather than a file resource by dumpConfiguration.
@@ -202,21 +233,21 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
 
   /**
-   * List of configuration parameters marked <b>final</b>.
+   * List of configuration parameters marked <b>final</b>. 
    */
   private Set<String> finalParameters = Collections.newSetFromMap(
       new ConcurrentHashMap<String, Boolean>());
-
+  
   private boolean loadDefaults = true;
-
+  
   /**
    * Configuration objects
    */
-  private static final WeakHashMap<Configuration,Object> REGISTRY =
+  private static final WeakHashMap<Configuration,Object> REGISTRY = 
     new WeakHashMap<Configuration,Object>();
-
+  
   /**
-   * List of default Resources. Resources are loaded in the order of the list
+   * List of default Resources. Resources are loaded in the order of the list 
    * entries
    */
   private static final CopyOnWriteArrayList<String> defaultResources =
@@ -232,15 +263,15 @@ public class Configuration implements Iterable<Entry<String,String>>,
     NegativeCacheSentinel.class;
 
   /**
-   * Stores the mapping of key to the resource which modifies or loads
+   * Stores the mapping of key to the resource which modifies or loads 
    * the key most recently
    */
   private Map<String, String[]> updatingResource;
-
+ 
   /**
    * Class to keep the information about the keys which replace the deprecated
    * ones.
-   *
+   * 
    * This class stores the new keys which replace the deprecated keys and also
    * gives a provision to have a custom message for each of the deprecated key
    * that is being replaced. It also provides method to get the appropriate
@@ -290,7 +321,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
       accessed.set(false);
     }
   }
-
+  
   /**
    * A pending addition to the global set of deprecated keys.
    */
@@ -356,7 +387,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
      */
     @SuppressWarnings("unchecked")
     DeprecationContext(DeprecationContext other, DeprecationDelta[] deltas) {
-      HashMap<String, DeprecatedKeyInfo> newDeprecatedKeyMap =
+      HashMap<String, DeprecatedKeyInfo> newDeprecatedKeyMap = 
         new HashMap<String, DeprecatedKeyInfo>();
       HashMap<String, String> newReverseDeprecatedKeyMap =
         new HashMap<String, String>();
@@ -394,22 +425,22 @@ public class Configuration implements Iterable<Entry<String,String>>,
       return reverseDeprecatedKeyMap;
     }
   }
-
-  private static DeprecationDelta[] defaultDeprecations =
+  
+  private static DeprecationDelta[] defaultDeprecations = 
     new DeprecationDelta[] {
-      new DeprecationDelta("topology.script.file.name",
+      new DeprecationDelta("topology.script.file.name", 
         CommonConfigurationKeys.NET_TOPOLOGY_SCRIPT_FILE_NAME_KEY),
-      new DeprecationDelta("topology.script.number.args",
+      new DeprecationDelta("topology.script.number.args", 
         CommonConfigurationKeys.NET_TOPOLOGY_SCRIPT_NUMBER_ARGS_KEY),
-      new DeprecationDelta("hadoop.configured.node.mapping",
+      new DeprecationDelta("hadoop.configured.node.mapping", 
         CommonConfigurationKeys.NET_TOPOLOGY_CONFIGURED_NODE_MAPPING_KEY),
-      new DeprecationDelta("topology.node.switch.mapping.impl",
+      new DeprecationDelta("topology.node.switch.mapping.impl", 
         CommonConfigurationKeys.NET_TOPOLOGY_NODE_SWITCH_MAPPING_IMPL_KEY),
-      new DeprecationDelta("dfs.df.interval",
+      new DeprecationDelta("dfs.df.interval", 
         CommonConfigurationKeys.FS_DF_INTERVAL_KEY),
-      new DeprecationDelta("hadoop.native.lib",
+      new DeprecationDelta("hadoop.native.lib", 
         CommonConfigurationKeys.IO_NATIVE_LIB_AVAILABLE_KEY),
-      new DeprecationDelta("fs.default.name",
+      new DeprecationDelta("fs.default.name", 
         CommonConfigurationKeys.FS_DEFAULT_NAME_KEY),
       new DeprecationDelta("dfs.umaskmode",
         CommonConfigurationKeys.FS_PERMISSIONS_UMASK_KEY),
@@ -449,14 +480,14 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * This is to be used only by the developers in order to add deprecation of
    * keys, and attempts to call this method after loading resources once,
    * would lead to <tt>UnsupportedOperationException</tt>
-   *
-   * If a key is deprecated in favor of multiple keys, they are all treated as
-   * aliases of each other, and setting any one of them resets all the others
+   * 
+   * If a key is deprecated in favor of multiple keys, they are all treated as 
+   * aliases of each other, and setting any one of them resets all the others 
    * to the new value.
    *
    * If you have multiple deprecation entries to add, it is more efficient to
    * use #addDeprecations(DeprecationDelta[] deltas) instead.
-   *
+   * 
    * @param key
    * @param newKeys
    * @param customMessage
@@ -477,7 +508,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * This is to be used only by the developers in order to add deprecation of
    * keys, and attempts to call this method after loading resources once,
    * would lead to <tt>UnsupportedOperationException</tt>
-   *
+   * 
    * If you have multiple deprecation entries to add, it is more efficient to
    * use #addDeprecations(DeprecationDelta[] deltas) instead.
    *
@@ -497,11 +528,11 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * This is to be used only by the developers in order to add deprecation of
    * keys, and attempts to call this method after loading resources once,
    * would lead to <tt>UnsupportedOperationException</tt>
-   *
-   * If a key is deprecated in favor of multiple keys, they are all treated as
-   * aliases of each other, and setting any one of them resets all the others
+   * 
+   * If a key is deprecated in favor of multiple keys, they are all treated as 
+   * aliases of each other, and setting any one of them resets all the others 
    * to the new value.
-   *
+   * 
    * If you have multiple deprecation entries to add, it is more efficient to
    * use #addDeprecations(DeprecationDelta[] deltas) instead.
    *
@@ -513,7 +544,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
   public static void addDeprecation(String key, String[] newKeys) {
     addDeprecation(key, newKeys, null);
   }
-
+  
   /**
    * Adds the deprecated key to the global deprecation map when no custom
    * message is provided.
@@ -521,7 +552,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * This is to be used only by the developers in order to add deprecation of
    * keys, and attempts to call this method after loading resources once,
    * would lead to <tt>UnsupportedOperationException</tt>
-   *
+   * 
    * If you have multiple deprecation entries to add, it is more efficient to
    * use #addDeprecations(DeprecationDelta[] deltas) instead.
    *
@@ -531,12 +562,12 @@ public class Configuration implements Iterable<Entry<String,String>>,
   public static void addDeprecation(String key, String newKey) {
     addDeprecation(key, new String[] {newKey}, null);
   }
-
+  
   /**
    * checks whether the given <code>key</code> is deprecated.
-   *
+   * 
    * @param key the parameter which is to be checked for deprecation
-   * @return <code>true</code> if the key is deprecated and
+   * @return <code>true</code> if the key is deprecated and 
    *         <code>false</code> otherwise.
    */
   public static boolean isDeprecated(String key) {
@@ -553,7 +584,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     DeprecationContext deprecations = deprecationContext.get();
     Properties props = getProps();
     Properties overlay = getOverlay();
-    for (Entry<String, DeprecatedKeyInfo> entry :
+    for (Map.Entry<String, DeprecatedKeyInfo> entry :
         deprecations.getDeprecatedKeyMap().entrySet()) {
       String depKey = entry.getKey();
       if (!overlay.contains(depKey)) {
@@ -609,7 +640,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
     return names.toArray(new String[names.size()]);
   }
-
+ 
   private void handleDeprecation() {
     LOG.debug("Handling deprecation for all properties in config...");
     DeprecationContext deprecations = deprecationContext.get();
@@ -620,7 +651,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
       handleDeprecation(deprecations, (String)item);
     }
   }
-
+ 
   static{
     //print deprecation warning if hadoop-site.xml is found in classpath
     ClassLoader cL = Thread.currentThread().getContextClassLoader();
@@ -637,7 +668,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     addDefaultResource("core-default-shaded.xml");
     addDefaultResource("core-site.xml");
   }
-
+  
   private Properties properties;
   private Properties overlay;
   private ClassLoader classLoader;
@@ -647,17 +678,17 @@ public class Configuration implements Iterable<Entry<String,String>>,
       classLoader = Configuration.class.getClassLoader();
     }
   }
-
+  
   /** A new configuration. */
   public Configuration() {
     this(true);
   }
 
-  /** A new configuration where the behavior of reading from the default
+  /** A new configuration where the behavior of reading from the default 
    * resources can be turned off.
-   *
+   * 
    * If the parameter {@code loadDefaults} is false, the new instance
-   * will not load resources from the default files.
+   * will not load resources from the default files. 
    * @param loadDefaults specifies whether to load from the default files
    */
   public Configuration(boolean loadDefaults) {
@@ -667,10 +698,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
       REGISTRY.put(this, null);
     }
   }
-
-  /**
+  
+  /** 
    * A new configuration with the same settings cloned from another.
-   *
+   * 
    * @param other the configuration from which to clone settings.
    */
   @SuppressWarnings("unchecked")
@@ -691,7 +722,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
          new ConcurrentHashMap<String, Boolean>());
      this.finalParameters.addAll(other.finalParameters);
    }
-
+   
     synchronized(Configuration.class) {
       REGISTRY.put(this, null);
     }
@@ -699,9 +730,9 @@ public class Configuration implements Iterable<Entry<String,String>>,
     this.loadDefaults = other.loadDefaults;
     setQuietMode(other.getQuietMode());
   }
-
+  
   /**
-   * Add a default resource. Resources are loaded in the order of the resources
+   * Add a default resource. Resources are loaded in the order of the resources 
    * added.
    * @param name file name. File should be present in the classpath.
    */
@@ -717,12 +748,12 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Add a configuration resource.
-   *
-   * The properties of this resource will override properties of previously
-   * added resources, unless they were marked <a href="#Final">final</a>.
-   *
-   * @param name resource to be added, the classpath is examined for a file
+   * Add a configuration resource. 
+   * 
+   * The properties of this resource will override properties of previously 
+   * added resources, unless they were marked <a href="#Final">final</a>. 
+   * 
+   * @param name resource to be added, the classpath is examined for a file 
    *             with that name.
    */
   public void addResource(String name) {
@@ -730,13 +761,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Add a configuration resource.
-   *
-   * The properties of this resource will override properties of previously
-   * added resources, unless they were marked <a href="#Final">final</a>.
-   *
-   * @param url url of the resource to be added, the local filesystem is
-   *            examined directly to find the resource, without referring to
+   * Add a configuration resource. 
+   * 
+   * The properties of this resource will override properties of previously 
+   * added resources, unless they were marked <a href="#Final">final</a>. 
+   * 
+   * @param url url of the resource to be added, the local filesystem is 
+   *            examined directly to find the resource, without referring to 
    *            the classpath.
    */
   public void addResource(URL url) {
@@ -744,13 +775,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Add a configuration resource.
-   *
-   * The properties of this resource will override properties of previously
-   * added resources, unless they were marked <a href="#Final">final</a>.
-   *
+   * Add a configuration resource. 
+   * 
+   * The properties of this resource will override properties of previously 
+   * added resources, unless they were marked <a href="#Final">final</a>. 
+   * 
    * @param file file-path of resource to be added, the local filesystem is
-   *             examined directly to find the resource, without referring to
+   *             examined directly to find the resource, without referring to 
    *             the classpath.
    */
   public void addResource(Path file) {
@@ -758,36 +789,36 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Add a configuration resource.
-   *
-   * The properties of this resource will override properties of previously
-   * added resources, unless they were marked <a href="#Final">final</a>.
-   *
-   * WARNING: The contents of the InputStream will be cached, by this method.
+   * Add a configuration resource. 
+   * 
+   * The properties of this resource will override properties of previously 
+   * added resources, unless they were marked <a href="#Final">final</a>. 
+   * 
+   * WARNING: The contents of the InputStream will be cached, by this method. 
    * So use this sparingly because it does increase the memory consumption.
-   *
+   * 
    * @param in InputStream to deserialize the object from. In will be read from
    * when a get or set is called next.  After it is read the stream will be
-   * closed.
+   * closed. 
    */
   public void addResource(InputStream in) {
     addResourceObject(new Resource(in));
   }
 
   /**
-   * Add a configuration resource.
-   *
-   * The properties of this resource will override properties of previously
-   * added resources, unless they were marked <a href="#Final">final</a>.
-   *
+   * Add a configuration resource. 
+   * 
+   * The properties of this resource will override properties of previously 
+   * added resources, unless they were marked <a href="#Final">final</a>. 
+   * 
    * @param in InputStream to deserialize the object from.
    * @param name the name of the resource because InputStream.toString is not
-   * very descriptive some times.
+   * very descriptive some times.  
    */
   public void addResource(InputStream in, String name) {
     addResourceObject(new Resource(in, name));
   }
-
+  
   /**
    * Add a configuration resource.
    *
@@ -800,13 +831,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
     addResourceObject(new Resource(conf.getProps()));
   }
 
-
-
+  
+  
   /**
    * Reload configuration from previously added resources.
    *
-   * This method will clear all the configuration read from the added
-   * resources, and final parameters. This will make the resources to
+   * This method will clear all the configuration read from the added 
+   * resources, and final parameters. This will make the resources to 
    * be read again before accessing the values. Values that are added
    * via set methods will overlay values read from the resources.
    */
@@ -814,7 +845,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     properties = null;                            // trigger reload
     finalParameters.clear();                      // clear site-limits
   }
-
+  
   private synchronized void addResourceObject(Resource resource) {
     resources.add(resource);                      // add to resources
     reloadConfiguration();
@@ -933,20 +964,20 @@ public class Configuration implements Iterable<Entry<String,String>>,
              + val
              + eval.substring(afterRightBrace);
     }
-    throw new IllegalStateException("Variable substitution depth too large: "
+    throw new IllegalStateException("Variable substitution depth too large: " 
                                     + MAX_SUBST + " " + expr);
   }
-
+  
   /**
    * Get the value of the <code>name</code> property, <code>null</code> if
    * no such property exists. If the key is deprecated, it returns the value of
    * the first key which replaces the deprecated key and is not null.
-   *
-   * Values are processed for <a href="#VariableExpansion">variable expansion</a>
-   * before being returned.
-   *
+   * 
+   * Values are processed for <a href="#VariableExpansion">variable expansion</a> 
+   * before being returned. 
+   * 
    * @param name the property name, will be trimmed before get value.
-   * @return the value of the <code>name</code> or its replacing property,
+   * @return the value of the <code>name</code> or its replacing property, 
    *         or null if no such property exists.
    */
   public String get(String name) {
@@ -990,33 +1021,33 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Get the value of the <code>name</code> property as a trimmed <code>String</code>,
-   * <code>null</code> if no such property exists.
+   * Get the value of the <code>name</code> property as a trimmed <code>String</code>, 
+   * <code>null</code> if no such property exists. 
    * If the key is deprecated, it returns the value of
    * the first key which replaces the deprecated key and is not null
-   *
-   * Values are processed for <a href="#VariableExpansion">variable expansion</a>
-   * before being returned.
-   *
+   * 
+   * Values are processed for <a href="#VariableExpansion">variable expansion</a> 
+   * before being returned. 
+   * 
    * @param name the property name.
-   * @return the value of the <code>name</code> or its replacing property,
+   * @return the value of the <code>name</code> or its replacing property, 
    *         or null if no such property exists.
    */
   public String getTrimmed(String name) {
     String value = get(name);
-
+    
     if (null == value) {
       return null;
     } else {
       return value.trim();
     }
   }
-
+  
   /**
-   * Get the value of the <code>name</code> property as a trimmed <code>String</code>,
-   * <code>defaultValue</code> if no such property exists.
+   * Get the value of the <code>name</code> property as a trimmed <code>String</code>, 
+   * <code>defaultValue</code> if no such property exists. 
    * See @{Configuration#getTrimmed} for more details.
-   *
+   * 
    * @param name          the property name.
    * @param defaultValue  the property default value.
    * @return              the value of the <code>name</code> or defaultValue
@@ -1029,12 +1060,12 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
   /**
    * Get the value of the <code>name</code> property, without doing
-   * <a href="#VariableExpansion">variable expansion</a>.If the key is
-   * deprecated, it returns the value of the first key which replaces
+   * <a href="#VariableExpansion">variable expansion</a>.If the key is 
+   * deprecated, it returns the value of the first key which replaces 
    * the deprecated key and is not null.
-   *
+   * 
    * @param name the property name.
-   * @return the value of the <code>name</code> property or
+   * @return the value of the <code>name</code> property or 
    *         its replacing property and null if no such property exists.
    */
   public String getRaw(String name) {
@@ -1077,28 +1108,28 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return altNames;
   }
 
-  /**
-   * Set the <code>value</code> of the <code>name</code> property. If
+  /** 
+   * Set the <code>value</code> of the <code>name</code> property. If 
    * <code>name</code> is deprecated or there is a deprecated name associated to it,
    * it sets the value to both names. Name will be trimmed before put into
    * configuration.
-   *
+   * 
    * @param name property name.
    * @param value property value.
    */
   public void set(String name, String value) {
     set(name, value, null);
   }
-
-  /**
-   * Set the <code>value</code> of the <code>name</code> property. If
+  
+  /** 
+   * Set the <code>value</code> of the <code>name</code> property. If 
    * <code>name</code> is deprecated, it also sets the <code>value</code> to
    * the keys that replace the deprecated key. Name will be trimmed before put
    * into configuration.
    *
    * @param name property name.
    * @param value property value.
-   * @param source the place that this configuration value came from
+   * @param source the place that this configuration value came from 
    * (For debugging).
    * @throws IllegalArgumentException when the value or name is null.
    */
@@ -1180,7 +1211,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
       set(name, value);
     }
   }
-
+  
   private synchronized Properties getOverlay() {
     if (overlay==null){
       overlay=new Properties();
@@ -1188,17 +1219,17 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return overlay;
   }
 
-  /**
+  /** 
    * Get the value of the <code>name</code>. If the key is deprecated,
    * it returns the value of the first key which replaces the deprecated key
    * and is not null.
    * If no such property exists,
    * then <code>defaultValue</code> is returned.
-   *
+   * 
    * @param name property name, will be trimmed before get value.
    * @param defaultValue default value.
-   * @return property value, or <code>defaultValue</code> if the property
-   *         doesn't exist.
+   * @return property value, or <code>defaultValue</code> if the property 
+   *         doesn't exist.                    
    */
   public String get(String name, String defaultValue) {
     String[] names = handleDeprecation(deprecationContext.get(), name);
@@ -1209,18 +1240,18 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return result;
   }
 
-  /**
+  /** 
    * Get the value of the <code>name</code> property as an <code>int</code>.
-   *
+   *   
    * If no such property exists, the provided default value is returned,
    * or if the specified value is not a valid <code>int</code>,
    * then an error is thrown.
-   *
+   * 
    * @param name property name.
    * @param defaultValue default value.
    * @throws NumberFormatException when the value is invalid
-   * @return property value as an <code>int</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as an <code>int</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public int getInt(String name, int defaultValue) {
     String valueString = getTrimmed(name);
@@ -1232,13 +1263,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
     return Integer.parseInt(valueString);
   }
-
+  
   /**
    * Get the value of the <code>name</code> property as a set of comma-delimited
    * <code>int</code> values.
-   *
+   * 
    * If no such property exists, an empty array is returned.
-   *
+   * 
    * @param name property name
    * @return property value interpreted as an array of comma-delimited
    *         <code>int</code> values
@@ -1252,9 +1283,9 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return ints;
   }
 
-  /**
+  /** 
    * Set the value of the <code>name</code> property to an <code>int</code>.
-   *
+   * 
    * @param name property name.
    * @param value <code>int</code> value of the property.
    */
@@ -1263,17 +1294,17 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
 
-  /**
-   * Get the value of the <code>name</code> property as a <code>long</code>.
+  /** 
+   * Get the value of the <code>name</code> property as a <code>long</code>.  
    * If no such property exists, the provided default value is returned,
    * or if the specified value is not a valid <code>long</code>,
    * then an error is thrown.
-   *
+   * 
    * @param name property name.
    * @param defaultValue default value.
    * @throws NumberFormatException when the value is invalid
-   * @return property value as a <code>long</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>long</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public long getLong(String name, long defaultValue) {
     String valueString = getTrimmed(name);
@@ -1324,10 +1355,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
     return null;
   }
-
-  /**
+  
+  /** 
    * Set the value of the <code>name</code> property to a <code>long</code>.
-   *
+   * 
    * @param name property name.
    * @param value <code>long</code> value of the property.
    */
@@ -1335,8 +1366,8 @@ public class Configuration implements Iterable<Entry<String,String>>,
     set(name, Long.toString(value));
   }
 
-  /**
-   * Get the value of the <code>name</code> property as a <code>float</code>.
+  /** 
+   * Get the value of the <code>name</code> property as a <code>float</code>.  
    * If no such property exists, the provided default value is returned,
    * or if the specified value is not a valid <code>float</code>,
    * then an error is thrown.
@@ -1344,8 +1375,8 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * @param name property name.
    * @param defaultValue default value.
    * @throws NumberFormatException when the value is invalid
-   * @return property value as a <code>float</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>float</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public float getFloat(String name, float defaultValue) {
     String valueString = getTrimmed(name);
@@ -1356,7 +1387,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
   /**
    * Set the value of the <code>name</code> property to a <code>float</code>.
-   *
+   * 
    * @param name property name.
    * @param value property value.
    */
@@ -1364,8 +1395,8 @@ public class Configuration implements Iterable<Entry<String,String>>,
     set(name,Float.toString(value));
   }
 
-  /**
-   * Get the value of the <code>name</code> property as a <code>double</code>.
+  /** 
+   * Get the value of the <code>name</code> property as a <code>double</code>.  
    * If no such property exists, the provided default value is returned,
    * or if the specified value is not a valid <code>double</code>,
    * then an error is thrown.
@@ -1373,8 +1404,8 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * @param name property name.
    * @param defaultValue default value.
    * @throws NumberFormatException when the value is invalid
-   * @return property value as a <code>double</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>double</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public double getDouble(String name, double defaultValue) {
     String valueString = getTrimmed(name);
@@ -1385,23 +1416,23 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
   /**
    * Set the value of the <code>name</code> property to a <code>double</code>.
-   *
+   * 
    * @param name property name.
    * @param value property value.
    */
   public void setDouble(String name, double value) {
     set(name,Double.toString(value));
   }
-
-  /**
-   * Get the value of the <code>name</code> property as a <code>boolean</code>.
+ 
+  /** 
+   * Get the value of the <code>name</code> property as a <code>boolean</code>.  
    * If no such property is specified, or if the specified value is not a valid
    * <code>boolean</code>, then <code>defaultValue</code> is returned.
-   *
+   * 
    * @param name property name.
    * @param defaultValue default value.
-   * @return property value as a <code>boolean</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>boolean</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public boolean getBoolean(String name, boolean defaultValue) {
     String valueString = getTrimmed(name);
@@ -1416,9 +1447,9 @@ public class Configuration implements Iterable<Entry<String,String>>,
     else return defaultValue;
   }
 
-  /**
+  /** 
    * Set the value of the <code>name</code> property to a <code>boolean</code>.
-   *
+   * 
    * @param name property name.
    * @param value <code>boolean</code> value of the property.
    */
@@ -1598,13 +1629,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Gets information about why a property was set.  Typically this is the
+   * Gets information about why a property was set.  Typically this is the 
    * path to the resource objects (file, URL, etc.) the property came from, but
    * it can also indicate that it was set programatically, or because of the
    * command line.
    *
    * @param name - The property name to get the source of.
-   * @return null - If the property or its source wasn't found. Otherwise,
+   * @return null - If the property or its source wasn't found. Otherwise, 
    * returns a list of the sources of the resource.  The older sources are
    * the first ones in the list.  So for example if a configuration is set from
    * the command line, and then written out to a file that is read back in the
@@ -1791,44 +1822,44 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return new IntegerRanges(get(name, defaultValue));
   }
 
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
-   * a collection of <code>String</code>s.
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
+   * a collection of <code>String</code>s.  
    * If no such property is specified then empty collection is returned.
    * <p>
    * This is an optimized version of {@link #getStrings(String)}
-   *
+   * 
    * @param name property name.
-   * @return property value as a collection of <code>String</code>s.
+   * @return property value as a collection of <code>String</code>s. 
    */
   public Collection<String> getStringCollection(String name) {
     String valueString = get(name);
     return StringUtils.getStringCollection(valueString);
   }
 
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
-   * an array of <code>String</code>s.
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
+   * an array of <code>String</code>s.  
    * If no such property is specified then <code>null</code> is returned.
-   *
+   * 
    * @param name property name.
-   * @return property value as an array of <code>String</code>s,
-   *         or <code>null</code>.
+   * @return property value as an array of <code>String</code>s, 
+   *         or <code>null</code>. 
    */
   public String[] getStrings(String name) {
     String valueString = get(name);
     return StringUtils.getStrings(valueString);
   }
 
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
-   * an array of <code>String</code>s.
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
+   * an array of <code>String</code>s.  
    * If no such property is specified then default value is returned.
-   *
+   * 
    * @param name property name.
    * @param defaultValue The default value
-   * @return property value as an array of <code>String</code>s,
-   *         or default value.
+   * @return property value as an array of <code>String</code>s, 
+   *         or default value. 
    */
   public String[] getStrings(String name, String... defaultValue) {
     String valueString = get(name);
@@ -1838,14 +1869,14 @@ public class Configuration implements Iterable<Entry<String,String>>,
       return StringUtils.getStrings(valueString);
     }
   }
-
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
-   * a collection of <code>String</code>s, trimmed of the leading and trailing whitespace.
+  
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
+   * a collection of <code>String</code>s, trimmed of the leading and trailing whitespace.  
    * If no such property is specified then empty <code>Collection</code> is returned.
    *
    * @param name property name.
-   * @return property value as a collection of <code>String</code>s, or empty <code>Collection</code>
+   * @return property value as a collection of <code>String</code>s, or empty <code>Collection</code> 
    */
   public Collection<String> getTrimmedStringCollection(String name) {
     String valueString = get(name);
@@ -1855,30 +1886,30 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
     return StringUtils.getTrimmedStringCollection(valueString);
   }
-
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
+  
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
    * an array of <code>String</code>s, trimmed of the leading and trailing whitespace.
    * If no such property is specified then an empty array is returned.
-   *
+   * 
    * @param name property name.
-   * @return property value as an array of trimmed <code>String</code>s,
-   *         or empty array.
+   * @return property value as an array of trimmed <code>String</code>s, 
+   *         or empty array. 
    */
   public String[] getTrimmedStrings(String name) {
     String valueString = get(name);
     return StringUtils.getTrimmedStrings(valueString);
   }
 
-  /**
-   * Get the comma delimited values of the <code>name</code> property as
+  /** 
+   * Get the comma delimited values of the <code>name</code> property as 
    * an array of <code>String</code>s, trimmed of the leading and trailing whitespace.
    * If no such property is specified then default value is returned.
-   *
+   * 
    * @param name property name.
    * @param defaultValue The default value
-   * @return property value as an array of trimmed <code>String</code>s,
-   *         or default value.
+   * @return property value as an array of trimmed <code>String</code>s, 
+   *         or default value. 
    */
   public String[] getTrimmedStrings(String name, String... defaultValue) {
     String valueString = get(name);
@@ -1889,10 +1920,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
-   * Set the array of string values for the <code>name</code> property as
-   * as comma delimited values.
-   *
+  /** 
+   * Set the array of string values for the <code>name</code> property as 
+   * as comma delimited values.  
+   * 
    * @param name property name.
    * @param values The values
    */
@@ -1904,7 +1935,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
    * Get the value for a known password configuration element.
    * In order to enable the elimination of clear text passwords in config,
    * this method attempts to resolve the property name as an alias through
-   * the CredentialProvider API and conditionally fallsback to config.
+   * the CredentialProvider API and conditionally falls back to config.
    * @param name property name
    * @return password
    */
@@ -2060,7 +2091,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return updateConnectAddr(addressProperty, NetUtils.createSocketAddrForHost(
         connectHost, addr.getPort()));
   }
-
+  
   /**
    * Set the socket address a client can use to connect for the
    * <code>name</code> property as a <code>host:port</code>.  The wildcard
@@ -2075,10 +2106,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
     setSocketAddr(name, connectAddr);
     return connectAddr;
   }
-
+  
   /**
    * Load a class by name.
-   *
+   * 
    * @param name the class name.
    * @return the class object.
    * @throws ClassNotFoundException if the class is not found.
@@ -2090,18 +2121,18 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
     return ret;
   }
-
+  
   /**
    * Load a class by name, returning null rather than throwing an exception
    * if it couldn't be loaded. This is to avoid the overhead of creating
    * an exception.
-   *
+   * 
    * @param name the class name
    * @return the class object, or null if it could not be found.
    */
   public Class<?> getClassByNameOrNull(String name) {
     Map<String, WeakReference<Class<?>>> map;
-
+    
     synchronized (CACHE_CLASSES) {
       map = CACHE_CLASSES.get(classLoader);
       if (map == null) {
@@ -2112,11 +2143,11 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
 
     Class<?> clazz = null;
-    WeakReference<Class<?>> ref = map.get(name);
+    WeakReference<Class<?>> ref = map.get(name); 
     if (ref != null) {
        clazz = ref.get();
     }
-
+     
     if (clazz == null) {
       try {
         clazz = Class.forName(name, true, classLoader);
@@ -2136,17 +2167,17 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
+  /** 
    * Get the value of the <code>name</code> property
    * as an array of <code>Class</code>.
-   * The value of the property specifies a list of comma separated class names.
-   * If no such property is specified, then <code>defaultValue</code> is
+   * The value of the property specifies a list of comma separated class names.  
+   * If no such property is specified, then <code>defaultValue</code> is 
    * returned.
-   *
+   * 
    * @param name the property name.
    * @param defaultValue default value.
-   * @return property value as a <code>Class[]</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>Class[]</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public Class<?>[] getClasses(String name, Class<?> ... defaultValue) {
     String[] classnames = getTrimmedStrings(name);
@@ -2163,15 +2194,15 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
-   * Get the value of the <code>name</code> property as a <code>Class</code>.
-   * If no such property is specified, then <code>defaultValue</code> is
+  /** 
+   * Get the value of the <code>name</code> property as a <code>Class</code>.  
+   * If no such property is specified, then <code>defaultValue</code> is 
    * returned.
-   *
+   * 
    * @param name the class name.
    * @param defaultValue default value.
-   * @return property value as a <code>Class</code>,
-   *         or <code>defaultValue</code>.
+   * @return property value as a <code>Class</code>, 
+   *         or <code>defaultValue</code>. 
    */
   public Class<?> getClass(String name, Class<?> defaultValue) {
     String valueString = getTrimmed(name);
@@ -2184,24 +2215,24 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
+  /** 
    * Get the value of the <code>name</code> property as a <code>Class</code>
    * implementing the interface specified by <code>xface</code>.
-   *
-   * If no such property is specified, then <code>defaultValue</code> is
+   *   
+   * If no such property is specified, then <code>defaultValue</code> is 
    * returned.
-   *
+   * 
    * An exception is thrown if the returned class does not implement the named
-   * interface.
-   *
+   * interface. 
+   * 
    * @param name the class name.
    * @param defaultValue default value.
    * @param xface the interface implemented by the named class.
-   * @return property value as a <code>Class</code>,
+   * @return property value as a <code>Class</code>, 
    *         or <code>defaultValue</code>.
    */
-  public <U> Class<? extends U> getClass(String name,
-                                         Class<? extends U> defaultValue,
+  public <U> Class<? extends U> getClass(String name, 
+                                         Class<? extends U> defaultValue, 
                                          Class<U> xface) {
     try {
       Class<?> theClass = getClass(name, defaultValue);
@@ -2219,10 +2250,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
   /**
    * Get the value of the <code>name</code> property as a <code>List</code>
    * of objects implementing the interface specified by <code>xface</code>.
-   *
+   * 
    * An exception is thrown if any of the classes does not exist, or if it does
    * not implement the named interface.
-   *
+   * 
    * @param name the property name.
    * @param xface the interface implemented by the classes named by
    *        <code>name</code>.
@@ -2241,13 +2272,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
     return ret;
   }
 
-  /**
-   * Set the value of the <code>name</code> property to the name of a
+  /** 
+   * Set the value of the <code>name</code> property to the name of a 
    * <code>theClass</code> implementing the given interface <code>xface</code>.
-   *
-   * An exception is thrown if <code>theClass</code> does not implement the
-   * interface <code>xface</code>.
-   *
+   * 
+   * An exception is thrown if <code>theClass</code> does not implement the 
+   * interface <code>xface</code>. 
+   * 
    * @param name property name.
    * @param theClass property value.
    * @param xface the interface implemented by the named class.
@@ -2258,12 +2289,12 @@ public class Configuration implements Iterable<Entry<String,String>>,
     set(name, theClass.getName());
   }
 
-  /**
+  /** 
    * Get a local file under a directory named by <i>dirsProp</i> with
    * the given <i>path</i>.  If <i>dirsProp</i> contains multiple directories,
    * then one is chosen based on <i>path</i>'s hash code.  If the selected
    * directory does not exist, an attempt is made to create it.
-   *
+   * 
    * @param dirsProp directory in which to locate the file.
    * @param path file-path.
    * @return local file under the directory with the given path.
@@ -2281,7 +2312,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
         return file;
       }
     }
-    LOG.warn("Could not make " + path +
+    LOG.warn("Could not make " + path + 
              " in local directories from " + dirsProp);
     for(int i=0; i < dirs.length; i++) {
       int index = (hashCode+i & Integer.MAX_VALUE) % dirs.length;
@@ -2290,12 +2321,12 @@ public class Configuration implements Iterable<Entry<String,String>>,
     throw new IOException("No valid local directories in property: "+dirsProp);
   }
 
-  /**
+  /** 
    * Get a local file name under a directory named in <i>dirsProp</i> with
    * the given <i>path</i>.  If <i>dirsProp</i> contains multiple directories,
    * then one is chosen based on <i>path</i>'s hash code.  If the selected
    * directory does not exist, an attempt is made to create it.
-   *
+   * 
    * @param dirsProp directory in which to locate the file.
    * @param path file-path.
    * @return local file under the directory with the given path.
@@ -2315,20 +2346,20 @@ public class Configuration implements Iterable<Entry<String,String>>,
     throw new IOException("No valid local directories in property: "+dirsProp);
   }
 
-  /**
+  /** 
    * Get the {@link URL} for the named resource.
-   *
+   * 
    * @param name resource name.
    * @return the url for the named resource.
    */
   public URL getResource(String name) {
     return classLoader.getResource(name);
   }
-
-  /**
+  
+  /** 
    * Get an input stream attached to the configuration resource with the
    * given <code>name</code>.
-   *
+   * 
    * @param name configuration resource name.
    * @return an input stream attached to the resource.
    */
@@ -2349,10 +2380,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
+  /** 
    * Get a {@link Reader} attached to the configuration resource with the
    * given <code>name</code>.
-   *
+   * 
    * @param name configuration resource name.
    * @return a reader attached to the resource.
    */
@@ -2394,7 +2425,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
       if (overlay != null) {
         properties.putAll(overlay);
-        for (Entry<Object,Object> item: overlay.entrySet()) {
+        for (Map.Entry<Object,Object> item: overlay.entrySet()) {
           String key = (String)item.getKey();
           String[] source = backup.get(key);
           if(source != null) {
@@ -2424,19 +2455,19 @@ public class Configuration implements Iterable<Entry<String,String>>,
   }
 
   /**
-   * Get an {@link Iterator} to go through the list of <code>String</code>
+   * Get an {@link Iterator} to go through the list of <code>String</code> 
    * key-value pairs in the configuration.
-   *
+   * 
    * @return an iterator over the entries.
    */
   @Override
-  public Iterator<Entry<String, String>> iterator() {
+  public Iterator<Map.Entry<String, String>> iterator() {
     // Get a copy of just the string to string pairs. After the old object
     // methods that allow non-strings to be put into configurations are removed,
     // we could replace properties with a Map<String,String> and get rid of this
     // code.
     Map<String,String> result = new HashMap<String,String>();
-    for(Entry<Object,Object> item: getProps().entrySet()) {
+    for(Map.Entry<Object,Object> item: getProps().entrySet()) {
       if (item.getKey() instanceof String &&
           item.getValue() instanceof String) {
           result.put((String) item.getKey(), (String) item.getValue());
@@ -2455,7 +2486,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
    */
   public Map<String, String> getPropsWithPrefix(String confPrefix) {
     Map<String, String> configMap = new HashMap<>();
-    for (Entry<String, String> entry : this) {
+    for (Map.Entry<String, String> entry : this) {
       String name = entry.getKey();
       if (name.startsWith(confPrefix)) {
         String value = this.get(name);
@@ -2509,13 +2540,13 @@ public class Configuration implements Iterable<Entry<String,String>>,
       for (String resource : defaultResources) {
         loadResource(properties, new Resource(resource), quiet);
       }
-
+    
       //support the hadoop-site.xml as a deprecated case
       if(getResource("hadoop-site.xml")!=null) {
         loadResource(properties, new Resource("hadoop-site.xml"), quiet);
       }
     }
-
+    
     for (int i = 0; i < resources.size(); i++) {
       Resource ret = loadResource(properties, resources.get(i), quiet);
       if (ret != null) {
@@ -2523,14 +2554,14 @@ public class Configuration implements Iterable<Entry<String,String>>,
       }
     }
   }
-
+  
   private Resource loadResource(Properties properties, Resource wrapper, boolean quiet) {
     String name = UNKNOWN_RESOURCE;
     try {
       Object resource = wrapper.getResource();
       name = wrapper.getName();
-
-      DocumentBuilderFactory docBuilderFactory
+      
+      DocumentBuilderFactory docBuilderFactory 
         = DocumentBuilderFactory.newInstance();
       //ignore all comments inside the xml file
       docBuilderFactory.setIgnoringComments(true);
@@ -2549,7 +2580,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
       Document doc = null;
       Element root = null;
       boolean returnCachedProperties = false;
-
+      
       if (resource instanceof URL) {                  // an URL resource
         doc = parse(builder, (URL)resource);
       } else if (resource instanceof String) {        // a CLASSPATH resource
@@ -2627,7 +2658,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
                 ((Text)field.getFirstChild()).getData()));
         }
         source.add(name);
-
+        
         // Ignore this parameter if it has already been marked as 'final'
         if (attr != null) {
           if (deprecations.getDeprecatedKeyMap().containsKey(attr)) {
@@ -2635,18 +2666,18 @@ public class Configuration implements Iterable<Entry<String,String>>,
                 deprecations.getDeprecatedKeyMap().get(attr);
             keyInfo.clearAccessed();
             for (String key:keyInfo.newKeys) {
-              // update new keys with deprecated key's value
-              loadProperty(toAddTo, name, key, value, finalParameter,
+              // update new keys with deprecated key's value 
+              loadProperty(toAddTo, name, key, value, finalParameter, 
                   source.toArray(new String[source.size()]));
             }
           }
           else {
-            loadProperty(toAddTo, name, attr, value, finalParameter,
+            loadProperty(toAddTo, name, attr, value, finalParameter, 
                 source.toArray(new String[source.size()]));
           }
         }
       }
-
+      
       if (returnCachedProperties) {
         overlay(properties, toAddTo);
         return new Resource(toAddTo, name);
@@ -2694,20 +2725,20 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
+  /** 
    * Write out the non-default properties in this configuration to the given
    * {@link OutputStream} using UTF-8 encoding.
-   *
+   * 
    * @param out the output stream to write to.
    */
   public void writeXml(OutputStream out) throws IOException {
     writeXml(new OutputStreamWriter(out, "UTF-8"));
   }
 
-  /**
+  /** 
    * Write out the non-default properties in this configuration to the given
    * {@link Writer}.
-   *
+   * 
    * @param out the writer to write to.
    */
   public void writeXml(Writer out) throws IOException {
@@ -2773,7 +2804,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
           }
         }
       }
-
+      
       conf.appendChild(doc.createTextNode("\n"));
     }
     return doc;
@@ -2782,10 +2813,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
   /**
    *  Writes out all the parameters and their properties (final and resource) to
    *  the given {@link Writer}
-   *  The format of the output would be
+   *  The format of the output would be 
    *  { "properties" : [ {key1,value1,key1.isFinal,key1.resource}, {key2,value2,
-   *  key2.isFinal,key2.resource}... ] }
-   *  It does not output the parameters of the configuration object which is
+   *  key2.isFinal,key2.resource}... ] } 
+   *  It does not output the parameters of the configuration object which is 
    *  loaded from an input stream.
    * @param out the Writer to write to
    * @throws IOException
@@ -2799,10 +2830,10 @@ public class Configuration implements Iterable<Entry<String,String>>,
     dumpGenerator.writeStartArray();
     dumpGenerator.flush();
     synchronized (config) {
-      for (Entry<Object,Object> item: config.getProps().entrySet()) {
+      for (Map.Entry<Object,Object> item: config.getProps().entrySet()) {
         dumpGenerator.writeStartObject();
         dumpGenerator.writeStringField("key", (String) item.getKey());
-        dumpGenerator.writeStringField("value",
+        dumpGenerator.writeStringField("value", 
                                        config.get((String) item.getKey()));
         dumpGenerator.writeBooleanField("isFinal",
                                         config.finalParameters.contains(item.getKey()));
@@ -2819,25 +2850,25 @@ public class Configuration implements Iterable<Entry<String,String>>,
     dumpGenerator.writeEndObject();
     dumpGenerator.flush();
   }
-
+  
   /**
    * Get the {@link ClassLoader} for this job.
-   *
+   * 
    * @return the correct class loader.
    */
   public ClassLoader getClassLoader() {
     return classLoader;
   }
-
+  
   /**
    * Set the class loader that will be used to load the various objects.
-   *
+   * 
    * @param classLoader the new class loader.
    */
   public void setClassLoader(ClassLoader classLoader) {
     this.classLoader = classLoader;
   }
-
+  
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
@@ -2851,7 +2882,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     toString(resources, sb);
     return sb.toString();
   }
-
+  
   private <T> void toString(List<T> resources, StringBuilder sb) {
     ListIterator<T> i = resources.listIterator();
     while (i.hasNext()) {
@@ -2862,11 +2893,11 @@ public class Configuration implements Iterable<Entry<String,String>>,
     }
   }
 
-  /**
-   * Set the quietness-mode.
-   *
+  /** 
+   * Set the quietness-mode. 
+   * 
    * In the quiet-mode, error and informational messages might not be logged.
-   *
+   * 
    * @param quietmode <code>true</code> to set quiet-mode on, <code>false</code>
    *              to turn it off.
    */
@@ -2877,7 +2908,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
   synchronized boolean getQuietMode() {
     return this.quietmode;
   }
-
+  
   /** For debugging.  List non-default properties to the terminal and exit. */
   public static void main(String[] args) throws Exception {
     new Configuration().writeXml(System.out);
@@ -2890,7 +2921,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
     for(int i=0; i < size; ++i) {
       String key = org.apache.hadoop.io.Text.readString(in);
       String value = org.apache.hadoop.io.Text.readString(in);
-      set(key, value);
+      set(key, value); 
       String sources[] = WritableUtils.readCompressedStringArray(in);
       if(sources != null) {
         updatingResource.put(key, sources);
@@ -2903,16 +2934,16 @@ public class Configuration implements Iterable<Entry<String,String>>,
   public void write(DataOutput out) throws IOException {
     Properties props = getProps();
     WritableUtils.writeVInt(out, props.size());
-    for(Entry<Object, Object> item: props.entrySet()) {
+    for(Map.Entry<Object, Object> item: props.entrySet()) {
       org.apache.hadoop.io.Text.writeString(out, (String) item.getKey());
       org.apache.hadoop.io.Text.writeString(out, (String) item.getValue());
-      WritableUtils.writeCompressedStringArray(out,
+      WritableUtils.writeCompressedStringArray(out, 
           updatingResource.get(item.getKey()));
     }
   }
-
+  
   /**
-   * get keys matching the the regex
+   * get keys matching the the regex 
    * @param regex
    * @return Map<String,String> with matching keys
    */
@@ -2922,8 +2953,8 @@ public class Configuration implements Iterable<Entry<String,String>>,
     Map<String,String> result = new HashMap<String,String>();
     Matcher m;
 
-    for(Entry<Object,Object> item: getProps().entrySet()) {
-      if (item.getKey() instanceof String &&
+    for(Map.Entry<Object,Object> item: getProps().entrySet()) {
+      if (item.getKey() instanceof String && 
           item.getValue() instanceof String) {
         m = p.matcher((String)item.getKey());
         if(m.find()) { // match
@@ -2943,7 +2974,7 @@ public class Configuration implements Iterable<Entry<String,String>>,
 
   public static void dumpDeprecatedKeys() {
     DeprecationContext deprecations = deprecationContext.get();
-    for (Entry<String, DeprecatedKeyInfo> entry :
+    for (Map.Entry<String, DeprecatedKeyInfo> entry :
         deprecations.getDeprecatedKeyMap().entrySet()) {
       StringBuilder newKeys = new StringBuilder();
       for (String newKey : entry.getValue().newKeys) {
