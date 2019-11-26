@@ -124,13 +124,8 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	@Nullable
 	private File[] localRocksDbDirectories;
 
-	/** The pre-configured option settings. */
-	@Nullable
-	private PredefinedOptions predefinedOptions;
-
-	/** The options factory to create the RocksDB options in the cluster. */
-	@Nullable
-	private OptionsFactory optionsFactory;
+	/** The container for all RocksDB options. */
+	private final RocksDBOptionsContainer optionsContainer;
 
 	/** This determines if incremental checkpointing is enabled. */
 	private final TernaryBoolean enableIncrementalCheckpointing;
@@ -269,6 +264,7 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 		this.priorityQueueStateType = PriorityQueueStateType.HEAP;
 		this.defaultMetricOptions = new RocksDBNativeMetricOptions();
 		this.enableTtlCompactionFilter = TernaryBoolean.UNDEFINED;
+		this.optionsContainer = new RocksDBOptionsContainer();
 	}
 
 	/**
@@ -341,21 +337,28 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 		// configure metric options
 		this.defaultMetricOptions = RocksDBNativeMetricOptions.fromConfig(config);
 
+		// initiate options container
+		this.optionsContainer = new RocksDBOptionsContainer();
+
 		// configure RocksDB predefined options
-		this.predefinedOptions = original.predefinedOptions == null ?
-			PredefinedOptions.valueOf(config.getString(RocksDBOptions.PREDEFINED_OPTIONS)) : original.predefinedOptions;
+		PredefinedOptions originalPredefinedOptions = original.optionsContainer.getPredefinedOptions();
+		PredefinedOptions predefinedOptions = originalPredefinedOptions == null ?
+			PredefinedOptions.valueOf(config.getString(RocksDBOptions.PREDEFINED_OPTIONS)) : originalPredefinedOptions;
+		this.optionsContainer.setPredefinedOptions(predefinedOptions);
 		LOG.info("Using predefined options: {}.", predefinedOptions.name());
 
 		// configure RocksDB options factory
+		OptionsFactory optionsFactory;
 		try {
-			this.optionsFactory = configureOptionsFactory(
-				original.optionsFactory,
+			optionsFactory = configureOptionsFactory(
+				original.optionsContainer.getOptionsFactory(),
 				config.getString(RocksDBOptions.OPTIONS_FACTORY),
 				config,
 				classLoader);
 		} catch (DynamicCodeLoadingException e) {
 			throw new FlinkRuntimeException(e);
 		}
+		this.optionsContainer.setOptionsFactory(optionsFactory);
 	}
 
 	// ------------------------------------------------------------------------
@@ -499,7 +502,7 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 			operatorIdentifier,
 			env.getUserClassLoader(),
 			instanceBasePath,
-			getDbOptions(),
+			optionsContainer,
 			stateName -> getColumnOptions(),
 			kvStateRegistry,
 			keySerializer,
@@ -730,8 +733,8 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	 *
 	 * @param options The options to set (must not be null).
 	 */
-	public void setPredefinedOptions(PredefinedOptions options) {
-		predefinedOptions = checkNotNull(options);
+	public void setPredefinedOptions(@Nonnull PredefinedOptions options) {
+		optionsContainer.setPredefinedOptions(options);
 	}
 
 	/**
@@ -746,10 +749,7 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	 * @return The currently set predefined options for RocksDB.
 	 */
 	public PredefinedOptions getPredefinedOptions() {
-		if (predefinedOptions == null) {
-			predefinedOptions = PredefinedOptions.DEFAULT;
-		}
-		return predefinedOptions;
+		return optionsContainer.checkAndGetPredefinedOptions();
 	}
 
 	/**
@@ -766,7 +766,7 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	 * @param optionsFactory The options factory that lazily creates the RocksDB options.
 	 */
 	public void setOptions(OptionsFactory optionsFactory) {
-		this.optionsFactory = optionsFactory;
+		optionsContainer.setOptionsFactory(optionsFactory);
 	}
 
 	/**
@@ -775,44 +775,26 @@ public class RocksDBStateBackend extends AbstractStateBackend implements Configu
 	 * @return The options factory.
 	 */
 	public OptionsFactory getOptions() {
-		return optionsFactory;
+		return optionsContainer.getOptionsFactory();
 	}
 
 	/**
 	 * Gets the RocksDB {@link DBOptions} to be used for all RocksDB instances.
 	 */
 	public DBOptions getDbOptions() {
-		// initial options from pre-defined profile
-		DBOptions opt = getPredefinedOptions().createDBOptions();
-
-		// add user-defined options factory, if specified
-		if (optionsFactory != null) {
-			opt = optionsFactory.createDBOptions(opt);
-		}
-
-		// add necessary default options
-		opt = opt.setCreateIfMissing(true);
-
-		return opt;
+		return optionsContainer.getDbOptions();
 	}
 
 	/**
 	 * Gets the RocksDB {@link ColumnFamilyOptions} to be used for all RocksDB instances.
 	 */
 	public ColumnFamilyOptions getColumnOptions() {
-		// initial options from pre-defined profile
-		ColumnFamilyOptions opt = getPredefinedOptions().createColumnOptions();
-
-		// add user-defined options, if specified
-		if (optionsFactory != null) {
-			opt = optionsFactory.createColumnOptions(opt);
-		}
-
-		return opt;
+		return optionsContainer.getColumnOptions();
 	}
 
 	public RocksDBNativeMetricOptions getMemoryWatcherOptions() {
 		RocksDBNativeMetricOptions options = this.defaultMetricOptions;
+		OptionsFactory optionsFactory = this.optionsContainer.getOptionsFactory();
 		if (optionsFactory != null) {
 			options = optionsFactory.createNativeMetricsOptions(options);
 		}

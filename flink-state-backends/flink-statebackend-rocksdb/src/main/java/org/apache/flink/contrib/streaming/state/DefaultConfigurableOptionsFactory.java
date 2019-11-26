@@ -18,6 +18,7 @@
 
 package org.apache.flink.contrib.streaming.state;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
@@ -59,6 +60,8 @@ import static org.apache.flink.contrib.streaming.state.RocksDBConfigurableOption
 public class DefaultConfigurableOptionsFactory implements ConfigurableOptionsFactory {
 
 	private final Map<String, String> configuredOptions = new HashMap<>();
+
+	private boolean closed;
 
 	@Override
 	public DBOptions createDBOptions(DBOptions currentOptions) {
@@ -421,5 +424,15 @@ public class DefaultConfigurableOptionsFactory implements ConfigurableOptionsFac
 			"The configuration " + key + " has not been configured.");
 
 		return configuredOptions.get(key);
+	}
+
+	@Override
+	public void close() {
+		this.closed = true;
+	}
+
+	@VisibleForTesting
+	boolean isClosed() {
+		return this.closed;
 	}
 }

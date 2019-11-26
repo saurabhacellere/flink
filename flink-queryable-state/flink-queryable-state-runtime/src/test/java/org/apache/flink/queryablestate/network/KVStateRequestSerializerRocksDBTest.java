@@ -23,9 +23,9 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
-import org.apache.flink.contrib.streaming.state.PredefinedOptions;
 import org.apache.flink.contrib.streaming.state.RocksDBKeyedStateBackend;
 import org.apache.flink.contrib.streaming.state.RocksDBKeyedStateBackendBuilder;
+import org.apache.flink.contrib.streaming.state.RocksDBOptionsContainer;
 import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
@@ -42,7 +42,6 @@ import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.rocksdb.DBOptions;
 
 import java.util.Collections;
 
@@ -69,16 +68,15 @@ public final class KVStateRequestSerializerRocksDBTest {
 		final long key = 0L;
 
 		// objects for RocksDB state list serialisation
-		DBOptions dbOptions = PredefinedOptions.DEFAULT.createDBOptions();
-		dbOptions.setCreateIfMissing(true);
+		RocksDBOptionsContainer optionsContainer = new RocksDBOptionsContainer();
 		ExecutionConfig executionConfig = new ExecutionConfig();
 		final RocksDBKeyedStateBackend<Long> longHeapKeyedStateBackend =
 			new RocksDBKeyedStateBackendBuilder<>(
 				"no-op",
 				ClassLoader.getSystemClassLoader(),
 				temporaryFolder.getRoot(),
-				dbOptions,
-				stateName -> PredefinedOptions.DEFAULT.createColumnOptions(),
+				optionsContainer,
+				stateName -> optionsContainer.getColumnOptions(),
 				mock(TaskKvStateRegistry.class),
 				LongSerializer.INSTANCE,
 				1,
@@ -113,16 +111,15 @@ public final class KVStateRequestSerializerRocksDBTest {
 		final long key = 0L;
 
 		// objects for RocksDB state list serialisation
-		DBOptions dbOptions = PredefinedOptions.DEFAULT.createDBOptions();
-		dbOptions.setCreateIfMissing(true);
+		RocksDBOptionsContainer optionsContainer = new RocksDBOptionsContainer();
 		ExecutionConfig executionConfig = new ExecutionConfig();
 		final RocksDBKeyedStateBackend<Long> longHeapKeyedStateBackend =
 			new RocksDBKeyedStateBackendBuilder<>(
 				"no-op",
 				ClassLoader.getSystemClassLoader(),
 				temporaryFolder.getRoot(),
-				dbOptions,
-				stateName -> PredefinedOptions.DEFAULT.createColumnOptions(),
+				optionsContainer,
+				stateName -> optionsContainer.getColumnOptions(),
 				mock(TaskKvStateRegistry.class),
 				LongSerializer.INSTANCE,
 				1,
