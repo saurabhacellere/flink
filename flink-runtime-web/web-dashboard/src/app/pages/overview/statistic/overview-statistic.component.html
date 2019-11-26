@@ -20,7 +20,10 @@
   <div nz-col [nzXs]="24" [nzSm]="24" [nzMd]="12" [nzLg]="12" [nzXl]="12" class="col">
     <nz-card [nzBordered]="false" nzTitle="Available Task Slots" [nzLoading]="!statistic">
       <ng-container *ngIf="statistic">
-        <div class="total">{{ statistic['slots-available'] | number:'1.0-0' }}</div>
+        <div class="taskslots">
+          <div class="total">{{ statistic['slots-available'] | number:'1.0-0' }}</div>
+          <div class="task-slot-percentage-bar"><h6>Task Slots Usage</h6><nz-progress [nzPercent]="taskSlotPercentage" nzStatus="normal"></nz-progress></div>
+        </div>
         <div class="footer">
           <div class="field">
             <span>Total Task Slots</span>
@@ -30,6 +33,11 @@
           <div class="field">
             <span>Task Managers</span>
             <span>{{ statistic['taskmanagers'] | number:'1.0-0' }}</span>
+          </div>
+          <nz-divider nzType="vertical"></nz-divider>
+          <div class="field">
+            <span>CPU Cores</span>
+            <span>{{ taskManagerCPUs | number:'1.0-0' }}</span>
           </div>
         </div>
       </ng-container>
@@ -55,6 +63,16 @@
             <span>{{ statistic['jobs-failed'] | number:'1.0-0' }}</span>
           </div>
         </div>
+      </ng-container>
+    </nz-card>
+  </div>
+  <div nz-col [nzXs]="24" [nzSm]="24" [nzMd]="24" [nzLg]="24" [nzXl]="24" class="col">
+    <nz-card [nzBordered]="false" nzTitle="Task Manager Overview" [nzLoading]="!listOfTaskManager">
+      <ng-container *ngFor="let manager of listOfTaskManager;trackBy:trackByTaskManager">
+        <flink-task-manager-item
+                [state]="manager"
+                [totalCount]="totalCount"
+                [timeoutThresholdSeconds]="timeoutThresholdSeconds"></flink-task-manager-item>
       </ng-container>
     </nz-card>
   </div>

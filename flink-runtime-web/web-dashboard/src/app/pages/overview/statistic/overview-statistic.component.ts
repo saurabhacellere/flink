@@ -17,10 +17,10 @@
  */
 
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
-import { OverviewInterface } from 'interfaces';
+import { OverviewInterface, TaskmanagersItemCalInterface } from 'interfaces';
 import { Subject } from 'rxjs';
 import { flatMap, takeUntil } from 'rxjs/operators';
-import { OverviewService, StatusService } from 'services';
+import { JobManagerService, OverviewService, StatusService, TaskManagerService } from 'services';
 
 @Component({
   selector: 'flink-overview-statistic',
@@ -30,12 +30,19 @@ import { OverviewService, StatusService } from 'services';
 })
 export class OverviewStatisticComponent implements OnInit, OnDestroy {
   statistic: OverviewInterface | null;
+  listOfTaskManager: TaskmanagersItemCalInterface[] = [];
+  taskSlotPercentage: number;
+  taskManagerCPUs: number;
+  totalCount: number;
   destroy$ = new Subject();
+  timeoutThresholdSeconds: number;
 
   constructor(
     private statusService: StatusService,
     private overviewService: OverviewService,
-    private cdr: ChangeDetectorRef
+    private taskManagerService: TaskManagerService,
+    private cdr: ChangeDetectorRef,
+    private jobManagerService: JobManagerService
   ) {}
 
   ngOnInit() {
@@ -46,12 +53,61 @@ export class OverviewStatisticComponent implements OnInit, OnDestroy {
       )
       .subscribe(data => {
         this.statistic = data;
+        this.taskSlotPercentage = Math.round(
+          ((data['slots-total'] - data['slots-available']) / data['slots-total']) * 100
+        );
         this.cdr.markForCheck();
       });
+    this.statusService.refresh$
+      .pipe(
+        takeUntil(this.destroy$),
+        flatMap(() => this.taskManagerService.loadManagers())
+      )
+      .subscribe(data => {
+        this.listOfTaskManager = data;
+        this.totalCount = data.length;
+        this.taskManagerCPUs = 0;
+        this.listOfTaskManager.map(tm => {
+          this.taskManagerCPUs += tm.hardware.cpuCores;
+          tm.milliSecondsSinceLastHeartBeat = new Date().getTime() - tm.timeSinceLastHeartbeat;
+        });
+
+        this.cdr.markForCheck();
+      });
+    this.jobManagerService.loadConfig().subscribe(data => {
+      const listOfConfig = data;
+
+      let timeoutThreshold = '';
+      listOfConfig.map(config => {
+        if (config.key === 'akka.lookup.timeout') {
+          timeoutThreshold = config.value;
+        }
+      });
+      if (!timeoutThreshold) {
+        this.timeoutThresholdSeconds = 20;
+      } else {
+        const intValue = parseInt(timeoutThreshold.substr(0, timeoutThreshold.length - 1), 10);
+        if (timeoutThreshold.substr(-1, 1) === 's') {
+          this.timeoutThresholdSeconds = intValue;
+        } else if (timeoutThreshold.substr(-1, 1) === 'm') {
+          this.timeoutThresholdSeconds = intValue * 60;
+        } else if (timeoutThreshold.substr(-1, 1) === 'h') {
+          this.timeoutThresholdSeconds = intValue * 60 * 60;
+        } else {
+          this.timeoutThresholdSeconds = 20;
+        }
+      }
+
+      this.cdr.markForCheck();
+    });
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  trackByTaskManager(_: number, item: TaskmanagersItemCalInterface) {
+    return item.id;
   }
 }

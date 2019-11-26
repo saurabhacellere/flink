@@ -29,10 +29,29 @@ nz-card {
   }
 }
 
+.taskslots {
+  display: flex;
+}
+
 .total {
   color: @success-color;
   font-size: 36px;
   line-height: 38px;
+  flex: 1
+}
+
+.task-manager-avatar {
+  overflow: hidden;
+  display: inline-block;
+}
+
+.task-slot-percentage-bar {
+  float: right;
+  flex: 4;
+}
+
+.task-slot-percentage-bar h6 {
+  margin-bottom: 0;
 }
 
 .footer {
