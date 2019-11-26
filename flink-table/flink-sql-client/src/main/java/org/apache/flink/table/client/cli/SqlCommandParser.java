@@ -99,16 +99,12 @@ public final class SqlCommandParser {
 			"SHOW\\s+FUNCTIONS",
 			NO_OPERANDS),
 
-		SHOW_MODULES(
-			"SHOW\\s+MODULES",
-			NO_OPERANDS),
-
 		USE_CATALOG(
 			"USE\\s+CATALOG\\s+(.*)",
 			SINGLE_OPERAND),
 
-		USE(
-			"USE\\s+(?!CATALOG)(.*)",
+		USE_DATABASE(
+			"USE\\s+DATABASE\\s+(.*)",
 			SINGLE_OPERAND),
 
 		DESCRIBE(
@@ -125,6 +121,10 @@ public final class SqlCommandParser {
 
 		INSERT_INTO(
 			"(INSERT\\s+INTO.*)",
+			SINGLE_OPERAND),
+
+		CREATE_TABLE(
+			"(CREATE\\s+TABLE.*)",
 			SINGLE_OPERAND),
 
 		CREATE_VIEW(
