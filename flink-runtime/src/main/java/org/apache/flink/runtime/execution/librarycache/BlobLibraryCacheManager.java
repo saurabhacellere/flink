@@ -19,20 +19,18 @@
 package org.apache.flink.runtime.execution.librarycache;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.runtime.blob.PermanentBlobKey;
-import org.apache.flink.runtime.blob.PermanentBlobService;
+import org.apache.flink.runtime.blob.BlobKey;
+import org.apache.flink.runtime.blob.BlobService;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.util.ExceptionUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -46,7 +44,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * Provides facilities to download a set of libraries (typically JAR files) for a job from a
- * {@link PermanentBlobService} and create a class loader with references to them.
+ * {@link BlobService} and create a class loader with references to them.
  */
 public class BlobLibraryCacheManager implements LibraryCacheManager {
 
@@ -63,30 +61,16 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 	private final Map<JobID, LibraryCacheEntry> cacheEntries = new HashMap<>();
 
 	/** The blob service to download libraries */
-	private final PermanentBlobService blobService;
-
-	/** The resolve order to use when creating a {@link ClassLoader}. */
-	private final FlinkUserCodeClassLoaders.ResolveOrder classLoaderResolveOrder;
-
-	/**
-	 * List of patterns for classes that should always be resolved from the parent ClassLoader,
-	 * if possible.
-	 */
-	private final String[] alwaysParentFirstPatterns;
+	private final BlobService blobService;
 
 	// --------------------------------------------------------------------------------------------
 
-	public BlobLibraryCacheManager(
-			PermanentBlobService blobService,
-			FlinkUserCodeClassLoaders.ResolveOrder classLoaderResolveOrder,
-			String[] alwaysParentFirstPatterns) {
+	public BlobLibraryCacheManager(BlobService blobService) {
 		this.blobService = checkNotNull(blobService);
-		this.classLoaderResolveOrder = checkNotNull(classLoaderResolveOrder);
-		this.alwaysParentFirstPatterns = alwaysParentFirstPatterns;
 	}
 
 	@Override
-	public void registerJob(JobID id, Collection<PermanentBlobKey> requiredJarFiles, Collection<URL> requiredClasspaths)
+	public void registerJob(JobID id, Collection<BlobKey> requiredJarFiles, Collection<URL> requiredClasspaths)
 		throws IOException {
 		registerTask(id, JOB_ATTEMPT_ID, requiredJarFiles, requiredClasspaths);
 	}
@@ -95,7 +79,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 	public void registerTask(
 		JobID jobId,
 		ExecutionAttemptID task,
-		@Nullable Collection<PermanentBlobKey> requiredJarFiles,
+		@Nullable Collection<BlobKey> requiredJarFiles,
 		@Nullable Collection<URL> requiredClasspaths) throws IOException {
 
 		checkNotNull(jobId, "The JobId must not be null.");
@@ -116,7 +100,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 				int count = 0;
 				try {
 					// add URLs to locally cached JAR files
-					for (PermanentBlobKey key : requiredJarFiles) {
+					for (BlobKey key : requiredJarFiles) {
 						urls[count] = blobService.getFile(jobId, key).toURI().toURL();
 						++count;
 					}
@@ -128,7 +112,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 					}
 
 					cacheEntries.put(jobId, new LibraryCacheEntry(
-						requiredJarFiles, requiredClasspaths, urls, task, classLoaderResolveOrder, alwaysParentFirstPatterns));
+						requiredJarFiles, requiredClasspaths, urls, task));
 				} catch (Throwable t) {
 					// rethrow or wrap
 					ExceptionUtils.tryRethrowIOException(t);
@@ -164,7 +148,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 			// else has already been unregistered
 		}
 	}
-
+	
 	@Override
 	public ClassLoader getClassLoader(JobID jobId) {
 		checkNotNull(jobId, "The JobId must not be null.");
@@ -211,13 +195,6 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 		}
 	}
 
-	@Override
-	public boolean hasClassLoader(@Nonnull JobID jobId) {
-		synchronized (lockObject) {
-			return cacheEntries.containsKey(jobId);
-		}
-	}
-
 	// --------------------------------------------------------------------------------------------
 
 	/**
@@ -227,7 +204,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 	 */
 	private static class LibraryCacheEntry {
 
-		private final URLClassLoader classLoader;
+		private final FlinkUserCodeClassLoader classLoader;
 
 		private final Set<ExecutionAttemptID> referenceHolders;
 		/**
@@ -236,7 +213,7 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 		 * <p>The purpose of this is to make sure, future registrations do not differ in content as
 		 * this is a contract of the {@link BlobLibraryCacheManager}.
 		 */
-		private final Set<PermanentBlobKey> libraries;
+		private final Set<BlobKey> libraries;
 
 		/**
 		 * Set of class path URLs used for a previous job/task registration.
@@ -260,26 +237,14 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 		 * 		<tt>requiredLibraries</tt> and <tt>requiredClasspaths</tt>)
 		 * @param initialReference
 		 * 		reference holder ID
-		 * @param classLoaderResolveOrder Whether to resolve classes first in the child ClassLoader
-		 * 		or parent ClassLoader
-		 * @param alwaysParentFirstPatterns A list of patterns for classes that should always be
-		 * 		resolved from the parent ClassLoader (if possible).
 		 */
 		LibraryCacheEntry(
-				Collection<PermanentBlobKey> requiredLibraries,
+				Collection<BlobKey> requiredLibraries,
 				Collection<URL> requiredClasspaths,
 				URL[] libraryURLs,
-				ExecutionAttemptID initialReference,
-				FlinkUserCodeClassLoaders.ResolveOrder classLoaderResolveOrder,
-				String[] alwaysParentFirstPatterns) {
+				ExecutionAttemptID initialReference) {
 
-			this.classLoader =
-				FlinkUserCodeClassLoaders.create(
-					classLoaderResolveOrder,
-					libraryURLs,
-					FlinkUserCodeClassLoaders.class.getClassLoader(),
-					alwaysParentFirstPatterns);
-
+			this.classLoader = new FlinkUserCodeClassLoader(libraryURLs);
 			// NOTE: do not store the class paths, i.e. URLs, into a set for performance reasons
 			//       see http://findbugs.sourceforge.net/bugDescriptions.html#DMI_COLLECTION_OF_URLS
 			//       -> alternatively, compare their string representation
@@ -296,12 +261,12 @@ public class BlobLibraryCacheManager implements LibraryCacheManager {
 			return classLoader;
 		}
 
-		public Set<PermanentBlobKey> getLibraries() {
+		public Set<BlobKey> getLibraries() {
 			return libraries;
 		}
 
 		public void register(
-				ExecutionAttemptID task, Collection<PermanentBlobKey> requiredLibraries,
+				ExecutionAttemptID task, Collection<BlobKey> requiredLibraries,
 				Collection<URL> requiredClasspaths) {
 
 			// Make sure the previous registration referred to the same libraries and class paths.

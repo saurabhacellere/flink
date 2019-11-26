@@ -20,6 +20,7 @@ package org.apache.flink.cep.nfa;
 
 import org.apache.flink.cep.Event;
 import org.apache.flink.cep.SubEvent;
+import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
@@ -33,9 +34,8 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.cep.utils.NFATestUtilities.compareMaps;
-import static org.apache.flink.cep.utils.NFATestUtilities.feedNFA;
-import static org.apache.flink.cep.utils.NFAUtils.compile;
+import static org.apache.flink.cep.nfa.NFATestUtilities.compareMaps;
+import static org.apache.flink.cep.nfa.NFATestUtilities.feedNFA;
 
 /**
  * IT tests covering {@link IterativeCondition} usage.
@@ -57,7 +57,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	private final Event endEvent = new Event(46, "end", 1.0);
 
 	@Test
-	public void testIterativeWithBranchingPatternEager() throws Exception {
+	public void testIterativeWithBranchingPatternEager() {
 		List<List<Event>> actual = testIterativeWithBranchingPattern(true);
 
 		compareMaps(actual,
@@ -72,7 +72,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithBranchingPatternCombinations() throws Exception {
+	public void testIterativeWithBranchingPatternCombinations() {
 		List<List<Event>> actual = testIterativeWithBranchingPattern(false);
 
 		compareMaps(actual,
@@ -88,7 +88,7 @@ public class IterativeConditionsITCase extends TestLogger {
 		);
 	}
 
-	private List<List<Event>> testIterativeWithBranchingPattern(boolean eager) throws Exception {
+	private List<List<Event>> testIterativeWithBranchingPattern(boolean eager) {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(startEvent1, 1));
@@ -136,7 +136,7 @@ public class IterativeConditionsITCase extends TestLogger {
 				}
 			});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		return feedNFA(inputEvents, nfa);
 	}
@@ -161,7 +161,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithLoopingStartingEager() throws Exception {
+	public void testIterativeWithLoopingStartingEager() {
 		List<List<Event>> actual = testIterativeWithLoopingStarting(true);
 
 		compareMaps(actual,
@@ -176,7 +176,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithLoopingStartingCombination() throws Exception {
+	public void testIterativeWithLoopingStartingCombination() {
 		List<List<Event>> actual = testIterativeWithLoopingStarting(false);
 
 		compareMaps(actual,
@@ -191,7 +191,7 @@ public class IterativeConditionsITCase extends TestLogger {
 		);
 	}
 
-	private List<List<Event>> testIterativeWithLoopingStarting(boolean eager) throws Exception {
+	private List<List<Event>> testIterativeWithLoopingStarting(boolean eager) {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(startEvent1, 1L));
@@ -223,7 +223,7 @@ public class IterativeConditionsITCase extends TestLogger {
 				}
 			});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		return feedNFA(inputEvents, nfa);
 	}
@@ -248,7 +248,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithPrevPatternDependency() throws Exception {
+	public void testIterativeWithPrevPatternDependency() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(startEvent1, 1L));
@@ -279,7 +279,7 @@ public class IterativeConditionsITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -292,7 +292,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithABACPattern() throws Exception {
+	public void testIterativeWithABACPattern() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(startEvent1, 1L)); //1
@@ -346,7 +346,7 @@ public class IterativeConditionsITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -362,7 +362,7 @@ public class IterativeConditionsITCase extends TestLogger {
 	}
 
 	@Test
-	public void testIterativeWithPrevPatternDependencyAfterBranching() throws Exception {
+	public void testIterativeWithPrevPatternDependencyAfterBranching() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(startEvent1, 1L));
@@ -403,7 +403,7 @@ public class IterativeConditionsITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 

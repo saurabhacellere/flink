@@ -123,8 +123,8 @@ public abstract class AbstractUdfStreamOperator<OUT, F extends Function>
 	// ------------------------------------------------------------------------
 
 	@Override
-	public void notifyCheckpointComplete(long checkpointId) throws Exception {
-		super.notifyCheckpointComplete(checkpointId);
+	public void notifyOfCompletedCheckpoint(long checkpointId) throws Exception {
+		super.notifyOfCompletedCheckpoint(checkpointId);
 
 		if (userFunction instanceof CheckpointListener) {
 			((CheckpointListener) userFunction).notifyCheckpointComplete(checkpointId);

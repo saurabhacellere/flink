@@ -18,78 +18,68 @@
 
 package org.apache.flink.yarn;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ConfigurationUtils;
-import org.apache.flink.configuration.GlobalConfiguration;
-import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
-import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
 import org.apache.flink.runtime.resourcemanager.JobLeaderIdService;
 import org.apache.flink.runtime.resourcemanager.ResourceManager;
+import org.apache.flink.runtime.resourcemanager.ResourceManagerConfiguration;
 import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
-import org.apache.flink.runtime.webmonitor.history.HistoryServerUtils;
 import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.FlinkException;
-import org.apache.flink.util.Preconditions;
 import org.apache.flink.yarn.configuration.YarnConfigOptions;
 
 import org.apache.hadoop.yarn.api.ApplicationConstants;
-import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.records.Container;
-import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerLaunchContext;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
 import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
-import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.client.api.AMRMClient;
+import org.apache.hadoop.yarn.client.api.NMClient;
 import org.apache.hadoop.yarn.client.api.async.AMRMClientAsync;
-import org.apache.hadoop.yarn.client.api.async.NMClientAsync;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import java.net.URL;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
+
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * The yarn implementation of the resource manager. Used when the system is started
  * via the resource framework YARN.
  */
-public class YarnResourceManager extends ResourceManager<YarnWorkerNode> implements AMRMClientAsync.CallbackHandler, NMClientAsync.CallbackHandler {
+public class YarnResourceManager extends ResourceManager<ResourceID> implements AMRMClientAsync.CallbackHandler {
 
-	private static final Priority RM_REQUEST_PRIORITY = Priority.newInstance(1);
 	/** The process environment variables. */
 	private final Map<String, String> env;
 
-	/** YARN container map. Package private for unit test purposes. */
-	private final ConcurrentMap<ResourceID, YarnWorkerNode> workerNodeMap;
+	/** The default registration timeout for task executor in seconds. */
+	private static final int DEFAULT_TASK_MANAGER_REGISTRATION_DURATION = 300;
+
+	/** The heartbeat interval while the resource master is waiting for containers. */
+	private static final int FAST_YARN_HEARTBEAT_INTERVAL_MS = 500;
+
+	/** The default heartbeat interval during regular operation. */
+	private static final int DEFAULT_YARN_HEARTBEAT_INTERVAL_MS = 5000;
+
+	/** The default memory of task executor to allocate (in MB). */
+	private static final int DEFAULT_TSK_EXECUTOR_MEMORY_SIZE = 1024;
+
 	/** Environment variable name of the final container id used by the YarnResourceManager.
 	 * Container ID generation may vary across Hadoop versions. */
 	static final String ENV_FLINK_CONTAINER_ID = "_FLINK_CONTAINER_ID";
@@ -98,42 +88,23 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 	 * In task executor we use the hostnames given by YARN consistently throughout akka */
 	static final String ENV_FLINK_NODE_ID = "_FLINK_NODE_ID";
 
-	static final String ERROR_MASSAGE_ON_SHUTDOWN_REQUEST = "Received shutdown request from YARN ResourceManager.";
-
 	/** Default heartbeat interval between this resource manager and the YARN ResourceManager. */
 	private final int yarnHeartbeatIntervalMillis;
 
 	private final Configuration flinkConfig;
 
-	/** Flink configuration uploaded to yarn distributed cache by client. */
-	private final Configuration flinkClientConfig;
-
 	private final YarnConfiguration yarnConfig;
-
-	@Nullable
-	private final String webInterfaceUrl;
-
-	private final int numberOfTaskSlots;
-
-	private final int defaultTaskManagerMemoryMB;
-
-	private final int defaultCpus;
-
-	/** The heartbeat interval while the resource master is waiting for containers. */
-	private final int containerRequestHeartbeatIntervalMillis;
 
 	/** Client to communicate with the Resource Manager (YARN's master). */
 	private AMRMClientAsync<AMRMClient.ContainerRequest> resourceManagerClient;
 
 	/** Client to communicate with the Node manager and launch TaskExecutor processes. */
-	private NMClientAsync nodeManagerClient;
+	private NMClient nodeManagerClient;
 
 	/** The number of containers requested, but not yet granted. */
 	private int numPendingContainerRequests;
 
-	private final Collection<ResourceProfile> slotsPerWorker;
-
-	private final Resource resource;
+	private final Map<ResourceProfile, Integer> resourcePriorities = new HashMap<>();
 
 	public YarnResourceManager(
 			RpcService rpcService,
@@ -141,29 +112,27 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 			ResourceID resourceId,
 			Configuration flinkConfig,
 			Map<String, String> env,
+			ResourceManagerConfiguration resourceManagerConfiguration,
 			HighAvailabilityServices highAvailabilityServices,
 			HeartbeatServices heartbeatServices,
 			SlotManager slotManager,
+			MetricRegistry metricRegistry,
 			JobLeaderIdService jobLeaderIdService,
-			ClusterInformation clusterInformation,
-			FatalErrorHandler fatalErrorHandler,
-			@Nullable String webInterfaceUrl,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) {
+			FatalErrorHandler fatalErrorHandler) {
 		super(
 			rpcService,
 			resourceManagerEndpointId,
 			resourceId,
+			resourceManagerConfiguration,
 			highAvailabilityServices,
 			heartbeatServices,
 			slotManager,
+			metricRegistry,
 			jobLeaderIdService,
-			clusterInformation,
-			fatalErrorHandler,
-			resourceManagerMetricGroup);
+			fatalErrorHandler);
 		this.flinkConfig  = flinkConfig;
 		this.yarnConfig = new YarnConfiguration();
 		this.env = env;
-		this.workerNodeMap = new ConcurrentHashMap<>();
 		final int yarnHeartbeatIntervalMS = flinkConfig.getInteger(
 				YarnConfigOptions.HEARTBEAT_DELAY_SECONDS) * 1000;
 
@@ -177,91 +146,32 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 					yarnHeartbeatIntervalMS, yarnExpiryIntervalMS);
 		}
 		yarnHeartbeatIntervalMillis = yarnHeartbeatIntervalMS;
-		containerRequestHeartbeatIntervalMillis = flinkConfig.getInteger(YarnConfigOptions.CONTAINER_REQUEST_HEARTBEAT_INTERVAL_MILLISECONDS);
 		numPendingContainerRequests = 0;
-
-		this.webInterfaceUrl = webInterfaceUrl;
-		this.numberOfTaskSlots = flinkConfig.getInteger(TaskManagerOptions.NUM_TASK_SLOTS);
-		this.defaultTaskManagerMemoryMB = ConfigurationUtils.getTaskManagerHeapMemory(flinkConfig).getMebiBytes();
-		this.defaultCpus = flinkConfig.getInteger(YarnConfigOptions.VCORES, numberOfTaskSlots);
-		this.resource = Resource.newInstance(defaultTaskManagerMemoryMB, defaultCpus);
-
-		this.slotsPerWorker = createWorkerSlotProfiles(flinkConfig);
-
-		// Load the flink config uploaded by flink client
-		this.flinkClientConfig = GlobalConfiguration.loadConfiguration(env.get(ApplicationConstants.Environment.PWD.key()));
-	}
-
-	protected AMRMClientAsync<AMRMClient.ContainerRequest> createAndStartResourceManagerClient(
-			YarnConfiguration yarnConfiguration,
-			int yarnHeartbeatIntervalMillis,
-			@Nullable String webInterfaceUrl) throws Exception {
-		AMRMClientAsync<AMRMClient.ContainerRequest> resourceManagerClient = AMRMClientAsync.createAMRMClientAsync(
-			yarnHeartbeatIntervalMillis,
-			this);
-
-		resourceManagerClient.init(yarnConfiguration);
-		resourceManagerClient.start();
-
-		//TODO: change akka address to tcp host and port, the getAddress() interface should return a standard tcp address
-		Tuple2<String, Integer> hostPort = parseHostPort(getAddress());
-
-		final int restPort;
-
-		if (webInterfaceUrl != null) {
-			final int lastColon = webInterfaceUrl.lastIndexOf(':');
-
-			if (lastColon == -1) {
-				restPort = -1;
-			} else {
-				restPort = Integer.valueOf(webInterfaceUrl.substring(lastColon + 1));
-			}
-		} else {
-			restPort = -1;
-		}
-
-		final RegisterApplicationMasterResponse registerApplicationMasterResponse =
-			resourceManagerClient.registerApplicationMaster(hostPort.f0, restPort, webInterfaceUrl);
-		getContainersFromPreviousAttempts(registerApplicationMasterResponse);
-
-		return resourceManagerClient;
-	}
-
-	private void getContainersFromPreviousAttempts(final RegisterApplicationMasterResponse registerApplicationMasterResponse) {
-		final List<Container> containersFromPreviousAttempts =
-			new RegisterApplicationMasterResponseReflector(log).getContainersFromPreviousAttempts(registerApplicationMasterResponse);
-
-		log.info("Recovered {} containers from previous attempts ({}).", containersFromPreviousAttempts.size(), containersFromPreviousAttempts);
-
-		for (final Container container : containersFromPreviousAttempts) {
-			workerNodeMap.put(new ResourceID(container.getId().toString()), new YarnWorkerNode(container));
-		}
-	}
-
-	protected NMClientAsync createAndStartNodeManagerClient(YarnConfiguration yarnConfiguration) {
-		// create the client to communicate with the node managers
-		NMClientAsync nodeManagerClient = NMClientAsync.createNMClientAsync(this);
-		nodeManagerClient.init(yarnConfiguration);
-		nodeManagerClient.start();
-		return nodeManagerClient;
 	}
 
 	@Override
 	protected void initialize() throws ResourceManagerException {
+		resourceManagerClient = AMRMClientAsync.createAMRMClientAsync(yarnHeartbeatIntervalMillis, this);
+		resourceManagerClient.init(yarnConfig);
+		resourceManagerClient.start();
 		try {
-			resourceManagerClient = createAndStartResourceManagerClient(
-				yarnConfig,
-				yarnHeartbeatIntervalMillis,
-				webInterfaceUrl);
+			//TODO: change akka address to tcp host and port, the getAddress() interface should return a standard tcp address
+			Tuple2<String, Integer> hostPort = parseHostPort(getAddress());
+			//TODO: the third paramter should be the webmonitor address
+			resourceManagerClient.registerApplicationMaster(hostPort.f0, hostPort.f1, getAddress());
 		} catch (Exception e) {
-			throw new ResourceManagerException("Could not start resource manager client.", e);
+			log.info("registerApplicationMaster fail", e);
 		}
 
-		nodeManagerClient = createAndStartNodeManagerClient(yarnConfig);
+		// create the client to communicate with the node managers
+		nodeManagerClient = NMClient.createNMClient();
+		nodeManagerClient.init(yarnConfig);
+		nodeManagerClient.start();
+		nodeManagerClient.cleanupRunningContainersOnStop(true);
 	}
 
 	@Override
-	public CompletableFuture<Void> onStop() {
+	public void postStop() throws Exception {
 		// shut down all components
 		Throwable firstException = null;
 
@@ -281,70 +191,52 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 			}
 		}
 
-		final CompletableFuture<Void> terminationFuture = super.onStop();
+		try {
+			super.postStop();
+		} catch (Throwable t) {
+			firstException = ExceptionUtils.firstOrSuppressed(t, firstException);
+		}
 
 		if (firstException != null) {
-			return FutureUtils.completedExceptionally(new FlinkException("Error while shutting down YARN resource manager", firstException));
-		} else {
-			return terminationFuture;
+			ExceptionUtils.rethrowException(firstException, "Error while shutting down YARN resource manager");
 		}
 	}
 
 	@Override
-	protected void internalDeregisterApplication(
-			ApplicationStatus finalStatus,
-			@Nullable String diagnostics) {
+	protected void shutDownApplication(ApplicationStatus finalStatus, String optionalDiagnostics) {
 
 		// first, de-register from YARN
 		FinalApplicationStatus yarnStatus = getYarnStatus(finalStatus);
-		log.info("Unregister application from the YARN Resource Manager with final status {}.", yarnStatus);
-
-		final Optional<URL> historyServerURL = HistoryServerUtils.getHistoryServerURL(flinkConfig);
-
-		final String appTrackingUrl = historyServerURL.map(URL::toString).orElse("");
-
+		log.info("Unregistering application from the YARN Resource Manager");
 		try {
-			resourceManagerClient.unregisterApplicationMaster(yarnStatus, diagnostics, appTrackingUrl);
+			resourceManagerClient.unregisterApplicationMaster(yarnStatus, optionalDiagnostics, "");
 		} catch (Throwable t) {
 			log.error("Could not unregister the application master.", t);
 		}
-
-		Utils.deleteApplicationFiles(env);
 	}
 
 	@Override
-	public Collection<ResourceProfile> startNewWorker(ResourceProfile resourceProfile) {
-		if (!slotsPerWorker.iterator().next().isMatching(resourceProfile)) {
-			return Collections.emptyList();
-		}
-		requestYarnContainer();
-		return slotsPerWorker;
-	}
-
-	@VisibleForTesting
-	Resource getContainerResource() {
-		return resource;
+	public void startNewWorker(ResourceProfile resourceProfile) {
+		// Priority for worker containers - priorities are intra-application
+		//TODO: set priority according to the resource allocated
+		Priority priority = Priority.newInstance(generatePriority(resourceProfile));
+		int mem = resourceProfile.getMemoryInMB() < 0 ? DEFAULT_TSK_EXECUTOR_MEMORY_SIZE : (int) resourceProfile.getMemoryInMB();
+		int vcore = resourceProfile.getCpuCores() < 1 ? 1 : (int) resourceProfile.getCpuCores();
+		Resource capability = Resource.newInstance(mem, vcore);
+		requestYarnContainer(capability, priority);
 	}
 
 	@Override
-	public boolean stopWorker(final YarnWorkerNode workerNode) {
-		final Container container = workerNode.getContainer();
-		log.info("Stopping container {}.", container.getId());
-		nodeManagerClient.stopContainerAsync(container.getId(), container.getNodeId());
-		resourceManagerClient.releaseAssignedContainer(container.getId());
-		workerNodeMap.remove(workerNode.getResourceID());
-		return true;
+	public void stopWorker(ResourceID resourceID) {
+		// TODO: Implement to stop the worker
 	}
 
 	@Override
-	protected YarnWorkerNode workerStarted(ResourceID resourceID) {
-		return workerNodeMap.get(resourceID);
+	protected ResourceID workerStarted(ResourceID resourceID) {
+		return resourceID;
 	}
 
-	// ------------------------------------------------------------------------
-	//  AMRMClientAsync CallbackHandler methods
-	// ------------------------------------------------------------------------
-
+	// AMRMClientAsync CallbackHandler methods
 	@Override
 	public float getProgress() {
 		// Temporarily need not record the total size of asked and allocated containers
@@ -352,109 +244,46 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 	}
 
 	@Override
-	public void onContainersCompleted(final List<ContainerStatus> statuses) {
-		runAsync(() -> {
-				log.debug("YARN ResourceManager reported the following containers completed: {}.", statuses);
-				for (final ContainerStatus containerStatus : statuses) {
-
-					final ResourceID resourceId = new ResourceID(containerStatus.getContainerId().toString());
-					final YarnWorkerNode yarnWorkerNode = workerNodeMap.remove(resourceId);
-
-					if (yarnWorkerNode != null) {
-						// Container completed unexpectedly ~> start a new one
-						requestYarnContainerIfRequired();
-					}
-					// Eagerly close the connection with task manager.
-					closeTaskManagerConnection(resourceId, new Exception(containerStatus.getDiagnostics()));
-				}
+	public void onContainersCompleted(List<ContainerStatus> list) {
+		for (ContainerStatus container : list) {
+			if (container.getExitStatus() < 0) {
+				closeTaskManagerConnection(new ResourceID(
+					container.getContainerId().toString()), new Exception(container.getDiagnostics()));
 			}
-		);
+		}
 	}
 
 	@Override
 	public void onContainersAllocated(List<Container> containers) {
-		runAsync(() -> {
-			log.info("Received {} containers with {} pending container requests.", containers.size(), numPendingContainerRequests);
-			final Collection<AMRMClient.ContainerRequest> pendingRequests = getPendingRequests();
-			final Iterator<AMRMClient.ContainerRequest> pendingRequestsIterator = pendingRequests.iterator();
-
-			// number of allocated containers can be larger than the number of pending container requests
-			final int numAcceptedContainers = Math.min(containers.size(), numPendingContainerRequests);
-			final List<Container> requiredContainers = containers.subList(0, numAcceptedContainers);
-			final List<Container> excessContainers = containers.subList(numAcceptedContainers, containers.size());
-
-			for (int i = 0; i < requiredContainers.size(); i++) {
-				removeContainerRequest(pendingRequestsIterator.next());
+		for (Container container : containers) {
+			numPendingContainerRequests = Math.max(0, numPendingContainerRequests - 1);
+			log.info("Received new container: {} - Remaining pending container requests: {}",
+					container.getId(), numPendingContainerRequests);
+			try {
+				/** Context information used to start a TaskExecutor Java process */
+				ContainerLaunchContext taskExecutorLaunchContext =
+						createTaskExecutorLaunchContext(container.getResource(), container.getId().toString(), container.getNodeId().getHost());
+				nodeManagerClient.startContainer(container, taskExecutorLaunchContext);
 			}
-
-			excessContainers.forEach(this::returnExcessContainer);
-			requiredContainers.forEach(this::startTaskExecutorInContainer);
-
-			// if we are waiting for no further containers, we can go to the
-			// regular heartbeat interval
-			if (numPendingContainerRequests <= 0) {
-				resourceManagerClient.setHeartbeatInterval(yarnHeartbeatIntervalMillis);
+			catch (Throwable t) {
+				// failed to launch the container, will release the failed one and ask for a new one
+				log.error("Could not start TaskManager in container {},", container, t);
+				resourceManagerClient.releaseAssignedContainer(container.getId());
+				requestYarnContainer(container.getResource(), container.getPriority());
 			}
-		});
-	}
-
-	private void startTaskExecutorInContainer(Container container) {
-		final String containerIdStr = container.getId().toString();
-		final ResourceID resourceId = new ResourceID(containerIdStr);
-
-		workerNodeMap.put(resourceId, new YarnWorkerNode(container));
-
-		try {
-			// Context information used to start a TaskExecutor Java process
-			ContainerLaunchContext taskExecutorLaunchContext = createTaskExecutorLaunchContext(
-				container.getResource(),
-				containerIdStr,
-				container.getNodeId().getHost());
-
-			nodeManagerClient.startContainerAsync(container, taskExecutorLaunchContext);
-		} catch (Throwable t) {
-			onStartContainerError(container.getId(), t);
 		}
-	}
-
-	private void returnExcessContainer(Container excessContainer) {
-		log.info("Returning excess container {}.", excessContainer.getId());
-		resourceManagerClient.releaseAssignedContainer(excessContainer.getId());
-	}
-
-	private void removeContainerRequest(AMRMClient.ContainerRequest pendingContainerRequest) {
-		numPendingContainerRequests--;
-
-		log.info("Removing container request {}. Pending container requests {}.", pendingContainerRequest, numPendingContainerRequests);
-
-		resourceManagerClient.removeContainerRequest(pendingContainerRequest);
-	}
-
-	private Collection<AMRMClient.ContainerRequest> getPendingRequests() {
-		final List<? extends Collection<AMRMClient.ContainerRequest>> matchingRequests = resourceManagerClient.getMatchingRequests(
-			RM_REQUEST_PRIORITY,
-			ResourceRequest.ANY,
-			getContainerResource());
-
-		final Collection<AMRMClient.ContainerRequest> matchingContainerRequests;
-
-		if (matchingRequests.isEmpty()) {
-			matchingContainerRequests = Collections.emptyList();
-		} else {
-			final Collection<AMRMClient.ContainerRequest> collection = matchingRequests.get(0);
-			matchingContainerRequests = new ArrayList<>(collection);
+		if (numPendingContainerRequests <= 0) {
+			resourceManagerClient.setHeartbeatInterval(yarnHeartbeatIntervalMillis);
 		}
-
-		Preconditions.checkState(
-			matchingContainerRequests.size() == numPendingContainerRequests,
-			"The RMClient's and YarnResourceManagers internal state about the number of pending container requests has diverged. Number client's pending container requests %s != Number RM's pending container requests %s.", matchingContainerRequests.size(), numPendingContainerRequests);
-
-		return matchingContainerRequests;
 	}
 
 	@Override
 	public void onShutdownRequest() {
-		onFatalError(new ResourceManagerException(ERROR_MASSAGE_ON_SHUTDOWN_REQUEST));
+		try {
+			shutDown();
+		} catch (Exception e) {
+			log.warn("Fail to shutdown the YARN resource manager.", e);
+		}
 	}
 
 	@Override
@@ -467,50 +296,7 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 		onFatalError(error);
 	}
 
-	// ------------------------------------------------------------------------
-	//  NMClientAsync CallbackHandler methods
-	// ------------------------------------------------------------------------
-	@Override
-	public void onContainerStarted(ContainerId containerId, Map<String, ByteBuffer> map) {
-		log.debug("Succeed to call YARN Node Manager to start container", containerId);
-	}
-
-	@Override
-	public void onContainerStatusReceived(ContainerId containerId, ContainerStatus containerStatus) {
-		// We are not interested in getting container status
-	}
-
-	@Override
-	public void onContainerStopped(ContainerId containerId) {
-		log.debug("Succeed to call YARN Node Manager to stop container", containerId);
-	}
-
-	@Override
-	public void onStartContainerError(ContainerId containerId, Throwable throwable) {
-		log.error("Could not start TaskManager in container {}.", containerId, throwable);
-
-		final ResourceID resourceId = new ResourceID(containerId.toString());
-		// release the failed container
-		workerNodeMap.remove(resourceId);
-		resourceManagerClient.releaseAssignedContainer(containerId);
-		// and ask for a new one
-		requestYarnContainerIfRequired();
-	}
-
-	@Override
-	public void onGetContainerStatusError(ContainerId containerId, Throwable throwable) {
-		// We are not interested in getting container status
-	}
-
-	@Override
-	public void onStopContainerError(ContainerId containerId, Throwable throwable) {
-		log.warn("Error while calling YARN Node Manager to stop container {}", containerId, throwable);
-	}
-
-	// ------------------------------------------------------------------------
-	//  Utility methods
-	// ------------------------------------------------------------------------
-
+	//Utility methods
 	/**
 	 * Converts a Flink application status enum to a YARN application status enum.
 	 * @param status The Flink application status.
@@ -540,41 +326,18 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 		String[] hostPort = address.split("@")[1].split(":");
 		String host = hostPort[0];
 		String port = hostPort[1].split("/")[0];
-		return new Tuple2<>(host, Integer.valueOf(port));
+		return new Tuple2(host, Integer.valueOf(port));
 	}
 
-	/**
-	 * Request new container if pending containers cannot satisfies pending slot requests.
-	 */
-	private void requestYarnContainerIfRequired() {
-		int requiredTaskManagerSlots = getNumberRequiredTaskManagerSlots();
-		int pendingTaskManagerSlots = numPendingContainerRequests * numberOfTaskSlots;
-
-		if (requiredTaskManagerSlots > pendingTaskManagerSlots) {
-			requestYarnContainer();
-		}
-	}
-
-	private void requestYarnContainer() {
-		resourceManagerClient.addContainerRequest(getContainerRequest());
-
+	private void requestYarnContainer(Resource resource, Priority priority) {
+		resourceManagerClient.addContainerRequest(
+				new AMRMClient.ContainerRequest(resource, null, null, priority));
 		// make sure we transmit the request fast and receive fast news of granted allocations
-		resourceManagerClient.setHeartbeatInterval(containerRequestHeartbeatIntervalMillis);
+		resourceManagerClient.setHeartbeatInterval(FAST_YARN_HEARTBEAT_INTERVAL_MS);
+
 		numPendingContainerRequests++;
-
-		log.info("Requesting new TaskExecutor container with resources {}. Number pending requests {}.",
-			resource,
-			numPendingContainerRequests);
-	}
-
-	@Nonnull
-	@VisibleForTesting
-	AMRMClient.ContainerRequest getContainerRequest() {
-		return new AMRMClient.ContainerRequest(
-			getContainerResource(),
-			null,
-			null,
-			RM_REQUEST_PRIORITY);
+		log.info("Requesting new TaskManager container pending requests: {}",
+				numPendingContainerRequests);
 	}
 
 	private ContainerLaunchContext createTaskExecutorLaunchContext(Resource resource, String containerId, String host)
@@ -583,30 +346,25 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 		final String currDir = env.get(ApplicationConstants.Environment.PWD.key());
 
 		final ContaineredTaskManagerParameters taskManagerParameters =
-				ContaineredTaskManagerParameters.create(flinkConfig, resource.getMemory(), numberOfTaskSlots);
+				ContaineredTaskManagerParameters.create(flinkConfig, resource.getMemory(), 1);
 
-		log.debug("TaskExecutor {} will be started with container size {} MB, JVM heap size {} MB, " +
+		log.info("TaskExecutor{} will be started with container size {} MB, JVM heap size {} MB, " +
 				"JVM direct memory limit {} MB",
 				containerId,
 				taskManagerParameters.taskManagerTotalMemoryMB(),
 				taskManagerParameters.taskManagerHeapSizeMB(),
 				taskManagerParameters.taskManagerDirectMemoryLimitMB());
-
-		Configuration taskManagerConfig = BootstrapTools.cloneConfiguration(flinkConfig);
-
-		String taskManagerDynamicProperties = Utils.getDynamicProperties(flinkClientConfig, taskManagerConfig);
-
+		int timeout = flinkConfig.getInteger(ConfigConstants.TASK_MANAGER_MAX_REGISTRATION_DURATION,
+				DEFAULT_TASK_MANAGER_REGISTRATION_DURATION);
+		FiniteDuration teRegistrationTimeout = new FiniteDuration(timeout, TimeUnit.SECONDS);
+		final Configuration taskManagerConfig = BootstrapTools.generateTaskManagerConfiguration(
+				flinkConfig, "", 0, 1, teRegistrationTimeout);
 		log.debug("TaskManager configuration: {}", taskManagerConfig);
 
 		ContainerLaunchContext taskExecutorLaunchContext = Utils.createTaskExecutorContext(
-			flinkConfig,
-			yarnConfig,
-			env,
-			taskManagerParameters,
-			taskManagerDynamicProperties,
-			currDir,
-			YarnTaskExecutorRunner.class,
-			log);
+				flinkConfig, yarnConfig, env,
+				taskManagerParameters, taskManagerConfig,
+				currDir, YarnTaskExecutorRunner.class, log);
 
 		// set a special environment variable to uniquely identify this container
 		taskExecutorLaunchContext.getEnvironment()
@@ -615,4 +373,23 @@ public class YarnResourceManager extends ResourceManager<YarnWorkerNode> impleme
 				.put(ENV_FLINK_NODE_ID, host);
 		return taskExecutorLaunchContext;
 	}
+
+
+
+	/**
+	 * Generate priority by given resource profile.
+	 * Priority is only used for distinguishing request of different resource.
+	 * @param resourceProfile The resource profile of a request
+	 * @return The priority of this resource profile.
+	 */
+	private int generatePriority(ResourceProfile resourceProfile) {
+		if (resourcePriorities.containsKey(resourceProfile)) {
+			return resourcePriorities.get(resourceProfile);
+		} else {
+			int priority = resourcePriorities.size();
+			resourcePriorities.put(resourceProfile, priority);
+			return priority;
+		}
+	}
+
 }

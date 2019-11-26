@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.taskexecutor;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -31,7 +30,6 @@ import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
 import org.apache.flink.runtime.registration.RegisteredRpcConnection;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.registration.RetryingRegistration;
-import org.apache.flink.runtime.registration.RetryingRegistrationConfiguration;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
 import org.apache.flink.util.Preconditions;
@@ -39,13 +37,11 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 /**
@@ -66,8 +62,6 @@ public class JobLeaderService {
 	/** The leader retrieval service and listener for each registered job. */
 	private final Map<JobID, Tuple2<LeaderRetrievalService, JobLeaderService.JobManagerLeaderListener>> jobLeaderServices;
 
-	private final RetryingRegistrationConfiguration retryingRegistrationConfiguration;
-
 	/** Internal state of the service. */
 	private volatile JobLeaderService.State state;
 
@@ -83,15 +77,10 @@ public class JobLeaderService {
 	/** Job leader listener listening for job leader changes. */
 	private JobLeaderListener jobLeaderListener;
 
-	public JobLeaderService(
-			TaskManagerLocation location,
-			RetryingRegistrationConfiguration retryingRegistrationConfiguration) {
+	public JobLeaderService(TaskManagerLocation location) {
 		this.ownLocation = Preconditions.checkNotNull(location);
-		this.retryingRegistrationConfiguration = Preconditions.checkNotNull(retryingRegistrationConfiguration);
 
-		// Has to be a concurrent hash map because tests might access this service
-		// concurrently via containsJob
-		jobLeaderServices = new ConcurrentHashMap<>(4);
+		jobLeaderServices = new HashMap<>(4);
 
 		state = JobLeaderService.State.CREATED;
 
@@ -158,6 +147,18 @@ public class JobLeaderService {
 	}
 
 	/**
+	 * Check whether the service monitors the given job.
+	 *
+	 * @param jobId identifying the job
+	 * @return True if the given job is monitored; otherwise false
+	 */
+	public boolean containsJob(JobID jobId) {
+		Preconditions.checkState(JobLeaderService.State.STARTED == state, "The service is currently not running.");
+
+		return jobLeaderServices.containsKey(jobId);
+	}
+
+	/**
 	 * Remove the given job from being monitored by the job leader service.
 	 *
 	 * @param jobId identifying the job to remove from monitoring
@@ -198,31 +199,9 @@ public class JobLeaderService {
 
 		JobLeaderService.JobManagerLeaderListener jobManagerLeaderListener = new JobManagerLeaderListener(jobId);
 
-		final Tuple2<LeaderRetrievalService, JobManagerLeaderListener> oldEntry = jobLeaderServices.put(jobId, Tuple2.of(leaderRetrievalService, jobManagerLeaderListener));
-
-		if (oldEntry != null) {
-			oldEntry.f0.stop();
-			oldEntry.f1.stop();
-		}
-
 		leaderRetrievalService.start(jobManagerLeaderListener);
-	}
 
-	/**
-	 * Triggers reconnection to the last known leader of the given job.
-	 *
-	 * @param jobId specifying the job for which to trigger reconnection
-	 */
-	public void reconnect(final JobID jobId) {
-		Preconditions.checkNotNull(jobId, "JobID must not be null.");
-
-		final Tuple2<LeaderRetrievalService, JobManagerLeaderListener> jobLeaderService = jobLeaderServices.get(jobId);
-
-		if (jobLeaderService != null) {
-			jobLeaderService.f1.reconnect();
-		} else {
-			LOG.info("Cannot reconnect to job {} because it is not registered.", jobId);
-		}
+		jobLeaderServices.put(jobId, Tuple2.of(leaderRetrievalService, jobManagerLeaderListener));
 	}
 
 	/**
@@ -234,7 +213,7 @@ public class JobLeaderService {
 		private final JobID jobId;
 
 		/** Rpc connection to the job leader. */
-		private volatile RegisteredRpcConnection<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess> rpcConnection;
+		private RegisteredRpcConnection<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess> rpcConnection;
 
 		/** State of the listener. */
 		private volatile boolean stopped;
@@ -258,39 +237,13 @@ public class JobLeaderService {
 			}
 		}
 
-		public void reconnect() {
-			if (stopped) {
-				LOG.debug("Cannot reconnect because the JobManagerLeaderListener has already been stopped.");
-			} else {
-				final RegisteredRpcConnection<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess> currentRpcConnection = rpcConnection;
-
-				if (currentRpcConnection != null) {
-					if (currentRpcConnection.isConnected()) {
-
-						if (currentRpcConnection.tryReconnect()) {
-							// double check for concurrent stop operation
-							if (stopped) {
-								currentRpcConnection.close();
-							}
-						} else {
-							LOG.debug("Could not reconnect to the JobMaster {}.", currentRpcConnection.getTargetAddress());
-						}
-					} else {
-						LOG.debug("Ongoing registration to JobMaster {}.", currentRpcConnection.getTargetAddress());
-					}
-				} else {
-					LOG.debug("Cannot reconnect to an unknown JobMaster.");
-				}
-			}
-		}
-
 		@Override
-		public void notifyLeaderAddress(final @Nullable String leaderAddress, final @Nullable UUID leaderId) {
+		public void notifyLeaderAddress(final String leaderAddress, final UUID leaderId) {
 			if (stopped) {
 				LOG.debug("{}'s leader retrieval listener reported a new leader for job {}. " +
 					"However, the service is no longer running.", JobLeaderService.class.getSimpleName(), jobId);
 			} else {
-				final JobMasterId jobMasterId = JobMasterId.fromUuidOrNull(leaderId);
+				final JobMasterId jobMasterId = leaderId != null ? new JobMasterId(leaderId) : null;
 
 				LOG.debug("New leader information for job {}. Address: {}, leader id: {}.",
 					jobId, leaderAddress, jobMasterId);
@@ -354,10 +307,10 @@ public class JobLeaderService {
 		private final class JobManagerRegisteredRpcConnection extends RegisteredRpcConnection<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess> {
 
 			JobManagerRegisteredRpcConnection(
-					Logger log,
-					String targetAddress,
-					JobMasterId jobMasterId,
-					Executor executor) {
+				Logger log,
+				String targetAddress,
+				JobMasterId jobMasterId,
+				Executor executor) {
 				super(log, targetAddress, jobMasterId, executor);
 			}
 
@@ -370,7 +323,6 @@ public class JobLeaderService {
 						JobMasterGateway.class,
 						getTargetAddress(),
 						getTargetLeaderId(),
-						retryingRegistrationConfiguration,
 						ownerAddress,
 						ownLocation);
 			}
@@ -404,7 +356,8 @@ public class JobLeaderService {
 	 * Retrying registration for the job manager <--> task manager connection.
 	 */
 	private static final class JobManagerRetryingRegistration
-			extends RetryingRegistration<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess> {
+			extends RetryingRegistration<JobMasterId, JobMasterGateway, JMTMRegistrationSuccess>
+	{
 
 		private final String taskManagerRpcAddress;
 
@@ -417,17 +370,9 @@ public class JobLeaderService {
 				Class<JobMasterGateway> targetType,
 				String targetAddress,
 				JobMasterId jobMasterId,
-				RetryingRegistrationConfiguration retryingRegistrationConfiguration,
 				String taskManagerRpcAddress,
 				TaskManagerLocation taskManagerLocation) {
-			super(
-				log,
-				rpcService,
-				targetName,
-				targetType,
-				targetAddress,
-				jobMasterId,
-				retryingRegistrationConfiguration);
+			super(log, rpcService, targetName, targetType, targetAddress, jobMasterId);
 
 			this.taskManagerRpcAddress = taskManagerRpcAddress;
 			this.taskManagerLocation = Preconditions.checkNotNull(taskManagerLocation);
@@ -447,22 +392,5 @@ public class JobLeaderService {
 	 */
 	private enum State {
 		CREATED, STARTED, STOPPED
-	}
-
-	// -----------------------------------------------------------
-	// Testing methods
-	// -----------------------------------------------------------
-
-	/**
-	 * Check whether the service monitors the given job.
-	 *
-	 * @param jobId identifying the job
-	 * @return True if the given job is monitored; otherwise false
-	 */
-	@VisibleForTesting
-	public boolean containsJob(JobID jobId) {
-		Preconditions.checkState(JobLeaderService.State.STARTED == state, "The service is currently not running.");
-
-		return jobLeaderServices.containsKey(jobId);
 	}
 }

@@ -56,8 +56,6 @@ public class DatadogHttpReporter implements MetricReporter, Scheduled {
 	private List<String> configTags;
 
 	public static final String API_KEY = "apikey";
-	public static final String PROXY_HOST = "proxyHost";
-	public static final String PROXY_PORT = "proxyPort";
 	public static final String TAGS = "tags";
 
 	@Override
@@ -104,11 +102,7 @@ public class DatadogHttpReporter implements MetricReporter, Scheduled {
 
 	@Override
 	public void open(MetricConfig config) {
-		String apiKey = config.getString(API_KEY, null);
-		String proxyHost = config.getString(PROXY_HOST, null);
-		Integer proxyPort = config.getInteger(PROXY_PORT, 8080);
-
-		client = new DatadogHttpClient(apiKey, proxyHost, proxyPort);
+		client = new DatadogHttpClient(config.getString(API_KEY, null));
 		LOGGER.info("Configured DatadogHttpReporter");
 
 		configTags = getTagsFromConfig(config.getString(TAGS, ""));
@@ -124,7 +118,6 @@ public class DatadogHttpReporter implements MetricReporter, Scheduled {
 	public void report() {
 		DatadogHttpRequest request = new DatadogHttpRequest();
 
-		List<Gauge> gaugesToRemove = new ArrayList<>();
 		for (Map.Entry<Gauge, DGauge> entry : gauges.entrySet()) {
 			DGauge g = entry.getValue();
 			try {
@@ -132,19 +125,11 @@ public class DatadogHttpReporter implements MetricReporter, Scheduled {
 				// Flink uses Gauge to store many types other than Number
 				g.getMetricValue();
 				request.addGauge(g);
-			} catch (ClassCastException e) {
-				LOGGER.info("The metric {} will not be reported because only number types are supported by this reporter.", g.getMetric());
-				gaugesToRemove.add(entry.getKey());
 			} catch (Exception e) {
-				if (LOGGER.isDebugEnabled()) {
-					LOGGER.debug("The metric {} will not be reported because it threw an exception.", g.getMetric(), e);
-				} else {
-					LOGGER.info("The metric {} will not be reported because it threw an exception.", g.getMetric());
-				}
-				gaugesToRemove.add(entry.getKey());
+				// Remove that Gauge if it's not of Number type
+				gauges.remove(entry.getKey());
 			}
 		}
-		gaugesToRemove.forEach(gauges::remove);
 
 		for (DCounter c : counters.values()) {
 			request.addCounter(c);
@@ -156,7 +141,6 @@ public class DatadogHttpReporter implements MetricReporter, Scheduled {
 
 		try {
 			client.send(request);
-			LOGGER.debug("Reported series with size {}.", request.getSeries().getSeries().size());
 		} catch (SocketTimeoutException e) {
 			LOGGER.warn("Failed reporting metrics to Datadog because of socket timeout.", e.getMessage());
 		} catch (Exception e) {

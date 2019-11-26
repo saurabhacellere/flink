@@ -18,20 +18,17 @@
 
 package org.apache.flink.runtime.checkpoint.savepoint;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.checkpoint.MasterState;
 import org.apache.flink.runtime.checkpoint.OperatorState;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.jobgraph.OperatorID;
-import org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle;
-import org.apache.flink.runtime.state.OperatorStateHandle;
+import org.apache.flink.runtime.state.IncrementalKeyedStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.KeyGroupRangeOffsets;
 import org.apache.flink.runtime.state.KeyGroupsStateHandle;
 import org.apache.flink.runtime.state.KeyedStateHandle;
-import org.apache.flink.runtime.state.OperatorStreamStateHandle;
+import org.apache.flink.runtime.state.OperatorStateHandle;
 import org.apache.flink.runtime.state.StateHandleID;
 import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.state.filesystem.FileStateHandle;
@@ -69,9 +66,7 @@ import java.util.UUID;
  *  +--------------+---------------------+---------+------+---------------+
  * </pre>
  */
-@Internal
-@VisibleForTesting
-public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
+class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 
 	/** Random magic number for consistency checks */
 	private static final int MASTER_STATE_MAGIC_NUMBER = 0xc96b1696;
@@ -324,8 +319,7 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 				keyedStateStream);
 	}
 
-	@VisibleForTesting
-	public static void serializeKeyedStateHandle(
+	private static void serializeKeyedStateHandle(
 			KeyedStateHandle stateHandle, DataOutputStream dos) throws IOException {
 
 		if (stateHandle == null) {
@@ -340,9 +334,9 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 				dos.writeLong(keyGroupsStateHandle.getOffsetForKeyGroup(keyGroup));
 			}
 			serializeStreamStateHandle(keyGroupsStateHandle.getDelegateStateHandle(), dos);
-		} else if (stateHandle instanceof IncrementalRemoteKeyedStateHandle) {
-			IncrementalRemoteKeyedStateHandle incrementalKeyedStateHandle =
-				(IncrementalRemoteKeyedStateHandle) stateHandle;
+		} else if (stateHandle instanceof IncrementalKeyedStateHandle) {
+			IncrementalKeyedStateHandle incrementalKeyedStateHandle =
+				(IncrementalKeyedStateHandle) stateHandle;
 
 			dos.writeByte(INCREMENTAL_KEY_GROUPS_HANDLE);
 
@@ -385,8 +379,7 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 		return result;
 	}
 
-	@VisibleForTesting
-	public static KeyedStateHandle deserializeKeyedStateHandle(DataInputStream dis) throws IOException {
+	private static KeyedStateHandle deserializeKeyedStateHandle(DataInputStream dis) throws IOException {
 		final int type = dis.readByte();
 		if (NULL_HANDLE == type) {
 
@@ -427,7 +420,7 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 				uuid = UUID.nameUUIDFromBytes(backendId.getBytes(StandardCharsets.UTF_8));
 			}
 
-			return new IncrementalRemoteKeyedStateHandle(
+			return new IncrementalKeyedStateHandle(
 				uuid,
 				keyGroupRange,
 				checkpointId,
@@ -439,9 +432,8 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 		}
 	}
 
-	@VisibleForTesting
-	public static void serializeOperatorStateHandle(
-		OperatorStateHandle stateHandle, DataOutputStream dos) throws IOException {
+	private static void serializeOperatorStateHandle(
+			OperatorStateHandle stateHandle, DataOutputStream dos) throws IOException {
 
 		if (stateHandle != null) {
 			dos.writeByte(PARTITIONABLE_OPERATOR_STATE_HANDLE);
@@ -468,8 +460,7 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 		}
 	}
 
-	@VisibleForTesting
-	public static OperatorStateHandle deserializeOperatorStateHandle(
+	private static OperatorStateHandle deserializeOperatorStateHandle(
 			DataInputStream dis) throws IOException {
 
 		final int type = dis.readByte();
@@ -494,14 +485,13 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 				offsetsMap.put(key, metaInfo);
 			}
 			StreamStateHandle stateHandle = deserializeStreamStateHandle(dis);
-			return new OperatorStreamStateHandle(offsetsMap, stateHandle);
+			return new OperatorStateHandle(offsetsMap, stateHandle);
 		} else {
 			throw new IllegalStateException("Reading invalid OperatorStateHandle, type: " + type);
 		}
 	}
 
-	@VisibleForTesting
-	public static void serializeStreamStateHandle(
+	private static void serializeStreamStateHandle(
 			StreamStateHandle stateHandle, DataOutputStream dos) throws IOException {
 
 		if (stateHandle == null) {
@@ -527,7 +517,7 @@ public class SavepointV2Serializer implements SavepointSerializer<SavepointV2> {
 		dos.flush();
 	}
 
-	public static StreamStateHandle deserializeStreamStateHandle(DataInputStream dis) throws IOException {
+	private static StreamStateHandle deserializeStreamStateHandle(DataInputStream dis) throws IOException {
 		final int type = dis.read();
 		if (NULL_HANDLE == type) {
 			return null;

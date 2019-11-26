@@ -21,14 +21,17 @@ package org.apache.flink.runtime.messages;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.testutils.CommonTestUtils;
-import org.apache.flink.runtime.checkpoint.CheckpointCoordinatorTestingUtils;
+import org.apache.flink.runtime.checkpoint.CheckpointCoordinatorTest;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.messages.checkpoint.AcknowledgeCheckpoint;
+import org.apache.flink.runtime.messages.checkpoint.NotifyCheckpointComplete;
+import org.apache.flink.runtime.messages.checkpoint.TriggerCheckpoint;
 import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.StreamStateHandle;
 
@@ -42,10 +45,23 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
-/**
- * Tests for checkpoint messages.
- */
 public class CheckpointMessagesTest {
+
+	@Test
+	public void testTriggerAndConfirmCheckpoint() {
+		try {
+			NotifyCheckpointComplete cc = new NotifyCheckpointComplete(new JobID(), new ExecutionAttemptID(), 45287698767345L, 467L);
+			testSerializabilityEqualsHashCode(cc);
+
+			TriggerCheckpoint tc = new TriggerCheckpoint(new JobID(), new ExecutionAttemptID(), 347652734L, 7576752L, CheckpointOptions.forFullCheckpoint());
+			testSerializabilityEqualsHashCode(tc);
+
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			fail(e.getMessage());
+		}
+	}
 
 	@Test
 	public void testConfirmTaskCheckpointed() {
@@ -53,15 +69,15 @@ public class CheckpointMessagesTest {
 			AcknowledgeCheckpoint noState = new AcknowledgeCheckpoint(
 					new JobID(), new ExecutionAttemptID(), 569345L);
 
-			KeyGroupRange keyGroupRange = KeyGroupRange.of(42, 42);
+			KeyGroupRange keyGroupRange = KeyGroupRange.of(42,42);
 
 			TaskStateSnapshot checkpointStateHandles = new TaskStateSnapshot();
 			checkpointStateHandles.putSubtaskStateByOperatorID(
 				new OperatorID(),
 				new OperatorSubtaskState(
-					CheckpointCoordinatorTestingUtils.generatePartitionableStateHandle(new JobVertexID(), 0, 2, 8, false),
+					CheckpointCoordinatorTest.generatePartitionableStateHandle(new JobVertexID(), 0, 2, 8, false),
 					null,
-					CheckpointCoordinatorTestingUtils.generateKeyGroupState(keyGroupRange, Collections.singletonList(new MyHandle())),
+					CheckpointCoordinatorTest.generateKeyGroupState(keyGroupRange, Collections.singletonList(new MyHandle())),
 					null
 				)
 			);
@@ -89,7 +105,7 @@ public class CheckpointMessagesTest {
 		assertNotNull(copy.toString());
 	}
 
-	private static class MyHandle implements StreamStateHandle {
+	public static class MyHandle implements StreamStateHandle {
 
 		private static final long serialVersionUID = 8128146204128728332L;
 

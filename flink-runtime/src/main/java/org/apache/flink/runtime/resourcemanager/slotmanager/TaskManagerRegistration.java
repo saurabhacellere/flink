@@ -32,8 +32,6 @@ public class TaskManagerRegistration {
 
 	private final HashSet<SlotID> slots;
 
-	private int numberFreeSlots;
-
 	/** Timestamp when the last time becoming idle. Otherwise Long.MAX_VALUE. */
 	private long idleSince;
 
@@ -46,9 +44,7 @@ public class TaskManagerRegistration {
 
 		this.slots = new HashSet<>(slots);
 
-		this.numberFreeSlots = slots.size();
-
-		idleSince = System.currentTimeMillis();
+		idleSince = Long.MAX_VALUE;
 	}
 
 	public TaskExecutorConnection getTaskManagerConnection() {
@@ -57,34 +53,6 @@ public class TaskManagerRegistration {
 
 	public InstanceID getInstanceId() {
 		return taskManagerConnection.getInstanceID();
-	}
-
-	public int getNumberRegisteredSlots() {
-		return slots.size();
-	}
-
-	public int getNumberFreeSlots() {
-		return numberFreeSlots;
-	}
-
-	public void freeSlot() {
-		Preconditions.checkState(
-			numberFreeSlots < slots.size(),
-			"The number of free slots cannot exceed the number of registered slots. This indicates a bug.");
-		numberFreeSlots++;
-
-		if (numberFreeSlots == getNumberRegisteredSlots() && idleSince == Long.MAX_VALUE) {
-			idleSince = System.currentTimeMillis();
-		}
-	}
-
-	public void occupySlot() {
-		Preconditions.checkState(
-			numberFreeSlots > 0,
-			"There are no more free slots. This indicates a bug.");
-		numberFreeSlots--;
-
-		idleSince = Long.MAX_VALUE;
 	}
 
 	public Iterable<SlotID> getSlots() {
@@ -97,6 +65,12 @@ public class TaskManagerRegistration {
 
 	public boolean isIdle() {
 		return idleSince != Long.MAX_VALUE;
+	}
+
+	public void markIdle() {
+		if (!isIdle()) {
+			idleSince = System.currentTimeMillis();
+		}
 	}
 
 	public void markUsed() {

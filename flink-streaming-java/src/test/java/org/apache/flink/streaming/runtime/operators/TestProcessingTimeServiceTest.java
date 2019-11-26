@@ -22,13 +22,15 @@ import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.StreamMap;
+import org.apache.flink.streaming.runtime.tasks.AsyncExceptionHandler;
 import org.apache.flink.streaming.runtime.tasks.OneInputStreamTask;
 import org.apache.flink.streaming.runtime.tasks.OneInputStreamTaskTestHarness;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeCallback;
-import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.TestProcessingTimeService;
 
 import org.junit.Test;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 
@@ -39,13 +41,13 @@ public class TestProcessingTimeServiceTest {
 
 	@Test
 	public void testCustomTimeServiceProvider() throws Throwable {
-		final TestProcessingTimeService tp = new TestProcessingTimeService();
+		TestProcessingTimeService tp = new TestProcessingTimeService();
+
+		final OneInputStreamTask<String, String> mapTask = new OneInputStreamTask<>();
+		mapTask.setProcessingTimeService(tp);
 
 		final OneInputStreamTaskTestHarness<String, String> testHarness = new OneInputStreamTaskTestHarness<>(
-				(env) -> new OneInputStreamTask<>(env, tp),
-				BasicTypeInfo.STRING_TYPE_INFO,
-				BasicTypeInfo.STRING_TYPE_INFO);
-
+			mapTask, BasicTypeInfo.STRING_TYPE_INFO, BasicTypeInfo.STRING_TYPE_INFO);
 		testHarness.setupOutputForSingletonOperatorChain();
 
 		StreamConfig streamConfig = testHarness.getStreamConfig();
@@ -56,26 +58,24 @@ public class TestProcessingTimeServiceTest {
 
 		testHarness.invoke();
 
-		ProcessingTimeService processingTimeService = testHarness.getTask().getProcessingTimeService(0);
-
-		assertEquals(Long.MIN_VALUE, processingTimeService.getCurrentProcessingTime());
+		assertEquals(Long.MIN_VALUE, testHarness.getProcessingTimeService().getCurrentProcessingTime());
 
 		tp.setCurrentTime(11);
-		assertEquals(processingTimeService.getCurrentProcessingTime(), 11);
+		assertEquals(testHarness.getProcessingTimeService().getCurrentProcessingTime(), 11);
 
 		tp.setCurrentTime(15);
 		tp.setCurrentTime(16);
-		assertEquals(processingTimeService.getCurrentProcessingTime(), 16);
+		assertEquals(testHarness.getProcessingTimeService().getCurrentProcessingTime(), 16);
 
 		// register 2 tasks
-		processingTimeService.registerTimer(30, new ProcessingTimeCallback() {
+		mapTask.getProcessingTimeService().registerTimer(30, new ProcessingTimeCallback() {
 			@Override
 			public void onProcessingTime(long timestamp) {
 
 			}
 		});
 
-		processingTimeService.registerTimer(40, new ProcessingTimeCallback() {
+		mapTask.getProcessingTimeService().registerTimer(40, new ProcessingTimeCallback() {
 			@Override
 			public void onProcessingTime(long timestamp) {
 
@@ -91,5 +91,24 @@ public class TestProcessingTimeServiceTest {
 		assertEquals(0, tp.getNumActiveTimers());
 
 		tp.shutdownService();
+	}
+
+	// ------------------------------------------------------------------------
+
+	/**
+	 * An {@link AsyncExceptionHandler} storing the handled exception.
+	 */
+	public static class ReferenceSettingExceptionHandler implements AsyncExceptionHandler {
+
+		private final AtomicReference<Throwable> errorReference;
+
+		public ReferenceSettingExceptionHandler(AtomicReference<Throwable> errorReference) {
+			this.errorReference = errorReference;
+		}
+
+		@Override
+		public void handleAsyncException(String message, Throwable exception) {
+			errorReference.compareAndSet(null, exception);
+		}
 	}
 }

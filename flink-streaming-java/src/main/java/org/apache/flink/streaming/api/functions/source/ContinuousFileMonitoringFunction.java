@@ -114,12 +114,8 @@ public class ContinuousFileMonitoringFunction<OUT>
 				"allowed one (" + MIN_MONITORING_INTERVAL + " ms)."
 		);
 
-		Preconditions.checkArgument(
-			format.getFilePaths().length == 1,
-			"FileInputFormats with multiple paths are not supported yet.");
-
 		this.format = Preconditions.checkNotNull(format, "Unspecified File Input Format.");
-		this.path = Preconditions.checkNotNull(format.getFilePaths()[0].toString(), "Unspecified Path.");
+		this.path = Preconditions.checkNotNull(format.getFilePath().toString(), "Unspecified Path.");
 
 		this.interval = interval;
 		this.watchType = watchType;
@@ -340,12 +336,9 @@ public class ContinuousFileMonitoringFunction<OUT>
 	@Override
 	public void close() throws Exception {
 		super.close();
-
-		if (checkpointLock != null) {
-			synchronized (checkpointLock) {
-				globalModificationTime = Long.MAX_VALUE;
-				isRunning = false;
-			}
+		synchronized (checkpointLock) {
+			globalModificationTime = Long.MAX_VALUE;
+			isRunning = false;
 		}
 
 		if (LOG.isDebugEnabled()) {

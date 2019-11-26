@@ -18,75 +18,69 @@
 
 package org.apache.flink.runtime.webmonitor.handlers;
 
-import org.apache.flink.api.common.time.Time;
-import org.apache.flink.runtime.rest.handler.AbstractRestHandler;
-import org.apache.flink.runtime.rest.handler.HandlerRequest;
-import org.apache.flink.runtime.rest.handler.RestHandlerException;
-import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
-import org.apache.flink.runtime.rest.messages.EmptyResponseBody;
-import org.apache.flink.runtime.rest.messages.MessageHeaders;
-import org.apache.flink.runtime.webmonitor.RestfulGateway;
-import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
+import org.apache.flink.runtime.concurrent.FlinkFutureException;
+import org.apache.flink.runtime.jobmaster.JobManagerGateway;
 
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
+import com.fasterxml.jackson.core.JsonGenerator;
 
-import javax.annotation.Nonnull;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.File;
+import java.io.FilenameFilter;
+import java.io.StringWriter;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
-
-import static java.util.Objects.requireNonNull;
 
 /**
  * Handles requests for deletion of jars.
  */
-public class JarDeleteHandler
-		extends AbstractRestHandler<RestfulGateway, EmptyRequestBody, EmptyResponseBody, JarDeleteMessageParameters> {
+public class JarDeleteHandler extends AbstractJsonRequestHandler {
 
-	private final Path jarDir;
+	static final String JAR_DELETE_REST_PATH = "/jars/:jarid";
 
-	private final Executor executor;
+	private final File jarDir;
 
-	public JarDeleteHandler(
-			final GatewayRetriever<? extends RestfulGateway> leaderRetriever,
-			final Time timeout,
-			final Map<String, String> responseHeaders,
-			final MessageHeaders<EmptyRequestBody, EmptyResponseBody, JarDeleteMessageParameters> messageHeaders,
-			final Path jarDir,
-			final Executor executor) {
-		super(leaderRetriever, timeout, responseHeaders, messageHeaders);
-		this.jarDir = requireNonNull(jarDir);
-		this.executor = requireNonNull(executor);
+	public JarDeleteHandler(Executor executor, File jarDirectory) {
+		super(executor);
+		jarDir = jarDirectory;
 	}
 
 	@Override
-	protected CompletableFuture<EmptyResponseBody> handleRequest(
-			@Nonnull final HandlerRequest<EmptyRequestBody, JarDeleteMessageParameters> request,
-			@Nonnull final RestfulGateway gateway) throws RestHandlerException {
+	public String[] getPaths() {
+		return new String[]{JAR_DELETE_REST_PATH};
+	}
 
-		final String jarId = request.getPathParameter(JarIdPathParameter.class);
-		return CompletableFuture.supplyAsync(() -> {
-			final Path jarToDelete = jarDir.resolve(jarId);
-			if (!Files.exists(jarToDelete)) {
-				throw new CompletionException(new RestHandlerException(
-					String.format("File %s does not exist in %s.", jarId, jarDir),
-					HttpResponseStatus.BAD_REQUEST));
-			} else {
+	@Override
+	public CompletableFuture<String> handleJsonRequest(Map<String, String> pathParams, Map<String, String> queryParams, JobManagerGateway jobManagerGateway) {
+		final String file = pathParams.get("jarid");
+		return CompletableFuture.supplyAsync(
+			() -> {
 				try {
-					Files.delete(jarToDelete);
-					return EmptyResponseBody.getInstance();
-				} catch (final IOException e) {
-					throw new CompletionException(new RestHandlerException(
-						String.format("Failed to delete jar %s.", jarToDelete),
-						HttpResponseStatus.INTERNAL_SERVER_ERROR,
-						e));
+					File[] list = jarDir.listFiles(new FilenameFilter() {
+						@Override
+						public boolean accept(File dir, String name) {
+							return name.equals(file);
+						}
+					});
+					boolean success = false;
+					for (File f: list) {
+						// although next to impossible for multiple files, we still delete them.
+						success = success || f.delete();
+					}
+					StringWriter writer = new StringWriter();
+					JsonGenerator gen = JsonFactory.JACKSON_FACTORY.createGenerator(writer);
+					gen.writeStartObject();
+					if (!success) {
+						// this seems to always fail on Windows.
+						gen.writeStringField("error", "The requested jar couldn't be deleted. Please try again.");
+					}
+					gen.writeEndObject();
+					gen.close();
+					return writer.toString();
 				}
-			}
-		}, executor);
+				catch (Exception e) {
+					throw new FlinkFutureException("Failed to delete jar id " + pathParams.get("jarid") + '.', e);
+				}
+			},
+			executor);
 	}
 }

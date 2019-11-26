@@ -18,20 +18,17 @@
 package org.apache.flink.streaming.api.graph;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.util.CorruptConfigurationException;
-import org.apache.flink.runtime.state.StateBackend;
+import org.apache.flink.runtime.state.AbstractStateBackend;
 import org.apache.flink.runtime.util.ClassLoaderUtil;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.collector.selector.OutputSelector;
-import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
-import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.runtime.tasks.StreamTaskException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.OutputTag;
@@ -44,8 +41,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
  * Internal configuration for a {@link StreamOperator}. This is created and populated by the
@@ -60,9 +55,6 @@ public class StreamConfig implements Serializable {
 	//  Config Keys
 	// ------------------------------------------------------------------------
 
-	@VisibleForTesting
-	public static final String SERIALIZEDUDF = "serializedUDF";
-
 	private static final String NUMBER_OF_OUTPUTS = "numberOfOutputs";
 	private static final String NUMBER_OF_INPUTS = "numberOfInputs";
 	private static final String CHAINED_OUTPUTS = "chainedOutputs";
@@ -72,6 +64,8 @@ public class StreamConfig implements Serializable {
 	private static final String VERTEX_NAME = "vertexID";
 	private static final String ITERATION_ID = "iterationId";
 	private static final String OUTPUT_SELECTOR_WRAPPER = "outputSelectorWrapper";
+	private static final String SERIALIZEDUDF = "serializedUDF";
+	private static final String USER_FUNCTION = "userFunction";
 	private static final String BUFFER_TIMEOUT = "bufferTimeout";
 	private static final String TYPE_SERIALIZER_IN_1 = "typeSerializer_in_1";
 	private static final String TYPE_SERIALIZER_IN_2 = "typeSerializer_in_2";
@@ -96,9 +90,6 @@ public class StreamConfig implements Serializable {
 
 	private static final String TIME_CHARACTERISTIC = "timechar";
 
-	private static final String MANAGED_MEMORY_FRACTION_ON_HEAP = "managedMemFractionOnHeap";
-	private static final String MANAGED_MEMORY_FRACTION_OFF_HEAP = "managedMemFractionOffHeap";
-
 	// ------------------------------------------------------------------------
 	//  Default Values
 	// ------------------------------------------------------------------------
@@ -106,7 +97,6 @@ public class StreamConfig implements Serializable {
 	private static final long DEFAULT_TIMEOUT = 100;
 	private static final CheckpointingMode DEFAULT_CHECKPOINTING_MODE = CheckpointingMode.EXACTLY_ONCE;
 
-	private static final double DEFAULT_MANAGED_MEMORY_FRACTION = 0.0;
 
 	// ------------------------------------------------------------------------
 	//  Config
@@ -132,30 +122,6 @@ public class StreamConfig implements Serializable {
 
 	public Integer getVertexID() {
 		return config.getInteger(VERTEX_NAME, -1);
-	}
-
-	public void setManagedMemoryFractionOnHeap(double managedMemFractionOnHeap) {
-		checkArgument(
-			managedMemFractionOnHeap >= 0.0 && managedMemFractionOnHeap <= 1.0,
-			String.format("managedMemFractionOnHeap should be in range [0.0, 1.0], but was: %s", managedMemFractionOnHeap));
-
-		config.setDouble(MANAGED_MEMORY_FRACTION_ON_HEAP, managedMemFractionOnHeap);
-	}
-
-	public double getManagedMemoryFractionOnHeap() {
-		return config.getDouble(MANAGED_MEMORY_FRACTION_ON_HEAP, DEFAULT_MANAGED_MEMORY_FRACTION);
-	}
-
-	public void setManagedMemoryFractionOffHeap(double managedMemFractionOffHeap) {
-		checkArgument(
-			managedMemFractionOffHeap >= 0.0 && managedMemFractionOffHeap <= 1.0,
-			String.format("managedMemFractionOffHeap should be in range [0.0, 1.0], but was: %s", managedMemFractionOffHeap));
-
-		config.setDouble(MANAGED_MEMORY_FRACTION_OFF_HEAP, managedMemFractionOffHeap);
-	}
-
-	public double getManagedMemoryFractionOffHeap() {
-		return config.getDouble(MANAGED_MEMORY_FRACTION_OFF_HEAP, DEFAULT_MANAGED_MEMORY_FRACTION);
 	}
 
 	public void setTimeCharacteristic(TimeCharacteristic characteristic) {
@@ -236,33 +202,20 @@ public class StreamConfig implements Serializable {
 		return config.getLong(BUFFER_TIMEOUT, DEFAULT_TIMEOUT);
 	}
 
-	public boolean isFlushAlwaysEnabled() {
-		return getBufferTimeout() == 0;
-	}
-
-	@VisibleForTesting
 	public void setStreamOperator(StreamOperator<?> operator) {
-		setStreamOperatorFactory(SimpleOperatorFactory.of(operator));
-	}
+		if (operator != null) {
+			config.setClass(USER_FUNCTION, operator.getClass());
 
-	public void setStreamOperatorFactory(StreamOperatorFactory<?> factory) {
-		if (factory != null) {
 			try {
-				InstantiationUtil.writeObjectToConfig(factory, this.config, SERIALIZEDUDF);
+				InstantiationUtil.writeObjectToConfig(operator, this.config, SERIALIZEDUDF);
 			} catch (IOException e) {
 				throw new StreamTaskException("Cannot serialize operator object "
-						+ factory.getClass() + ".", e);
+						+ operator.getClass() + ".", e);
 			}
 		}
 	}
 
-	@VisibleForTesting
 	public <T extends StreamOperator<?>> T getStreamOperator(ClassLoader cl) {
-		SimpleOperatorFactory<?> factory = getStreamOperatorFactory(cl);
-		return (T) factory.getOperator();
-	}
-
-	public <T extends StreamOperatorFactory<?>> T getStreamOperatorFactory(ClassLoader cl) {
 		try {
 			return InstantiationUtil.readObjectFromConfig(this.config, SERIALIZEDUDF, cl);
 		}
@@ -276,7 +229,7 @@ public class StreamConfig implements Serializable {
 							"\nClass was actually found in classloader - deserialization issue." :
 							"\nClass not resolvable through given classloader.");
 
-			throw new StreamTaskException(exceptionMessage, e);
+			throw new StreamTaskException(exceptionMessage);
 		}
 		catch (Exception e) {
 			throw new StreamTaskException("Cannot instantiate user function.", e);
@@ -460,13 +413,6 @@ public class StreamConfig implements Serializable {
 		}
 	}
 
-	public Map<Integer, StreamConfig> getTransitiveChainedTaskConfigsWithSelf(ClassLoader cl) {
-		//TODO: could this logic be moved to the user of #setTransitiveChainedTaskConfigs() ?
-		Map<Integer, StreamConfig> chainedTaskConfigs = getTransitiveChainedTaskConfigs(cl);
-		chainedTaskConfigs.put(getVertexID(), this);
-		return chainedTaskConfigs;
-	}
-
 	public void setOperatorID(OperatorID operatorID) {
 		this.config.setBytes(OPERATOR_ID, operatorID.getBytes());
 	}
@@ -496,7 +442,7 @@ public class StreamConfig implements Serializable {
 	//  State backend
 	// ------------------------------------------------------------------------
 
-	public void setStateBackend(StateBackend backend) {
+	public void setStateBackend(AbstractStateBackend backend) {
 		if (backend != null) {
 			try {
 				InstantiationUtil.writeObjectToConfig(backend, this.config, STATE_BACKEND);
@@ -506,7 +452,7 @@ public class StreamConfig implements Serializable {
 		}
 	}
 
-	public StateBackend getStateBackend(ClassLoader cl) {
+	public AbstractStateBackend getStateBackend(ClassLoader cl) {
 		try {
 			return InstantiationUtil.readObjectFromConfig(this.config, STATE_BACKEND, cl);
 		} catch (Exception e) {
@@ -553,7 +499,7 @@ public class StreamConfig implements Serializable {
 
 
 	// ------------------------------------------------------------------------
-	//  Miscellaneous
+	//  Miscellansous
 	// ------------------------------------------------------------------------
 
 	public void setChainStart() {
@@ -593,7 +539,7 @@ public class StreamConfig implements Serializable {
 		builder.append("\nChained subtasks: ").append(getChainedOutputs(cl));
 
 		try {
-			builder.append("\nOperator: ").append(getStreamOperatorFactory(cl).getClass().getSimpleName());
+			builder.append("\nOperator: ").append(getStreamOperator(cl).getClass().getSimpleName());
 		}
 		catch (Exception e) {
 			builder.append("\nOperator: Missing");

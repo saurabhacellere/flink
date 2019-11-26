@@ -27,7 +27,7 @@ import akka.actor.ActorSystem;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
- * An abstract implementation of {@link MesosServices}.
+ * An abrstact implementation of {@link MesosServices}.
  */
 public abstract class AbstractMesosServices implements MesosServices {
 
@@ -55,7 +55,7 @@ public abstract class AbstractMesosServices implements MesosServices {
 		Throwable exception = null;
 
 		try {
-			actorSystem.terminate();
+			actorSystem.shutdown();
 		} catch (Throwable t) {
 			exception = ExceptionUtils.firstOrSuppressed(t, exception);
 		}

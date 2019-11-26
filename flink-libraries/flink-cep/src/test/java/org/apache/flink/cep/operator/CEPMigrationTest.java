@@ -26,14 +26,15 @@ import org.apache.flink.cep.nfa.NFA;
 import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
-import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.OperatorStateHandles;
 import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OperatorSnapshotUtil;
-import org.apache.flink.testutils.migration.MigrationVersion;
+import org.apache.flink.streaming.util.migration.MigrationTestUtil;
+import org.apache.flink.streaming.util.migration.MigrationVersion;
 
 import org.junit.Ignore;
 import org.junit.Test;
@@ -63,7 +64,6 @@ public class CEPMigrationTest {
 	/**
 	 * TODO change this to the corresponding savepoint version to be written (e.g. {@link MigrationVersion#v1_3} for 1.3)
 	 * TODO and remove all @Ignore annotations on write*Snapshot() methods to generate savepoints
-	 * TODO Note: You should generate the savepoint based on the release branch instead of the master.
 	 */
 	private final MigrationVersion flinkGenerateSavepointVersion = null;
 
@@ -71,14 +71,7 @@ public class CEPMigrationTest {
 
 	@Parameterized.Parameters(name = "Migration Savepoint: {0}")
 	public static Collection<MigrationVersion> parameters () {
-		return Arrays.asList(
-			MigrationVersion.v1_3,
-			MigrationVersion.v1_4,
-			MigrationVersion.v1_5,
-			MigrationVersion.v1_6,
-			MigrationVersion.v1_7,
-			MigrationVersion.v1_8,
-			MigrationVersion.v1_9);
+		return Arrays.asList(MigrationVersion.v1_3);
 	}
 
 	public CEPMigrationTest(MigrationVersion migrateVersion) {
@@ -125,7 +118,7 @@ public class CEPMigrationTest {
 			harness.processWatermark(new Watermark(5));
 
 			// do snapshot and save to file
-			OperatorSubtaskState snapshot = harness.snapshot(0L, 0L);
+			OperatorStateHandles snapshot = harness.snapshot(0L, 0L);
 			OperatorSnapshotUtil.writeStateHandle(snapshot,
 				"src/test/resources/cep-migration-after-branching-flink" + flinkGenerateSavepointVersion + "-snapshot");
 		} finally {
@@ -159,8 +152,10 @@ public class CEPMigrationTest {
 		try {
 			harness.setup();
 
-			harness.initializeState(
-				OperatorSnapshotUtil.getResourceFilename("cep-migration-after-branching-flink" + migrateVersion + "-snapshot"));
+			MigrationTestUtil.restoreFromSnapshot(
+				harness,
+				OperatorSnapshotUtil.getResourceFilename("cep-migration-after-branching-flink" + migrateVersion + "-snapshot"),
+				migrateVersion);
 
 			harness.open();
 
@@ -210,7 +205,7 @@ public class CEPMigrationTest {
 			harness.processElement(new StreamRecord<Event>(middleEvent3, 23));
 
 			// simulate snapshot/restore with some elements in internal sorting queue
-			OperatorSubtaskState snapshot = harness.snapshot(1L, 1L);
+			OperatorStateHandles snapshot = harness.snapshot(1L, 1L);
 			harness.close();
 
 			harness = new KeyedOneInputStreamOperatorTestHarness<>(
@@ -284,7 +279,7 @@ public class CEPMigrationTest {
 			harness.processWatermark(new Watermark(5));
 
 			// do snapshot and save to file
-			OperatorSubtaskState snapshot = harness.snapshot(0L, 0L);
+			OperatorStateHandles snapshot = harness.snapshot(0L, 0L);
 			OperatorSnapshotUtil.writeStateHandle(snapshot,
 				"src/test/resources/cep-migration-starting-new-pattern-flink" + flinkGenerateSavepointVersion + "-snapshot");
 		} finally {
@@ -319,9 +314,10 @@ public class CEPMigrationTest {
 		try {
 			harness.setup();
 
-			harness.initializeState(
-				OperatorSnapshotUtil.getResourceFilename(
-					"cep-migration-starting-new-pattern-flink" + migrateVersion + "-snapshot"));
+			MigrationTestUtil.restoreFromSnapshot(
+				harness,
+				OperatorSnapshotUtil.getResourceFilename("cep-migration-starting-new-pattern-flink" + migrateVersion + "-snapshot"),
+				migrateVersion);
 
 			harness.open();
 
@@ -385,7 +381,7 @@ public class CEPMigrationTest {
 			harness.processElement(new StreamRecord<Event>(middleEvent3, 23));
 
 			// simulate snapshot/restore with some elements in internal sorting queue
-			OperatorSubtaskState snapshot = harness.snapshot(1L, 1L);
+			OperatorStateHandles snapshot = harness.snapshot(1L, 1L);
 			harness.close();
 
 			harness = new KeyedOneInputStreamOperatorTestHarness<>(
@@ -453,7 +449,7 @@ public class CEPMigrationTest {
 			harness.processWatermark(new Watermark(5));
 
 			// do snapshot and save to file
-			OperatorSubtaskState snapshot = harness.snapshot(0L, 0L);
+			OperatorStateHandles snapshot = harness.snapshot(0L, 0L);
 			OperatorSnapshotUtil.writeStateHandle(snapshot,
 				"src/test/resources/cep-migration-single-pattern-afterwards-flink" + flinkGenerateSavepointVersion + "-snapshot");
 		} finally {
@@ -484,9 +480,10 @@ public class CEPMigrationTest {
 		try {
 			harness.setup();
 
-			harness.initializeState(
-				OperatorSnapshotUtil.getResourceFilename(
-					"cep-migration-single-pattern-afterwards-flink" + migrateVersion + "-snapshot"));
+			MigrationTestUtil.restoreFromSnapshot(
+				harness,
+				OperatorSnapshotUtil.getResourceFilename("cep-migration-single-pattern-afterwards-flink" + migrateVersion + "-snapshot"),
+				migrateVersion);
 
 			harness.open();
 
@@ -509,99 +506,6 @@ public class CEPMigrationTest {
 				(Map<String, List<Event>>) resultRecord.getValue();
 
 			assertEquals(startEvent1, patternMap.get("start").get(0));
-		} finally {
-			harness.close();
-		}
-	}
-
-	/**
-	 * Manually run this to write binary snapshot data.
-	 */
-	@Ignore
-	@Test
-	public void writeAndOrSubtypConditionsPatternAfterMigrationSnapshot() throws Exception {
-
-		KeySelector<Event, Integer> keySelector = new KeySelector<Event, Integer>() {
-			private static final long serialVersionUID = -4873366487571254798L;
-
-			@Override
-			public Integer getKey(Event value) throws Exception {
-				return value.getId();
-			}
-		};
-
-		final Event startEvent1 = new SubEvent(42, "start", 1.0, 6.0);
-
-		OneInputStreamOperatorTestHarness<Event, Map<String, List<Event>>> harness =
-			new KeyedOneInputStreamOperatorTestHarness<>(
-				getKeyedCepOpearator(false, new NFAComplexConditionsFactory()),
-				keySelector,
-				BasicTypeInfo.INT_TYPE_INFO);
-
-		try {
-			harness.setup();
-			harness.open();
-			harness.processElement(new StreamRecord<>(startEvent1, 5));
-			harness.processWatermark(new Watermark(6));
-
-			// do snapshot and save to file
-			OperatorSubtaskState snapshot = harness.snapshot(0L, 0L);
-			OperatorSnapshotUtil.writeStateHandle(snapshot,
-				"src/test/resources/cep-migration-conditions-flink" + flinkGenerateSavepointVersion + "-snapshot");
-		} finally {
-			harness.close();
-		}
-	}
-
-	@Test
-	public void testAndOrSubtypeConditionsAfterMigration() throws Exception {
-
-		KeySelector<Event, Integer> keySelector = new KeySelector<Event, Integer>() {
-			private static final long serialVersionUID = -4873366487571254798L;
-
-			@Override
-			public Integer getKey(Event value) throws Exception {
-				return value.getId();
-			}
-		};
-
-		final Event startEvent1 = new SubEvent(42, "start", 1.0, 6.0);
-
-		OneInputStreamOperatorTestHarness<Event, Map<String, List<Event>>> harness =
-			new KeyedOneInputStreamOperatorTestHarness<>(
-				getKeyedCepOpearator(false, new NFAComplexConditionsFactory()),
-				keySelector,
-				BasicTypeInfo.INT_TYPE_INFO);
-
-		try {
-			harness.setup();
-
-			harness.initializeState(
-				OperatorSnapshotUtil.getResourceFilename(
-					"cep-migration-conditions-flink" + migrateVersion + "-snapshot"));
-
-			harness.open();
-
-			final Event endEvent = new SubEvent(42, "end", 1.0, 2.0);
-			harness.processElement(new StreamRecord<>(endEvent, 9));
-			harness.processWatermark(new Watermark(20));
-
-			ConcurrentLinkedQueue<Object> result = harness.getOutput();
-
-			// watermark and the result
-			assertEquals(2, result.size());
-
-			Object resultObject = result.poll();
-			assertTrue(resultObject instanceof StreamRecord);
-			StreamRecord<?> resultRecord = (StreamRecord<?>) resultObject;
-			assertTrue(resultRecord.getValue() instanceof Map);
-
-			@SuppressWarnings("unchecked")
-			Map<String, List<Event>> patternMap =
-				(Map<String, List<Event>>) resultRecord.getValue();
-
-			assertEquals(startEvent1, patternMap.get("start").get(0));
-			assertEquals(endEvent, patternMap.get("start").get(1));
 		} finally {
 			harness.close();
 		}
@@ -627,35 +531,7 @@ public class CEPMigrationTest {
 			Pattern<Event, ?> pattern = Pattern.<Event>begin("start").where(new StartFilter())
 					.within(Time.milliseconds(10L));
 
-			return NFACompiler.compileFactory(pattern, handleTimeout).createNFA();
-		}
-	}
-
-	private static class NFAComplexConditionsFactory implements NFACompiler.NFAFactory<Event> {
-
-		private static final long serialVersionUID = 1173020762472766713L;
-
-		private final boolean handleTimeout;
-
-		private NFAComplexConditionsFactory() {
-			this(false);
-		}
-
-		private NFAComplexConditionsFactory(boolean handleTimeout) {
-			this.handleTimeout = handleTimeout;
-		}
-
-		@Override
-		public NFA<Event> createNFA() {
-
-			Pattern<Event, ?> pattern = Pattern.<Event>begin("start")
-				.subtype(SubEvent.class)
-				.where(new MiddleFilter())
-				.or(new SubEventEndFilter())
-				.times(2)
-				.within(Time.milliseconds(10L));
-
-			return NFACompiler.compileFactory(pattern, handleTimeout).createNFA();
+			return NFACompiler.compile(pattern, Event.createTypeSerializer(), handleTimeout);
 		}
 	}
 
@@ -686,7 +562,7 @@ public class CEPMigrationTest {
 					// priority queue in CEP operator are correctly checkpointed/restored
 					.within(Time.milliseconds(10L));
 
-			return NFACompiler.compileFactory(pattern, handleTimeout).createNFA();
+			return NFACompiler.compile(pattern, Event.createTypeSerializer(), handleTimeout);
 		}
 	}
 
@@ -713,15 +589,6 @@ public class CEPMigrationTest {
 
 		@Override
 		public boolean filter(Event value) throws Exception {
-			return value.getName().equals("end");
-		}
-	}
-
-	private static class SubEventEndFilter extends SimpleCondition<SubEvent> {
-		private static final long serialVersionUID = 7056763917392056548L;
-
-		@Override
-		public boolean filter(SubEvent value) throws Exception {
 			return value.getName().equals("end");
 		}
 	}

@@ -51,23 +51,18 @@ public class StandaloneHaServices extends AbstractNonHaServices {
 	/** The fix address of the JobManager */
 	private final String jobManagerAddress;
 
-	private final String clusterRestEndpointAddress;
-
 	/**
 	 * Creates a new services class for the fix pre-defined leaders.
-	 *
+	 * 
 	 * @param resourceManagerAddress    The fix address of the ResourceManager
-	 * @param clusterRestEndpointAddress
 	 */
 	public StandaloneHaServices(
-			String resourceManagerAddress,
-			String dispatcherAddress,
-			String jobManagerAddress,
-			String clusterRestEndpointAddress) {
+		String resourceManagerAddress,
+		String dispatcherAddress,
+		String jobManagerAddress) {
 		this.resourceManagerAddress = checkNotNull(resourceManagerAddress, "resourceManagerAddress");
 		this.dispatcherAddress = checkNotNull(dispatcherAddress, "dispatcherAddress");
 		this.jobManagerAddress = checkNotNull(jobManagerAddress, "jobManagerAddress");
-		this.clusterRestEndpointAddress = checkNotNull(clusterRestEndpointAddress, clusterRestEndpointAddress);
 	}
 
 	// ------------------------------------------------------------------------
@@ -137,23 +132,4 @@ public class StandaloneHaServices extends AbstractNonHaServices {
 			return new StandaloneLeaderElectionService();
 		}
 	}
-
-	@Override
-	public LeaderRetrievalService getClusterRestEndpointLeaderRetriever() {
-		synchronized (lock) {
-			checkNotShutdown();
-
-			return new StandaloneLeaderRetrievalService(clusterRestEndpointAddress, DEFAULT_LEADER_ID);
-		}
-	}
-
-	@Override
-	public LeaderElectionService getClusterRestEndpointLeaderElectionService() {
-		synchronized (lock) {
-			checkNotShutdown();
-
-			return new StandaloneLeaderElectionService();
-		}
-	}
-
 }

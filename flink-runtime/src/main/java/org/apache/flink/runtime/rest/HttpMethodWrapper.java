@@ -25,9 +25,7 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpMethod;
  */
 public enum HttpMethodWrapper {
 	GET(HttpMethod.GET),
-	POST(HttpMethod.POST),
-	DELETE(HttpMethod.DELETE),
-	PATCH(HttpMethod.PATCH);
+	POST(HttpMethod.POST);
 
 	private HttpMethod nettyHttpMethod;
 

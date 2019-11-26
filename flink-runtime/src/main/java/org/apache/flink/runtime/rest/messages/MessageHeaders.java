@@ -18,10 +18,9 @@
 
 package org.apache.flink.runtime.rest.messages;
 
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
+import org.apache.flink.runtime.rest.HttpMethodWrapper;
 
-import java.util.Collection;
-import java.util.Collections;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
 
 /**
  * This class links {@link RequestBody}s to {@link ResponseBody}s types and contains meta-data required for their http headers.
@@ -32,7 +31,28 @@ import java.util.Collections;
  * @param <P> response message type
  * @param <M> message parameters type
  */
-public interface MessageHeaders<R extends RequestBody, P extends ResponseBody, M extends MessageParameters> extends UntypedResponseMessageHeaders<R, M> {
+public interface MessageHeaders<R extends RequestBody, P extends ResponseBody, M extends MessageParameters> {
+
+	/**
+	 * Returns the class of the request message.
+	 *
+	 * @return class of the request message
+	 */
+	Class<R> getRequestClass();
+
+	/**
+	 * Returns the {@link HttpMethodWrapper} to be used for the request.
+	 *
+	 * @return http method to be used for the request
+	 */
+	HttpMethodWrapper getHttpMethod();
+
+	/**
+	 * Returns the generalized endpoint url that this request should be sent to, for example {@code /job/:jobid}.
+	 *
+	 * @return endpoint url that this request should be sent to
+	 */
+	String getTargetRestEndpointURL();
 
 	/**
 	 * Returns the class of the response message.
@@ -49,18 +69,10 @@ public interface MessageHeaders<R extends RequestBody, P extends ResponseBody, M
 	HttpResponseStatus getResponseStatusCode();
 
 	/**
-	 * Returns the collection of type parameters for the response type.
+	 * Returns a new {@link MessageParameters} object.
 	 *
-	 * @return Collection of type parameters for the response type
+	 * @return new message parameters object
 	 */
-	default Collection<Class<?>> getResponseTypeParameters() {
-		return Collections.emptyList();
-	}
+	M getUnresolvedMessageParameters();
 
-	/**
-	 * Returns the description for this header.
-	 *
-	 * @return description for the header
-	 */
-	String getDescription();
 }
