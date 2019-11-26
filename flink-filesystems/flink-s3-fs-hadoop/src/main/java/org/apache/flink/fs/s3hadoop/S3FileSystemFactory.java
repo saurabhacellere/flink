@@ -20,9 +20,10 @@ package org.apache.flink.fs.s3hadoop;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.fs.s3.common.AbstractS3FileSystemFactory;
+import org.apache.flink.fs.s3.common.HadoopConfigLoader;
 import org.apache.flink.fs.s3.common.writer.S3AccessHelper;
-import org.apache.flink.runtime.util.HadoopConfigLoader;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.Collections;
 import java.util.Set;
@@ -41,13 +43,11 @@ public class S3FileSystemFactory extends AbstractS3FileSystemFactory {
 
 	private static final Logger LOG = LoggerFactory.getLogger(S3FileSystemFactory.class);
 
-	// intentionally obfuscated to prevent relocations by the shade-plugin
-	private static final Set<String> PACKAGE_PREFIXES_TO_SHADE = Collections.singleton("com.UNSHADE.".replace("UNSHADE", "amazonaws"));
+	private static final Set<String> PACKAGE_PREFIXES_TO_SHADE = Collections.singleton("com.amazonaws.");
 
 	private static final Set<String> CONFIG_KEYS_TO_SHADE = Collections.singleton("fs.s3a.aws.credentials.provider");
 
-	// keep this in sync with the relocation pattern applied to com.amazon in the shade-plugin configuration
-	private static final String FLINK_SHADING_PREFIX = "org.apache.flink.fs.s3base.shaded.";
+	private static final String FLINK_SHADING_PREFIX = "org.apache.flink.fs.s3hadoop.shaded.";
 
 	private static final String[] FLINK_CONFIG_PREFIXES = { "s3.", "s3a.", "fs.s3a." };
 
@@ -72,7 +72,7 @@ public class S3FileSystemFactory extends AbstractS3FileSystemFactory {
 	}
 
 	@Override
-	protected org.apache.hadoop.fs.FileSystem createHadoopFileSystem() {
+	protected org.apache.hadoop.fs.FileSystem createHadoopFileSystem(URI fsUri, Configuration hadoopConf) throws IOException {
 		return new S3AFileSystem();
 	}
 

@@ -21,13 +21,11 @@ package org.apache.flink.fs.s3.common;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ConfigurationUtils;
+import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystemFactory;
 import org.apache.flink.fs.s3.common.writer.S3AccessHelper;
-import org.apache.flink.runtime.util.HadoopConfigLoader;
-import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,7 +120,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 		try {
 			// create the Hadoop FileSystem
 			org.apache.hadoop.conf.Configuration hadoopConfig = hadoopConfigLoader.getOrLoadHadoopConfig();
-			org.apache.hadoop.fs.FileSystem fs = createHadoopFileSystem();
+			org.apache.hadoop.fs.FileSystem fs = createHadoopFileSystem(fsUri, hadoopConfig);
 			fs.initialize(getInitURI(fsUri, hadoopConfig), hadoopConfig);
 
 			// load the entropy injection settings
@@ -140,9 +138,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 				}
 			}
 
-			final String[] localTmpDirectories = ConfigurationUtils.parseTempDirectories(flinkConfig);
-			Preconditions.checkArgument(localTmpDirectories.length > 0);
-			final String localTmpDirectory = localTmpDirectories[0];
+			final String localTmpDirectory = flinkConfig.getString(CoreOptions.TMP_DIRS);
 			final long s3minPartSize = flinkConfig.getLong(PART_UPLOAD_MIN_SIZE);
 			final int maxConcurrentUploads = flinkConfig.getInteger(MAX_CONCURRENT_UPLOADS);
 			final S3AccessHelper s3AccessHelper = getS3AccessHelper(fs);
@@ -164,7 +160,8 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
 		}
 	}
 
-	protected abstract org.apache.hadoop.fs.FileSystem createHadoopFileSystem();
+	protected abstract org.apache.hadoop.fs.FileSystem createHadoopFileSystem(
+		URI fsUri, org.apache.hadoop.conf.Configuration hadoopConf) throws IOException;
 
 	protected abstract URI getInitURI(
 		URI fsUri, org.apache.hadoop.conf.Configuration hadoopConfig);
