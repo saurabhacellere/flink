@@ -18,11 +18,11 @@
 
 package org.apache.flink.formats.avro.registry.confluent;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.formats.avro.AvroDeserializationSchema;
 import org.apache.flink.formats.avro.RegistryAvroDeserializationSchema;
 import org.apache.flink.formats.avro.SchemaCoder;
 
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.specific.SpecificRecord;
@@ -50,7 +50,8 @@ public class ConfluentRegistryAvroDeserializationSchema<T> extends RegistryAvroD
 	 *                            {@link GenericRecord}
 	 * @param schemaCoderProvider provider for schema coder that reads writer schema from Confluent Schema Registry
 	 */
-	private ConfluentRegistryAvroDeserializationSchema(Class<T> recordClazz, @Nullable Schema reader,
+	@VisibleForTesting
+	ConfluentRegistryAvroDeserializationSchema(Class<T> recordClazz, @Nullable Schema reader,
 			SchemaCoder.SchemaCoderProvider schemaCoderProvider) {
 		super(recordClazz, reader, schemaCoderProvider);
 	}
@@ -81,7 +82,7 @@ public class ConfluentRegistryAvroDeserializationSchema<T> extends RegistryAvroD
 		return new ConfluentRegistryAvroDeserializationSchema<>(
 			GenericRecord.class,
 			schema,
-			new CachedSchemaCoderProvider(url, identityMapCapacity));
+			new ConfluenceCachedSchemaCoderProvider(url, identityMapCapacity));
 	}
 
 	/**
@@ -111,26 +112,7 @@ public class ConfluentRegistryAvroDeserializationSchema<T> extends RegistryAvroD
 		return new ConfluentRegistryAvroDeserializationSchema<>(
 			tClass,
 			null,
-			new CachedSchemaCoderProvider(url, identityMapCapacity)
+			new ConfluenceCachedSchemaCoderProvider(url, identityMapCapacity)
 		);
-	}
-
-	private static class CachedSchemaCoderProvider implements SchemaCoder.SchemaCoderProvider {
-
-		private static final long serialVersionUID = 4023134423033312666L;
-		private final String url;
-		private final int identityMapCapacity;
-
-		CachedSchemaCoderProvider(String url, int identityMapCapacity) {
-			this.url = url;
-			this.identityMapCapacity = identityMapCapacity;
-		}
-
-		@Override
-		public SchemaCoder get() {
-			return new ConfluentSchemaRegistryCoder(new CachedSchemaRegistryClient(
-				url,
-				identityMapCapacity));
-		}
 	}
 }
