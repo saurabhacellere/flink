@@ -16,33 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.types.inference.strategies;
+package org.apache.flink.table.types.inference.utils;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.inference.CallContext;
-import org.apache.flink.table.types.inference.TypeStrategy;
-
-import java.util.Optional;
+import org.apache.flink.table.functions.FunctionDefinition;
+import org.apache.flink.table.functions.FunctionKind;
 
 /**
- * Placeholder for a missing type strategy.
+ * {@link FunctionDefinition} mock for testing purposes.
  */
-@Internal
-public final class MissingTypeStrategy implements TypeStrategy {
+public class FunctionDefinitionMock implements FunctionDefinition {
+
+	public FunctionKind functionKind;
 
 	@Override
-	public Optional<DataType> inferType(CallContext callContext) {
-		return Optional.empty();
-	}
-
-	@Override
-	public boolean equals(Object o) {
-		return this == o || o instanceof MissingTypeStrategy;
-	}
-
-	@Override
-	public int hashCode() {
-		return MissingTypeStrategy.class.hashCode();
+	public FunctionKind getKind() {
+		return functionKind;
 	}
 }
