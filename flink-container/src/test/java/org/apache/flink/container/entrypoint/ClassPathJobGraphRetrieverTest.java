@@ -21,43 +21,64 @@ package org.apache.flink.container.entrypoint;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.CoreOptions;
+import org.apache.flink.configuration.JobManagerOptions;
+import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.container.entrypoint.ClassPathJobGraphRetriever.JarsOnClassPath;
-import org.apache.flink.container.entrypoint.testjar.TestJobInfo;
+import org.apache.flink.runtime.akka.AkkaUtils;
+import org.apache.flink.runtime.blob.BlobServer;
+import org.apache.flink.runtime.concurrent.Executors;
+import org.apache.flink.runtime.concurrent.FutureUtils;
+import org.apache.flink.runtime.dispatcher.ArchivedExecutionGraphStore;
+import org.apache.flink.runtime.dispatcher.HistoryServerArchivist;
+import org.apache.flink.runtime.dispatcher.JobDispatcherFactory;
+import org.apache.flink.runtime.heartbeat.HeartbeatServices;
+import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
+import org.apache.flink.runtime.highavailability.HighAvailabilityServicesUtils;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.FileUtils;
-import org.apache.flink.util.FlinkException;
+import org.apache.flink.runtime.jobmanager.SubmittedJobGraph;
+import org.apache.flink.runtime.jobmanager.SubmittedJobGraphStore;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
+import org.apache.flink.runtime.rpc.FatalErrorHandler;
+import org.apache.flink.runtime.rpc.FencedRpcGateway;
+import org.apache.flink.runtime.rpc.RpcGateway;
+import org.apache.flink.runtime.rpc.akka.AkkaRpcService;
+import org.apache.flink.runtime.rpc.akka.AkkaRpcServiceConfiguration;
+import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.TestLogger;
-import org.apache.flink.util.function.FunctionUtils;
+import org.apache.flink.util.function.BiFunctionWithException;
+import org.apache.flink.util.function.FunctionWithException;
 
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.io.Serializable;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
+import static java.util.Objects.requireNonNull;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasProperty;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for the {@link ClassPathJobGraphRetriever}.
@@ -67,117 +88,143 @@ public class ClassPathJobGraphRetrieverTest extends TestLogger {
 	@Rule
 	public final TemporaryFolder temporaryFolder = new TemporaryFolder();
 
-	@ClassRule
-	public static final TemporaryFolder JOB_DIRS = new TemporaryFolder();
-
 	private static final String[] PROGRAM_ARGUMENTS = {"--arg", "suffix"};
 
-	/*
-	 * The directory structure used to test
-	 *
-	 * userDirHasEntryClass/
-	 *                    |_jarWithEntryClass
-	 *                    |_jarWithoutEntryClass
-	 *                    |_textFile
-	 *
-	 * userDirHasNotEntryClass/
-	 *                       |_jarWithoutEntryClass
-	 *                       |_textFile
-	 */
-
-	private static final Collection<URL> expectedURLs = new ArrayList<>();
-
-	private static File userDirHasEntryClass;
-
-	private static File userDirHasNotEntryClass;
-
-	@BeforeClass
-	public static void init() throws IOException {
-		final String textFileName = "test.txt";
-		final String userDirHasEntryClassName = "_test_user_dir_has_entry_class";
-		final String userDirHasNotEntryClassName = "_test_user_dir_has_not_entry_class";
-
-		userDirHasEntryClass = JOB_DIRS.newFolder(userDirHasEntryClassName);
-		final Path userJarPath = userDirHasEntryClass.toPath().resolve(TestJobInfo.JOB_JAR_PATH.toFile().getName());
-		final Path userLibJarPath =
-			userDirHasEntryClass.toPath().resolve(TestJobInfo.JOB_LIB_JAR_PATH.toFile().getName());
-		userDirHasNotEntryClass = JOB_DIRS.newFolder(userDirHasNotEntryClassName);
-
-		//create files
-		Files.copy(TestJobInfo.JOB_JAR_PATH, userJarPath);
-		Files.copy(TestJobInfo.JOB_LIB_JAR_PATH, userLibJarPath);
-		Files.createFile(userDirHasEntryClass.toPath().resolve(textFileName));
-
-		Files.copy(TestJobInfo.JOB_LIB_JAR_PATH, userDirHasNotEntryClass.toPath().resolve(TestJobInfo.JOB_LIB_JAR_PATH.toFile().getName()));
-		Files.createFile(userDirHasNotEntryClass.toPath().resolve(textFileName));
-
-		final Path workingDirectory = FileUtils.getCurrentWorkingDirectory();
-		Arrays.asList(userJarPath, userLibJarPath)
-			.stream()
-			.map(path -> FileUtils.relativizePath(workingDirectory, path))
-			.map(FunctionUtils.uncheckedFunction(FileUtils::toURL))
-			.forEach(expectedURLs::add);
-	}
-
 	@Test
-	public void testJobGraphRetrieval() throws FlinkException, IOException {
+	public void testJobGraphRetrieval() throws Exception {
 		final int parallelism = 42;
 		final Configuration configuration = new Configuration();
 		configuration.setInteger(CoreOptions.DEFAULT_PARALLELISM, parallelism);
 		final JobID jobId = new JobID();
+		configuration.setString(TaskManagerOptions.HOST, "localhost");
+		configuration.setString(JobManagerOptions.ADDRESS, "localhost");
+		configuration.setInteger(JobManagerOptions.PORT, 7891);
 
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(jobId, SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJobClassName(TestJob.class.getCanonicalName())
-				.build();
+		final HighAvailabilityServices highAvailabilityServices = HighAvailabilityServicesUtils.createHighAvailabilityServices(
+			configuration,
+			Executors.directExecutor(),
+			HighAvailabilityServicesUtils.AddressResolution.NO_ADDRESS_RESOLUTION);
 
-		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(configuration);
+		final InMemorySubmittedJobGraphStore jobGraphStore = new InMemorySubmittedJobGraphStore();
+		jobGraphStore.setRecoverJobGraphFunction(
+			(JobID jid, Map<JobID, SubmittedJobGraph> submittedJobs) -> submittedJobs.get(jid));
+		jobGraphStore.start(null);
+
+		final ClassPathJobGraphRetriever classPathJobGraphRetriever = new ClassPathJobGraphRetriever(
+			jobId,
+			SavepointRestoreSettings.none(),
+			PROGRAM_ARGUMENTS,
+			TestJob.class.getCanonicalName(),
+			jobGraphStore);
+
+		JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(configuration);
 
 		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
 		assertThat(jobGraph.getMaximumParallelism(), is(parallelism));
 		assertEquals(jobGraph.getJobID(), jobId);
+		assertEquals(null, jobGraphStore.recoverJobGraph(jobId));
+
+		JobDispatcherFactory dispatcherFactory = new JobDispatcherFactory(classPathJobGraphRetriever);
+		dispatcherFactory.createDispatcher(
+			configuration,
+			new TestingRpcService(),
+			highAvailabilityServices,
+			mock(GatewayRetriever.class),
+			jobGraphStore,
+			mock(BlobServer.class),
+			mock(HeartbeatServices.class),
+			mock(JobManagerMetricGroup.class),
+			null,
+			mock(ArchivedExecutionGraphStore.class),
+			mock(FatalErrorHandler.class),
+			mock(HistoryServerArchivist.class)
+		);
+
+		final SubmittedJobGraph submittedJobGraph = jobGraphStore.recoverJobGraph(jobId);
+		assertNotNull(submittedJobGraph);
+
+		jobGraph = submittedJobGraph.getJobGraph();
+		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
+		assertThat(jobGraph.getMaximumParallelism(), is(parallelism));
+		assertEquals(jobGraph.getJobID(), jobId);
+
+		jobGraphStore.stop();
 	}
 
 	@Test
-	public void testJobGraphRetrievalFromJar() throws FlinkException, IOException {
+	public void testJobGraphRetrievalFromJar() throws Exception {
 		final File testJar = TestJob.getTestJobJar();
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJarsOnClassPath(() -> Collections.singleton(testJar))
-				.build();
-
-		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-
-		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
-	}
-
-	@Test
-	public void testJobGraphRetrievalJobClassNameHasPrecedenceOverClassPath() throws FlinkException, IOException {
-		final File testJar = new File("non-existing");
-
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				// Both a class name is specified and a JAR "is" on the class path
-				// The class name should have precedence.
-			.setJobClassName(TestJob.class.getCanonicalName())
-			.setJarsOnClassPath(() -> Collections.singleton(testJar))
-			.build();
-
-		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-
-		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
-	}
-
-	@Test
-	public void testSavepointRestoreSettings() throws FlinkException, IOException {
 		final Configuration configuration = new Configuration();
+		configuration.setString(JobManagerOptions.ADDRESS, "localhost");
+
+		final HighAvailabilityServices highAvailabilityServices = HighAvailabilityServicesUtils.createHighAvailabilityServices(
+			configuration,
+			Executors.directExecutor(),
+			HighAvailabilityServicesUtils.AddressResolution.NO_ADDRESS_RESOLUTION);
+
+		final SubmittedJobGraphStore jobGraphStore = highAvailabilityServices.getSubmittedJobGraphStore();
+		final ClassPathJobGraphRetriever classPathJobGraphRetriever = new ClassPathJobGraphRetriever(
+			new JobID(),
+			SavepointRestoreSettings.none(),
+			PROGRAM_ARGUMENTS,
+			// No class name specified, but the test JAR "is" on the class path
+			null,
+			() -> Collections.singleton(testJar),
+			jobGraphStore);
+
+		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
+
+		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
+	}
+
+	@Test
+	public void testJobGraphRetrievalJobClassNameHasPrecedenceOverClassPath() throws Exception {
+		final File testJar = new File("non-existing");
+		final Configuration configuration = new Configuration();
+		configuration.setString(JobManagerOptions.ADDRESS, "localhost");
+
+		final HighAvailabilityServices highAvailabilityServices = HighAvailabilityServicesUtils.createHighAvailabilityServices(
+			configuration,
+			Executors.directExecutor(),
+			HighAvailabilityServicesUtils.AddressResolution.NO_ADDRESS_RESOLUTION);
+
+		final SubmittedJobGraphStore jobGraphStore = highAvailabilityServices.getSubmittedJobGraphStore();
+
+		final ClassPathJobGraphRetriever classPathJobGraphRetriever = new ClassPathJobGraphRetriever(
+			new JobID(),
+			SavepointRestoreSettings.none(),
+			PROGRAM_ARGUMENTS,
+			// Both a class name is specified and a JAR "is" on the class path
+			// The class name should have precedence.
+			TestJob.class.getCanonicalName(),
+			() -> Collections.singleton(testJar),
+			jobGraphStore);
+
+		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
+
+		assertThat(jobGraph.getName(), is(equalTo(TestJob.class.getCanonicalName() + "-suffix")));
+	}
+
+	@Test
+	public void testSavepointRestoreSettings() throws Exception {
+		final Configuration configuration = new Configuration();
+		configuration.setString(JobManagerOptions.ADDRESS, "localhost");
 		final SavepointRestoreSettings savepointRestoreSettings = SavepointRestoreSettings.forPath("foobar", true);
 		final JobID jobId = new JobID();
 
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(jobId, savepointRestoreSettings, PROGRAM_ARGUMENTS)
-			.setJobClassName(TestJob.class.getCanonicalName())
-			.build();
+		final HighAvailabilityServices highAvailabilityServices = HighAvailabilityServicesUtils.createHighAvailabilityServices(
+			configuration,
+			Executors.directExecutor(),
+			HighAvailabilityServicesUtils.AddressResolution.NO_ADDRESS_RESOLUTION);
+
+		final SubmittedJobGraphStore jobGraphStore = highAvailabilityServices.getSubmittedJobGraphStore();
+
+		final ClassPathJobGraphRetriever classPathJobGraphRetriever = new ClassPathJobGraphRetriever(
+			jobId,
+			savepointRestoreSettings,
+			PROGRAM_ARGUMENTS,
+			TestJob.class.getCanonicalName(),
+			jobGraphStore);
 
 		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(configuration);
 
@@ -218,68 +265,6 @@ public class ClassPathJobGraphRetrieverTest extends TestLogger {
 		assertThat(jarFiles, contains(file1, file2));
 	}
 
-	@Test
-	public void testJobGraphRetrievalFailIfJobDirDoesNotHaveEntryClass() throws IOException {
-		final File testJar = TestJob.getTestJobJar();
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJarsOnClassPath(() -> Collections.singleton(testJar))
-				.setUserLibDirectory(userDirHasNotEntryClass)
-				.build();
-		try {
-			classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-			Assert.fail("This case should throw exception !");
-		} catch (FlinkException e) {
-			assertTrue(ExceptionUtils
-				.findThrowableWithMessage(e, "Failed to find job JAR on class path")
-				.isPresent());
-		}
-	}
-
-	@Test
-	public void testJobGraphRetrievalFailIfDoesNotFindTheEntryClassInTheJobDir() throws IOException {
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJobClassName(TestJobInfo.JOB_CLASS)
-				.setJarsOnClassPath(Collections::emptyList)
-				.setUserLibDirectory(userDirHasNotEntryClass)
-				.build();
-		try {
-			classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-			Assert.fail("This case should throw class not found exception!!");
-		} catch (FlinkException e) {
-			assertTrue(ExceptionUtils
-				.findThrowableWithMessage(e, "Could not find the provided job class")
-				.isPresent());
-		}
-
-	}
-
-	@Test
-	public void testRetrieveCorrectUserClasspathsWithoutSpecifiedEntryClass() throws IOException, FlinkException {
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJarsOnClassPath(Collections::emptyList)
-				.setUserLibDirectory(userDirHasEntryClass)
-				.build();
-		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-
-		assertThat(jobGraph.getClasspaths(), containsInAnyOrder(expectedURLs.toArray()));
-	}
-
-	@Test
-	public void testRetrieveCorrectUserClasspathsWithSpecifiedEntryClass() throws IOException, FlinkException {
-		final ClassPathJobGraphRetriever classPathJobGraphRetriever =
-			ClassPathJobGraphRetriever.newBuilder(new JobID(), SavepointRestoreSettings.none(), PROGRAM_ARGUMENTS)
-				.setJobClassName(TestJobInfo.JOB_CLASS)
-				.setJarsOnClassPath(Collections::emptyList)
-				.setUserLibDirectory(userDirHasEntryClass)
-				.build();
-		final JobGraph jobGraph = classPathJobGraphRetriever.retrieveJobGraph(new Configuration());
-
-		assertThat(jobGraph.getClasspaths(), containsInAnyOrder(expectedURLs.toArray()));
-	}
-
 	private static String javaClassPath(String... entries) {
 		String pathSeparator = System.getProperty(JarsOnClassPath.PATH_SEPARATOR);
 		return String.join(pathSeparator, entries);
@@ -295,4 +280,179 @@ public class ClassPathJobGraphRetrieverTest extends TestLogger {
 			System.setProperty(JarsOnClassPath.JAVA_CLASS_PATH, originalClassPath);
 		}
 	}
+
+	private static class TestingRpcService extends AkkaRpcService {
+
+		/** Map of pre-registered connections. */
+		private final ConcurrentHashMap<String, RpcGateway> registeredConnections;
+
+		/**
+		 * Creates a new {@code TestingRpcService}.
+		 */
+		public TestingRpcService() {
+			this(new Configuration());
+		}
+
+		/**
+		 * Creates a new {@code TestingRpcService}, using the given configuration.
+		 */
+		public TestingRpcService(Configuration configuration) {
+			super(AkkaUtils.createLocalActorSystem(configuration), AkkaRpcServiceConfiguration.defaultConfiguration());
+
+			this.registeredConnections = new ConcurrentHashMap<>();
+		}
+
+		// ------------------------------------------------------------------------
+
+		@Override
+		public CompletableFuture<Void> stopService() {
+			final CompletableFuture<Void> terminationFuture = super.stopService();
+
+			terminationFuture.whenComplete(
+				(Void ignored, Throwable throwable) -> {
+					registeredConnections.clear();
+				});
+
+			return terminationFuture;
+		}
+
+		// ------------------------------------------------------------------------
+		// connections
+		// ------------------------------------------------------------------------
+
+		public void registerGateway(String address, RpcGateway gateway) {
+			checkNotNull(address);
+			checkNotNull(gateway);
+
+			if (registeredConnections.putIfAbsent(address, gateway) != null) {
+				throw new IllegalStateException("a gateway is already registered under " + address);
+			}
+		}
+
+		@Override
+		public <C extends RpcGateway> CompletableFuture<C> connect(String address, Class<C> clazz) {
+			RpcGateway gateway = registeredConnections.get(address);
+
+			if (gateway != null) {
+				if (clazz.isAssignableFrom(gateway.getClass())) {
+					@SuppressWarnings("unchecked")
+					C typedGateway = (C) gateway;
+					return CompletableFuture.completedFuture(typedGateway);
+				} else {
+					return FutureUtils.completedExceptionally(new Exception("Gateway registered under " + address + " is not of type " + clazz));
+				}
+			} else {
+				return super.connect(address, clazz);
+			}
+		}
+
+		@Override
+		public <F extends Serializable, C extends FencedRpcGateway<F>> CompletableFuture<C> connect(
+			String address,
+			F fencingToken,
+			Class<C> clazz) {
+			RpcGateway gateway = registeredConnections.get(address);
+
+			if (gateway != null) {
+				if (clazz.isAssignableFrom(gateway.getClass())) {
+					@SuppressWarnings("unchecked")
+					C typedGateway = (C) gateway;
+					return CompletableFuture.completedFuture(typedGateway);
+				} else {
+					return FutureUtils.completedExceptionally(new Exception("Gateway registered under " + address + " is not of type " + clazz));
+				}
+			} else {
+				return super.connect(address, fencingToken, clazz);
+			}
+		}
+
+		public void clearGateways() {
+			registeredConnections.clear();
+		}
+	}
+
+	private static class InMemorySubmittedJobGraphStore implements SubmittedJobGraphStore {
+
+		private final Map<JobID, SubmittedJobGraph> storedJobs = new HashMap<>();
+
+		private boolean started;
+
+		private volatile FunctionWithException<Collection<JobID>, Collection<JobID>, ? extends Exception> jobIdsFunction;
+
+		private volatile BiFunctionWithException<JobID, Map<JobID, SubmittedJobGraph>, SubmittedJobGraph, ? extends Exception> recoverJobGraphFunction;
+
+		public InMemorySubmittedJobGraphStore() {
+			jobIdsFunction = null;
+			recoverJobGraphFunction = null;
+		}
+
+		public void setJobIdsFunction(FunctionWithException<Collection<JobID>, Collection<JobID>, ? extends Exception> jobIdsFunction) {
+			this.jobIdsFunction = Preconditions.checkNotNull(jobIdsFunction);
+		}
+
+		public void setRecoverJobGraphFunction(BiFunctionWithException<JobID, Map<JobID, SubmittedJobGraph>, SubmittedJobGraph, ? extends Exception> recoverJobGraphFunction) {
+			this.recoverJobGraphFunction = Preconditions.checkNotNull(recoverJobGraphFunction);
+		}
+
+		@Override
+		public synchronized void start(@Nullable SubmittedJobGraphListener jobGraphListener) throws Exception {
+			started = true;
+		}
+
+		@Override
+		public synchronized void stop() throws Exception {
+			started = false;
+		}
+
+		@Override
+		public synchronized SubmittedJobGraph recoverJobGraph(JobID jobId) throws Exception {
+			verifyIsStarted();
+
+			if (recoverJobGraphFunction != null) {
+				return recoverJobGraphFunction.apply(jobId, storedJobs);
+			} else {
+				return requireNonNull(
+					storedJobs.get(jobId),
+					"Job graph for job " + jobId + " does not exist");
+			}
+		}
+
+		@Override
+		public synchronized void putJobGraph(SubmittedJobGraph jobGraph) throws Exception {
+			verifyIsStarted();
+			storedJobs.put(jobGraph.getJobId(), jobGraph);
+		}
+
+		@Override
+		public synchronized void removeJobGraph(JobID jobId) throws Exception {
+			verifyIsStarted();
+			storedJobs.remove(jobId);
+		}
+
+		@Override
+		public void releaseJobGraph(JobID jobId) {
+			verifyIsStarted();
+		}
+
+		@Override
+		public synchronized Collection<JobID> getJobIds() throws Exception {
+			verifyIsStarted();
+
+			if (jobIdsFunction != null) {
+				return jobIdsFunction.apply(storedJobs.keySet());
+			} else {
+				return Collections.unmodifiableSet(new HashSet<>(storedJobs.keySet()));
+			}
+		}
+
+		public synchronized boolean contains(JobID jobId) {
+			verifyIsStarted();
+			return storedJobs.containsKey(jobId);
+		}
+
+		private void verifyIsStarted() {
+			Preconditions.checkState(started, "Not running. Forgot to call start()?");
+		}
+	}
+
 }
