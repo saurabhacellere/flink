@@ -22,7 +22,6 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.types.logical.AnyType;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BinaryType;
@@ -40,6 +39,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.MapType;
 import org.apache.flink.table.types.logical.MultisetType;
 import org.apache.flink.table.types.logical.NullType;
+import org.apache.flink.table.types.logical.RawType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.SmallIntType;
 import org.apache.flink.table.types.logical.TimeType;
@@ -91,7 +91,7 @@ public final class LogicalTypeParser {
 	 * Parses a type string. All types will be fully resolved except for {@link UnresolvedUserDefinedType}s.
 	 *
 	 * @param typeString a string like "ROW(field1 INT, field2 BOOLEAN)"
-	 * @param classLoader class loader for loading classes of the ANY type
+	 * @param classLoader class loader for loading classes of the RAW type
 	 * @throws ValidationException in case of parsing errors.
 	 */
 	public static LogicalType parse(String typeString, ClassLoader classLoader) {
@@ -299,7 +299,7 @@ public final class LogicalTypeParser {
 		MAP,
 		ROW,
 		NULL,
-		ANY,
+		RAW,
 		NOT
 	}
 
@@ -536,8 +536,8 @@ public final class LogicalTypeParser {
 					return parseRowType();
 				case NULL:
 					return new NullType();
-				case ANY:
-					return parseAnyType();
+				case RAW:
+					return parseRawType();
 				default:
 					throw parsingError("Unsupported type: " + token().value);
 			}
@@ -872,7 +872,7 @@ public final class LogicalTypeParser {
 		}
 
 		@SuppressWarnings("unchecked")
-		private LogicalType parseAnyType() {
+		private LogicalType parseRawType() {
 			nextToken(TokenType.BEGIN_PARAMETER);
 			nextToken(TokenType.LITERAL_STRING);
 			final String className = tokenAsString();
@@ -889,10 +889,10 @@ public final class LogicalTypeParser {
 				final TypeSerializerSnapshot<?> snapshot = TypeSerializerSnapshot.readVersionedSnapshot(
 					inputDeserializer,
 					classLoader);
-				return new AnyType(clazz, snapshot.restoreSerializer());
+				return new RawType(clazz, snapshot.restoreSerializer());
 			} catch (Throwable t) {
 				throw parsingError(
-					"Unable to restore the ANY type of class '" + className + "' with " +
+					"Unable to restore the RAW type of class '" + className + "' with " +
 						"serializer snapshot '" + serializer + "'.", t);
 			}
 		}
