@@ -54,6 +54,8 @@ public class Bucket<IN, BucketID> {
 
 	private static final Logger LOG = LoggerFactory.getLogger(Bucket.class);
 
+	private static final String PART_PREFIX = "part";
+
 	private final BucketID bucketId;
 
 	private final Path bucketPath;
@@ -69,8 +71,6 @@ public class Bucket<IN, BucketID> {
 	private final NavigableMap<Long, ResumeRecoverable> resumablesPerCheckpoint;
 
 	private final NavigableMap<Long, List<CommitRecoverable>> pendingPartsPerCheckpoint;
-
-	private final OutputFileConfig outputFileConfig;
 
 	private long partCounter;
 
@@ -89,8 +89,8 @@ public class Bucket<IN, BucketID> {
 			final Path bucketPath,
 			final long initialPartCounter,
 			final PartFileWriter.PartFileFactory<IN, BucketID> partFileFactory,
-			final RollingPolicy<IN, BucketID> rollingPolicy,
-			final OutputFileConfig outputFileConfig) {
+			final RollingPolicy<IN, BucketID> rollingPolicy) {
+
 		this.fsWriter = checkNotNull(fsWriter);
 		this.subtaskIndex = subtaskIndex;
 		this.bucketId = checkNotNull(bucketId);
@@ -102,8 +102,6 @@ public class Bucket<IN, BucketID> {
 		this.pendingPartsForCurrentCheckpoint = new ArrayList<>();
 		this.pendingPartsPerCheckpoint = new TreeMap<>();
 		this.resumablesPerCheckpoint = new TreeMap<>();
-
-		this.outputFileConfig = checkNotNull(outputFileConfig);
 	}
 
 	/**
@@ -115,8 +113,7 @@ public class Bucket<IN, BucketID> {
 			final long initialPartCounter,
 			final PartFileWriter.PartFileFactory<IN, BucketID> partFileFactory,
 			final RollingPolicy<IN, BucketID> rollingPolicy,
-			final BucketState<BucketID> bucketState,
-			final OutputFileConfig outputFileConfig) throws IOException {
+			final BucketState<BucketID> bucketState) throws IOException {
 
 		this(
 				fsWriter,
@@ -125,8 +122,7 @@ public class Bucket<IN, BucketID> {
 				bucketState.getBucketPath(),
 				initialPartCounter,
 				partFileFactory,
-				rollingPolicy,
-				outputFileConfig);
+				rollingPolicy);
 
 		restoreInProgressFile(bucketState);
 		commitRecoveredPendingFiles(bucketState);
@@ -149,6 +145,10 @@ public class Bucket<IN, BucketID> {
 			// in-progress part and commit it, as done in the case of pending files.
 
 			fsWriter.recoverForCommit(resumable).commitAfterRecovery();
+		}
+
+		if (fsWriter.requiresCleanupOfRecoverableState()) {
+			fsWriter.cleanupRecoverableState(resumable);
 		}
 	}
 
@@ -209,28 +209,30 @@ public class Bucket<IN, BucketID> {
 						subtaskIndex, bucketId, element);
 			}
 
-			rollPartFile(currentTime);
+			inProgressPart = rollPartFile(currentTime);
 		}
 		inProgressPart.write(element, currentTime);
 	}
 
-	private void rollPartFile(final long currentTime) throws IOException {
+	private PartFileWriter<IN, BucketID> rollPartFile(final long currentTime) throws IOException {
 		closePartFile();
 
 		final Path partFilePath = assembleNewPartPath();
 		final RecoverableFsDataOutputStream stream = fsWriter.open(partFilePath);
-		inProgressPart = partFileFactory.openNew(bucketId, stream, partFilePath, currentTime);
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Subtask {} opening new part file \"{}\" for bucket id={}.",
 					subtaskIndex, partFilePath.getName(), bucketId);
 		}
 
-		partCounter++;
+		return partFileFactory.openNew(bucketId, stream, partFilePath, currentTime);
 	}
 
+	/**
+	 * Constructor a new PartPath and increment the partCounter.
+	 */
 	private Path assembleNewPartPath() {
-		return new Path(bucketPath, outputFileConfig.getPartPrefix() + '-' + subtaskIndex + '-' + partCounter + outputFileConfig.getPartSuffix());
+		return new Path(bucketPath, PART_PREFIX + '-' + subtaskIndex + '-' + partCounter++);
 	}
 
 	private CommitRecoverable closePartFile() throws IOException {
@@ -312,19 +314,12 @@ public class Bucket<IN, BucketID> {
 
 		while (it.hasNext()) {
 			final ResumeRecoverable recoverable = it.next().getValue();
-
-			// this check is redundant, as we only put entries in the resumablesPerCheckpoint map
-			// list when the requiresCleanupOfRecoverableState() returns true, but having it makes
-			// the code more readable.
-
-			if (fsWriter.requiresCleanupOfRecoverableState()) {
-				final boolean successfullyDeleted = fsWriter.cleanupRecoverableState(recoverable);
-
-				if (LOG.isDebugEnabled() && successfullyDeleted) {
-					LOG.debug("Subtask {} successfully deleted incomplete part for bucket id={}.", subtaskIndex, bucketId);
-				}
-			}
+			final boolean successfullyDeleted = fsWriter.cleanupRecoverableState(recoverable);
 			it.remove();
+
+			if (LOG.isDebugEnabled() && successfullyDeleted) {
+				LOG.debug("Subtask {} successfully deleted incomplete part for bucket id={}.", subtaskIndex, bucketId);
+			}
 		}
 	}
 
@@ -369,7 +364,6 @@ public class Bucket<IN, BucketID> {
 	 * @param partFileFactory the {@link PartFileWriter.PartFileFactory} the factory creating part file writers.
 	 * @param <IN> the type of input elements to the sink.
 	 * @param <BucketID> the type of the identifier of the bucket, as returned by the {@link BucketAssigner}
-	 * @param outputFileConfig the part file configuration.
 	 * @return The new Bucket.
 	 */
 	static <IN, BucketID> Bucket<IN, BucketID> getNew(
@@ -379,9 +373,8 @@ public class Bucket<IN, BucketID> {
 			final Path bucketPath,
 			final long initialPartCounter,
 			final PartFileWriter.PartFileFactory<IN, BucketID> partFileFactory,
-			final RollingPolicy<IN, BucketID> rollingPolicy,
-			final OutputFileConfig outputFileConfig) {
-		return new Bucket<>(fsWriter, subtaskIndex, bucketId, bucketPath, initialPartCounter, partFileFactory, rollingPolicy, outputFileConfig);
+			final RollingPolicy<IN, BucketID> rollingPolicy) {
+		return new Bucket<>(fsWriter, subtaskIndex, bucketId, bucketPath, initialPartCounter, partFileFactory, rollingPolicy);
 	}
 
 	/**
@@ -393,7 +386,6 @@ public class Bucket<IN, BucketID> {
 	 * @param bucketState the initial state of the restored bucket.
 	 * @param <IN> the type of input elements to the sink.
 	 * @param <BucketID> the type of the identifier of the bucket, as returned by the {@link BucketAssigner}
-	 * @param outputFileConfig the part file configuration.
 	 * @return The restored Bucket.
 	 */
 	static <IN, BucketID> Bucket<IN, BucketID> restore(
@@ -402,8 +394,7 @@ public class Bucket<IN, BucketID> {
 			final long initialPartCounter,
 			final PartFileWriter.PartFileFactory<IN, BucketID> partFileFactory,
 			final RollingPolicy<IN, BucketID> rollingPolicy,
-			final BucketState<BucketID> bucketState,
-			final OutputFileConfig outputFileConfig) throws IOException {
-		return new Bucket<>(fsWriter, subtaskIndex, initialPartCounter, partFileFactory, rollingPolicy, bucketState, outputFileConfig);
+			final BucketState<BucketID> bucketState) throws IOException {
+		return new Bucket<>(fsWriter, subtaskIndex, initialPartCounter, partFileFactory, rollingPolicy, bucketState);
 	}
 }
