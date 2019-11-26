@@ -19,20 +19,23 @@
 package org.apache.flink.runtime.executiongraph;
 
 import org.apache.flink.api.common.InputDependencyConstraint;
+import org.apache.flink.api.common.JobID;
+import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.concurrent.ComponentMainThreadExecutor;
 import org.apache.flink.runtime.concurrent.ComponentMainThreadExecutorServiceAdapter;
 import org.apache.flink.runtime.execution.ExecutionState;
+import org.apache.flink.runtime.executiongraph.failover.RestartAllStrategy;
 import org.apache.flink.runtime.executiongraph.utils.SimpleSlotProvider;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionID;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
 import org.apache.flink.runtime.jobgraph.DistributionPattern;
-import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobmaster.slotpool.SlotProvider;
 import org.apache.flink.runtime.taskmanager.TaskExecutionState;
+import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Test;
@@ -179,7 +182,7 @@ public class ExecutionVertexInputConstraintTest extends TestLogger {
 		v2.connectNewDataSetAsInput(v1, DistributionPattern.ALL_TO_ALL, ResultPartitionType.BLOCKING);
 		v2.connectNewDataSetAsInput(v3, DistributionPattern.ALL_TO_ALL, ResultPartitionType.BLOCKING);
 
-		final ExecutionGraph eg = createExecutionGraph(Arrays.asList(v1, v2, v3), InputDependencyConstraint.ALL, 3000);
+		final ExecutionGraph eg = createExecutionGraph(Arrays.asList(v1, v3, v2), InputDependencyConstraint.ALL, 3000);
 
 		eg.start(mainThreadExecutor);
 		eg.scheduleForExecution();
@@ -242,19 +245,27 @@ public class ExecutionVertexInputConstraintTest extends TestLogger {
 			InputDependencyConstraint inputDependencyConstraint,
 			int numSlots) throws Exception {
 
+		final JobID jobId = new JobID();
+		final String jobName = "Test Job Sample Name";
+		final SlotProvider slotProvider = new SimpleSlotProvider(jobId, numSlots);
+
 		for (JobVertex vertex : orderedVertices) {
 			vertex.setInputDependencyConstraint(inputDependencyConstraint);
 		}
 
-		final JobGraph jobGraph = new JobGraph(orderedVertices.toArray(new JobVertex[0]));
-		final SlotProvider slotProvider = new SimpleSlotProvider(jobGraph.getJobID(), numSlots);
+		ExecutionGraph eg = new ExecutionGraph(
+			new DummyJobInformation(
+				jobId,
+				jobName),
+			TestingUtils.defaultExecutor(),
+			TestingUtils.defaultExecutor(),
+			AkkaUtils.getDefaultTimeout(),
+			TestRestartStrategy.directExecuting(),
+			new RestartAllStrategy.Factory(),
+			slotProvider);
+		eg.attachJobGraph(orderedVertices);
 
-		return TestingExecutionGraphBuilder
-			.newBuilder()
-			.setJobGraph(jobGraph)
-			.setRestartStrategy(TestRestartStrategy.directExecuting())
-			.setSlotProvider(slotProvider)
-			.build();
+		return eg;
 	}
 
 	private void waitUntilJobRestarted(ExecutionGraph eg) throws Exception {
