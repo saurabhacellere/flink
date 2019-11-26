@@ -19,7 +19,6 @@
 package org.apache.flink.yarn;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.client.deployment.ClusterDeploymentException;
 import org.apache.flink.client.deployment.ClusterSpecification;
@@ -29,6 +28,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.ResourceManagerOptions;
 import org.apache.flink.configuration.RestartStrategyOptions;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobmaster.JobResult;
@@ -301,11 +301,7 @@ public class YARNHighAvailabilityITCase extends YarnTestBase {
 	}
 
 	private JobID submitJob(RestClusterClient<ApplicationId> restClusterClient) throws InterruptedException, java.util.concurrent.ExecutionException {
-		final CompletableFuture<JobSubmissionResult> jobSubmissionResultCompletableFuture =
-			restClusterClient.submitJob(job);
-
-		final JobSubmissionResult jobSubmissionResult = jobSubmissionResultCompletableFuture.get();
-		return jobSubmissionResult.getJobID();
+		return restClusterClient.submitJob(job).thenApply(JobClient::getJobID).get();
 	}
 
 	private void killApplicationMaster(final String processName) throws IOException, InterruptedException {

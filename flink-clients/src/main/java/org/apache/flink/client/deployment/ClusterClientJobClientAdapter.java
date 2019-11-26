@@ -24,14 +24,23 @@ import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.client.JobExecutionException;
+import org.apache.flink.runtime.jobgraph.JobStatus;
 import org.apache.flink.runtime.jobmaster.JobResult;
+import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.ShutdownHookUtil;
+import org.apache.flink.util.OptionalFailure;
+import org.apache.flink.util.function.ThrowingRunnable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
@@ -48,23 +57,44 @@ public class ClusterClientJobClientAdapter<ClusterID> implements JobClient {
 
 	private final JobID jobID;
 
-	private final Thread shutdownHook;
+	private final List<ThrowingRunnable<?>> onCloseActions;
 
-	public ClusterClientJobClientAdapter(final ClusterClient<ClusterID> clusterClient, final JobID jobID, final boolean withShutdownHook) {
+	public ClusterClientJobClientAdapter(
+			final ClusterClient<ClusterID> clusterClient,
+			final JobID jobID) {
 		this.jobID = checkNotNull(jobID);
 		this.clusterClient = checkNotNull(clusterClient);
-
-		if (withShutdownHook) {
-			shutdownHook = ShutdownHookUtil.addShutdownHook(
-					clusterClient::shutDownCluster, clusterClient.getClass().getSimpleName(), LOG);
-		} else {
-			shutdownHook = null;
-		}
+		this.onCloseActions = new ArrayList<>();
 	}
 
 	@Override
 	public JobID getJobID() {
 		return jobID;
+	}
+
+	@Override
+	public CompletableFuture<JobStatus> getJobStatus() {
+		return clusterClient.getJobStatus(jobID);
+	}
+
+	@Override
+	public CompletableFuture<Map<String, OptionalFailure<Object>>> getAccumulators(ClassLoader classLoader) {
+		return clusterClient.getAccumulators(jobID, classLoader);
+	}
+
+	@Override
+	public CompletableFuture<Acknowledge> cancel() {
+		return clusterClient.cancel(jobID);
+	}
+
+	@Override
+	public CompletableFuture<String> stopWithSavepoint(boolean advanceToEndOfEventTime, @Nullable String savepointDirectory) {
+		return clusterClient.stopWithSavepoint(jobID, advanceToEndOfEventTime, savepointDirectory);
+	}
+
+	@Override
+	public CompletableFuture<String> triggerSavepoint(@Nullable String savepointDirectory) {
+		return clusterClient.triggerSavepoint(jobID, savepointDirectory);
 	}
 
 	@Override
@@ -86,11 +116,24 @@ public class ClusterClientJobClientAdapter<ClusterID> implements JobClient {
 		});
 	}
 
+	void addOnCloseActions(Collection<ThrowingRunnable<?>> action) {
+		onCloseActions.addAll(action);
+	}
+
 	@Override
 	public void close() throws Exception {
-		if (shutdownHook != null) {
-			ShutdownHookUtil.removeShutdownHook(shutdownHook, clusterClient.getClass().getSimpleName(), LOG);
+		Throwable throwable = null;
+
+		for (ThrowingRunnable<?> action : onCloseActions) {
+			try {
+				action.run();
+			} catch (Throwable t) {
+				throwable = ExceptionUtils.firstOrSuppressed(t, throwable);
+			}
 		}
-		this.clusterClient.close();
+
+		if (throwable != null) {
+			throw new Exception("Cannot close JobClient properly.", throwable);
+		}
 	}
 }

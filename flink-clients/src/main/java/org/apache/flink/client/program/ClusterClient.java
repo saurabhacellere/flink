@@ -19,8 +19,8 @@
 package org.apache.flink.client.program;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
@@ -94,9 +94,9 @@ public interface ClusterClient<T> extends AutoCloseable {
 	 * Submit the given {@link JobGraph} to the cluster.
 	 *
 	 * @param jobGraph to submit
-	 * @return Future which is completed with the {@link JobSubmissionResult}
+	 * @return a {@link CompletableFuture} of JobClient that can be used to communicate with the job
 	 */
-	CompletableFuture<JobSubmissionResult> submitJob(@Nonnull JobGraph jobGraph);
+	CompletableFuture<? extends JobClient> submitJob(@Nonnull JobGraph jobGraph);
 
 	/**
 	 * Requests the {@link JobStatus} of the job with the given {@link JobID}.
@@ -167,7 +167,6 @@ public interface ClusterClient<T> extends AutoCloseable {
 	 * @param jobId job id
 	 * @param savepointDirectory directory the savepoint should be written to
 	 * @return path future where the savepoint is located
-	 * @throws FlinkException if no connection to the cluster could be established
 	 */
-	CompletableFuture<String> triggerSavepoint(JobID jobId, @Nullable String savepointDirectory) throws FlinkException;
+	CompletableFuture<String> triggerSavepoint(JobID jobId, @Nullable String savepointDirectory);
 }

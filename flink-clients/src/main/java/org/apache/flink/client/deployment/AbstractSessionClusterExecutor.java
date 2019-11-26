@@ -19,7 +19,6 @@
 package org.apache.flink.client.deployment;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.api.dag.Pipeline;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
@@ -29,6 +28,7 @@ import org.apache.flink.runtime.jobgraph.JobGraph;
 
 import javax.annotation.Nonnull;
 
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -50,7 +50,7 @@ public class AbstractSessionClusterExecutor<ClusterID, ClientFactory extends Clu
 	}
 
 	@Override
-	public CompletableFuture<JobClient> execute(@Nonnull final Pipeline pipeline, @Nonnull final Configuration configuration) throws Exception {
+	public CompletableFuture<? extends JobClient> execute(@Nonnull final Pipeline pipeline, @Nonnull final Configuration configuration) throws Exception {
 		final JobGraph jobGraph = ExecutorUtils.getJobGraph(pipeline, configuration);
 
 		try (final ClusterDescriptor<ClusterID> clusterDescriptor = clusterClientFactory.createClusterDescriptor(configuration)) {
@@ -58,10 +58,12 @@ public class AbstractSessionClusterExecutor<ClusterID, ClientFactory extends Clu
 			checkState(clusterID != null);
 
 			final ClusterClient<ClusterID> clusterClient = clusterDescriptor.retrieve(clusterID);
-			return clusterClient
-					.submitJob(jobGraph)
-					.thenApply(JobSubmissionResult::getJobID)
-					.thenApply(jobID -> new ClusterClientJobClientAdapter<>(clusterClient, jobID, false));
+			return clusterClient.submitJob(jobGraph).thenApply(jobClient -> {
+				if (jobClient instanceof ClusterClientJobClientAdapter) {
+					((ClusterClientJobClientAdapter<?>) jobClient).addOnCloseActions(Collections.singleton(clusterClient::close));
+				}
+				return jobClient;
+			});
 		}
 	}
 }

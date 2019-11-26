@@ -18,11 +18,11 @@
 
 package org.apache.flink.test.runtime;
 
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.client.program.MiniClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.NettyShuffleEnvironmentOptions;
 import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.network.api.reader.RecordReader;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
@@ -35,7 +35,6 @@ import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.ScheduleMode;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup;
-import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.minicluster.MiniClusterConfiguration;
 import org.apache.flink.testutils.junit.category.AlsoRunWithSchedulerNG;
@@ -99,14 +98,10 @@ public class FileBufferReaderITCase extends TestLogger {
 
 			final MiniClusterClient client = new MiniClusterClient(configuration, miniCluster);
 			final JobGraph jobGraph = createJobGraph();
-			final CompletableFuture<JobSubmissionResult> submitFuture = client.submitJob(jobGraph);
+			final CompletableFuture<? extends JobClient> jobClientFuture = client.submitJob(jobGraph);
 			// wait for the submission to succeed
-			final JobSubmissionResult result = submitFuture.get();
-
-			final CompletableFuture<JobResult> resultFuture = client.requestJobResult(result.getJobID());
-			final JobResult jobResult = resultFuture.get();
-
-			assertThat(jobResult.getSerializedThrowable().isPresent(), is(false));
+			final JobClient jobClient = jobClientFuture.get();
+			jobClient.getJobExecutionResult(ClassLoader.getSystemClassLoader());
 		}
 	}
 
