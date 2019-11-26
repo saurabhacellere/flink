@@ -18,7 +18,7 @@
 package org.apache.flink.cep.scala.pattern
 
 import org.apache.flink.cep
-import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy
+import org.apache.flink.cep.nfa.AfterMatchSkipStrategy
 import org.apache.flink.cep.pattern.conditions.IterativeCondition.{Context => JContext}
 import org.apache.flink.cep.pattern.conditions.{IterativeCondition, SimpleCondition}
 import org.apache.flink.cep.pattern.{MalformedPatternException, Quantifier, Pattern => JPattern}
@@ -322,6 +322,17 @@ class Pattern[T , F <: T](jPattern: JPattern[T, F]) {
     Pattern[T, T](jPattern.followedByAny(name))
   }
 
+  /**
+    * Appends a new pattern to the existing one. This pattern describes a situation
+    * that the match will reach the {@link org.apache.flink.cep.nfa.State.StateType#Final}
+    * with the time (processing or event) fulfills the condition bounded.
+    *
+    * @param name Name of the new pattern
+    * @return A new pattern which is appended to this one
+    */
+  def timeEnd(name: String): Pattern[T, T] = {
+    Pattern[T, T](jPattern.timeEnd(name))
+  }
 
   /**
     * Specifies that this pattern is optional for a final match of the pattern

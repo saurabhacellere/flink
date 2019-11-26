@@ -19,42 +19,42 @@
 package org.apache.flink.cep.nfa;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.functions.RuntimeContext;
-import org.apache.flink.api.common.functions.util.FunctionUtils;
+import org.apache.flink.api.common.typeutils.CompatibilityResult;
+import org.apache.flink.api.common.typeutils.CompatibilityUtil;
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerConfigSnapshot;
-import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot;
-import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil;
+import org.apache.flink.api.common.typeutils.TypeDeserializerAdapter;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
+import org.apache.flink.api.common.typeutils.TypeSerializerConfigSnapshot;
+import org.apache.flink.api.common.typeutils.UnloadableDummyTypeSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
 import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.nfa.sharedbuffer.EventId;
 import org.apache.flink.cep.nfa.sharedbuffer.NodeId;
 import org.apache.flink.cep.nfa.sharedbuffer.SharedBuffer;
-import org.apache.flink.cep.nfa.sharedbuffer.SharedBufferAccessor;
+import org.apache.flink.cep.operator.AbstractKeyedCEPPatternOperator;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
-import org.apache.flink.cep.time.TimerService;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.Set;
 import java.util.Stack;
 
 import static org.apache.flink.cep.nfa.MigrationUtils.deserializeComputationStates;
@@ -62,7 +62,7 @@ import static org.apache.flink.cep.nfa.MigrationUtils.deserializeComputationStat
 /**
  * Non-deterministic finite automaton implementation.
  *
- * <p>The {@link org.apache.flink.cep.operator.CepOperator CEP operator}
+ * <p>The {@link AbstractKeyedCEPPatternOperator CEP operator}
  * keeps one NFA per key, for keyed input streams, and a single global NFA for non-keyed ones.
  * When an event gets processed, it updates the NFA's internal state machine.
  *
@@ -171,31 +171,28 @@ public class NFA<T> {
 	}
 
 	/**
-	 * Initialization method for the NFA. It is called before any element is passed and thus suitable for one time setup
-	 * work.
-	 * @param cepRuntimeContext runtime context of the enclosing operator
-	 * @param conf The configuration containing the parameters attached to the contract.
+	 * Processes the next input event. If some of the computations reach a final state then the
+	 * resulting event sequences are returned. If computations time out and timeout handling is
+	 * activated, then the timed out event patterns are returned.
+	 *
+	 * <p>If computations reach a stop state, the path forward is discarded and currently constructed path is returned
+	 * with the element that resulted in the stop state.
+	 *
+	 * @param sharedBuffer the SharedBuffer object that we need to work upon while processing
+	 * @param nfaState The NFAState object that we need to affect while processing
+	 * @param event The current event to be processed or null if only pruning shall be done
+	 * @param timestamp The timestamp of the current event
+	 * @return Tuple of the collection of matched patterns (e.g. the result of computations which have
+	 * reached a final state) and the collection of timed out patterns (if timeout handling is
+	 * activated)
+	 * @throws Exception Thrown if the system cannot access the state.
 	 */
-	public void open(RuntimeContext cepRuntimeContext, Configuration conf) throws Exception {
-		for (State<T> state : getStates()) {
-			for (StateTransition<T> transition : state.getStateTransitions()) {
-				IterativeCondition condition = transition.getCondition();
-				FunctionUtils.setFunctionRuntimeContext(condition, cepRuntimeContext);
-				FunctionUtils.openFunction(condition, conf);
-			}
-		}
-	}
-
-	/**
-	 * Tear-down method for the NFA.
-	 */
-	public void close() throws Exception {
-		for (State<T> state : getStates()) {
-			for (StateTransition<T> transition : state.getStateTransitions()) {
-				IterativeCondition condition = transition.getCondition();
-				FunctionUtils.closeFunction(condition);
-			}
-		}
+	public Collection<Map<String, List<T>>> process(
+			final SharedBuffer<T> sharedBuffer,
+			final NFAState nfaState,
+			final T event,
+			final long timestamp) throws Exception {
+		return process(sharedBuffer, nfaState, event, timestamp, AfterMatchSkipStrategy.noSkip());
 	}
 
 	/**
@@ -206,26 +203,24 @@ public class NFA<T> {
 	 * <p>If computations reach a stop state, the path forward is discarded and currently constructed path is returned
 	 * with the element that resulted in the stop state.
 	 *
-	 * @param sharedBufferAccessor the accessor to SharedBuffer object that we need to work upon while processing
+	 * @param sharedBuffer the SharedBuffer object that we need to work upon while processing
 	 * @param nfaState The NFAState object that we need to affect while processing
 	 * @param event The current event to be processed or null if only pruning shall be done
 	 * @param timestamp The timestamp of the current event
 	 * @param afterMatchSkipStrategy The skip strategy to use after per match
-	 * @param timerService gives access to processing time and time characteristic, needed for condition evaluation
 	 * @return Tuple of the collection of matched patterns (e.g. the result of computations which have
 	 * reached a final state) and the collection of timed out patterns (if timeout handling is
 	 * activated)
 	 * @throws Exception Thrown if the system cannot access the state.
 	 */
 	public Collection<Map<String, List<T>>> process(
-			final SharedBufferAccessor<T> sharedBufferAccessor,
+			final SharedBuffer<T> sharedBuffer,
 			final NFAState nfaState,
 			final T event,
 			final long timestamp,
-			final AfterMatchSkipStrategy afterMatchSkipStrategy,
-			final TimerService timerService) throws Exception {
-		try (EventWrapper eventWrapper = new EventWrapper(event, timestamp, sharedBufferAccessor)) {
-			return doProcess(sharedBufferAccessor, nfaState, eventWrapper, afterMatchSkipStrategy, timerService);
+			final AfterMatchSkipStrategy afterMatchSkipStrategy) throws Exception {
+		try (EventWrapper eventWrapper = new EventWrapper(event, timestamp, sharedBuffer)) {
+			return doProcess(sharedBuffer, nfaState, eventWrapper, afterMatchSkipStrategy);
 		}
 	}
 
@@ -233,44 +228,88 @@ public class NFA<T> {
 	 * Prunes states assuming there will be no events with timestamp <b>lower</b> than the given one.
 	 * It clears the sharedBuffer and also emits all timed out partial matches.
 	 *
-	 * @param sharedBufferAccessor the accessor to SharedBuffer object that we need to work upon while processing
+	 * @param sharedBuffer the SharedBuffer object that we need to work upon while processing
 	 * @param nfaState     The NFAState object that we need to affect while processing
 	 * @param timestamp    timestamp that indicates that there will be no more events with lower timestamp
 	 * @return all timed outed partial matches
 	 * @throws Exception Thrown if the system cannot access the state.
 	 */
-	public Collection<Tuple2<Map<String, List<T>>, Long>> advanceTime(
-			final SharedBufferAccessor<T> sharedBufferAccessor,
+	public Tuple2<Collection<Tuple2<Map<String, List<T>>, Long>>, Collection<Map<String, List<T>>>> advanceTime(
+			final SharedBuffer<T> sharedBuffer,
 			final NFAState nfaState,
-			final long timestamp) throws Exception {
+			final long timestamp,
+			final AfterMatchSkipStrategy afterMatchSkipStrategy) throws Exception {
 
+		Queue<ComputationState> computationStates = nfaState.getComputationStates();
 		final Collection<Tuple2<Map<String, List<T>>, Long>> timeoutResult = new ArrayList<>();
-		final PriorityQueue<ComputationState> newPartialMatches = new PriorityQueue<>(NFAState.COMPUTATION_STATE_COMPARATOR);
+		final Collection<Map<String, List<T>>> result = new ArrayList<>();
 
-		for (ComputationState computationState : nfaState.getPartialMatches()) {
+		final int numberComputationStates = computationStates.size();
+
+		for (int i = 0; i < numberComputationStates; i++) {
+			ComputationState computationState = computationStates.poll();
+
 			if (isStateTimedOut(computationState, timestamp)) {
 
 				if (handleTimeout) {
 					// extract the timed out event pattern
-					Map<String, List<T>> timedOutPattern = sharedBufferAccessor.materializeMatch(extractCurrentMatches(
-						sharedBufferAccessor,
-						computationState));
-					timeoutResult.add(Tuple2.of(timedOutPattern, computationState.getStartTimestamp() + windowTime));
+					Map<String, List<T>> timedOutPattern = extractCurrentMatches(sharedBuffer, computationState);
+					timeoutResult.add(Tuple2.of(timedOutPattern, timestamp));
 				}
 
-				sharedBufferAccessor.releaseNode(computationState.getPreviousBufferEntry());
+				sharedBuffer.releaseNode(computationState.getPreviousBufferEntry());
 
 				nfaState.setStateChanged();
 			} else {
-				newPartialMatches.add(computationState);
+				final Collection<ComputationState> newComputationStates = computeNextStates(
+					sharedBuffer,
+					computationState,
+					null,
+					timestamp);
+
+				//delay adding new computation states in case a stop state is reached and we discard the path.
+				final Collection<ComputationState> statesToRetain = new ArrayList<>();
+				boolean isFinaled = false;
+				for (final ComputationState newComputationState : newComputationStates) {
+
+					if (isFinalState(newComputationState)) {
+						isFinaled = true;
+						// we've reached a final state and can thus retrieve the matching event sequence
+						Map<String, List<T>> matchedPattern = extractCurrentMatches(sharedBuffer, newComputationState);
+						result.add(matchedPattern);
+
+						// remove found patterns because they are no longer needed
+						sharedBuffer.releaseNode(newComputationState.getPreviousBufferEntry());
+					} else {
+						// add new computation state; it will be processed once the next event arrives
+						statesToRetain.add(newComputationState);
+					}
+				}
+
+				if (!isFinaled && !isStartState(computationState)) {
+					statesToRetain.add(computationState);
+					newComputationStates.add(computationState);
+				} else if (computationState.getPreviousBufferEntry() != null) {
+					// release the shared entry referenced by the current computation state.
+					sharedBuffer.releaseNode(computationState.getPreviousBufferEntry());
+				}
+
+				if (newComputationStates.size() != 1) {
+					nfaState.setStateChanged();
+				} else if (!newComputationStates.iterator().next().equals(computationState)) {
+					nfaState.setStateChanged();
+				}
+
+				computationStates.addAll(statesToRetain);
 			}
-		}
 
-		nfaState.setNewPartialMatches(newPartialMatches);
+			discardComputationStatesAccordingToStrategy(
+				sharedBuffer, computationStates, result, afterMatchSkipStrategy);
+			}
 
-		sharedBufferAccessor.advanceTime(timestamp);
+		sharedBuffer.advanceTime(timestamp);
 
-		return timeoutResult;
+		return Tuple2.of(timeoutResult, result);
 	}
 
 	private boolean isStateTimedOut(final ComputationState state, final long timestamp) {
@@ -278,22 +317,30 @@ public class NFA<T> {
 	}
 
 	private Collection<Map<String, List<T>>> doProcess(
-			final SharedBufferAccessor<T> sharedBufferAccessor,
+			final SharedBuffer<T> sharedBuffer,
 			final NFAState nfaState,
 			final EventWrapper event,
-			final AfterMatchSkipStrategy afterMatchSkipStrategy,
-			final TimerService timerService) throws Exception {
+			final AfterMatchSkipStrategy afterMatchSkipStrategy) throws Exception {
 
-		final PriorityQueue<ComputationState> newPartialMatches = new PriorityQueue<>(NFAState.COMPUTATION_STATE_COMPARATOR);
-		final PriorityQueue<ComputationState> potentialMatches = new PriorityQueue<>(NFAState.COMPUTATION_STATE_COMPARATOR);
+		Queue<ComputationState> computationStates = nfaState.getComputationStates();
+
+		final int numberComputationStates = computationStates.size();
+		final Collection<Map<String, List<T>>> result = new ArrayList<>();
 
 		// iterate over all current computations
-		for (ComputationState computationState : nfaState.getPartialMatches()) {
+		for (int i = 0; i < numberComputationStates; i++) {
+			ComputationState computationState = computationStates.poll();
+
 			final Collection<ComputationState> newComputationStates = computeNextStates(
-				sharedBufferAccessor,
+				sharedBuffer,
 				computationState,
 				event,
-				timerService);
+				event.getTimestamp());
+
+			if (computationState.getPreviousBufferEntry() != null) {
+				// release the shared entry referenced by the current computation state.
+				sharedBuffer.releaseNode(computationState.getPreviousBufferEntry());
+			}
 
 			if (newComputationStates.size() != 1) {
 				nfaState.setStateChanged();
@@ -305,14 +352,20 @@ public class NFA<T> {
 			final Collection<ComputationState> statesToRetain = new ArrayList<>();
 			//if stop state reached in this path
 			boolean shouldDiscardPath = false;
+
 			for (final ComputationState newComputationState : newComputationStates) {
 
 				if (isFinalState(newComputationState)) {
-					potentialMatches.add(newComputationState);
+					// we've reached a final state and can thus retrieve the matching event sequence
+					Map<String, List<T>> matchedPattern = extractCurrentMatches(sharedBuffer, newComputationState);
+					result.add(matchedPattern);
+
+					// remove found patterns because they are no longer needed
+					sharedBuffer.releaseNode(newComputationState.getPreviousBufferEntry());
 				} else if (isStopState(newComputationState)) {
 					//reached stop state. release entry for the stop state
 					shouldDiscardPath = true;
-					sharedBufferAccessor.releaseNode(newComputationState.getPreviousBufferEntry());
+					sharedBuffer.releaseNode(newComputationState.getPreviousBufferEntry());
 				} else {
 					// add new computation state; it will be processed once the next event arrives
 					statesToRetain.add(newComputationState);
@@ -323,88 +376,82 @@ public class NFA<T> {
 				// a stop state was reached in this branch. release branch which results in removing previous event from
 				// the buffer
 				for (final ComputationState state : statesToRetain) {
-					sharedBufferAccessor.releaseNode(state.getPreviousBufferEntry());
+					sharedBuffer.releaseNode(state.getPreviousBufferEntry());
 				}
 			} else {
-				newPartialMatches.addAll(statesToRetain);
+				computationStates.addAll(statesToRetain);
 			}
 		}
 
-		if (!potentialMatches.isEmpty()) {
-			nfaState.setStateChanged();
-		}
-
-		List<Map<String, List<T>>> result = new ArrayList<>();
-		if (afterMatchSkipStrategy.isSkipStrategy()) {
-			processMatchesAccordingToSkipStrategy(sharedBufferAccessor,
-				nfaState,
-				afterMatchSkipStrategy,
-				potentialMatches,
-				newPartialMatches,
-				result);
-		} else {
-			for (ComputationState match : potentialMatches) {
-				Map<String, List<T>> materializedMatch =
-					sharedBufferAccessor.materializeMatch(
-						sharedBufferAccessor.extractPatterns(
-							match.getPreviousBufferEntry(),
-							match.getVersion()).get(0)
-					);
-
-				result.add(materializedMatch);
-				sharedBufferAccessor.releaseNode(match.getPreviousBufferEntry());
-			}
-		}
-
-		nfaState.setNewPartialMatches(newPartialMatches);
+		discardComputationStatesAccordingToStrategy(
+			sharedBuffer, computationStates, result, afterMatchSkipStrategy);
 
 		return result;
 	}
 
-	private void processMatchesAccordingToSkipStrategy(
-			SharedBufferAccessor<T> sharedBufferAccessor,
-			NFAState nfaState,
-			AfterMatchSkipStrategy afterMatchSkipStrategy,
-			PriorityQueue<ComputationState> potentialMatches,
-			PriorityQueue<ComputationState> partialMatches,
-			List<Map<String, List<T>>> result) throws Exception {
+	private void discardComputationStatesAccordingToStrategy(
+			final SharedBuffer<T> sharedBuffer,
+			final Queue<ComputationState> computationStates,
+			final Collection<Map<String, List<T>>> matchedResult,
+			final AfterMatchSkipStrategy afterMatchSkipStrategy) throws Exception {
 
-		nfaState.getCompletedMatches().addAll(potentialMatches);
-
-		ComputationState earliestMatch = nfaState.getCompletedMatches().peek();
-
-		if (earliestMatch != null) {
-
-			ComputationState earliestPartialMatch;
-			while (earliestMatch != null && ((earliestPartialMatch = partialMatches.peek()) == null ||
-				isEarlier(earliestMatch, earliestPartialMatch))) {
-
-				nfaState.setStateChanged();
-				nfaState.getCompletedMatches().poll();
-				List<Map<String, List<EventId>>> matchedResult =
-					sharedBufferAccessor.extractPatterns(earliestMatch.getPreviousBufferEntry(), earliestMatch.getVersion());
-
-				afterMatchSkipStrategy.prune(
-					partialMatches,
-					matchedResult,
-					sharedBufferAccessor);
-
-				afterMatchSkipStrategy.prune(
-					nfaState.getCompletedMatches(),
-					matchedResult,
-					sharedBufferAccessor);
-
-				result.add(sharedBufferAccessor.materializeMatch(matchedResult.get(0)));
-				sharedBufferAccessor.releaseNode(earliestMatch.getPreviousBufferEntry());
-				earliestMatch = nfaState.getCompletedMatches().peek();
-			}
-
-			nfaState.getPartialMatches().removeIf(pm -> pm.getStartEventID() != null && !partialMatches.contains(pm));
+		Set<T> discardEvents = new HashSet<>();
+		switch(afterMatchSkipStrategy.getStrategy()) {
+			case SKIP_TO_LAST:
+				for (Map<String, List<T>> resultMap: matchedResult) {
+					for (Map.Entry<String, List<T>> keyMatches : resultMap.entrySet()) {
+						if (keyMatches.getKey().equals(afterMatchSkipStrategy.getPatternName())) {
+							discardEvents.addAll(keyMatches.getValue().subList(0, keyMatches.getValue().size() - 1));
+							break;
+						} else {
+							discardEvents.addAll(keyMatches.getValue());
+						}
+					}
+				}
+				break;
+			case SKIP_TO_FIRST:
+				for (Map<String, List<T>> resultMap: matchedResult) {
+					for (Map.Entry<String, List<T>> keyMatches : resultMap.entrySet()) {
+						if (keyMatches.getKey().equals(afterMatchSkipStrategy.getPatternName())) {
+							break;
+						} else {
+							discardEvents.addAll(keyMatches.getValue());
+						}
+					}
+				}
+				break;
+			case SKIP_PAST_LAST_EVENT:
+				for (Map<String, List<T>> resultMap: matchedResult) {
+					for (List<T> eventList: resultMap.values()) {
+						discardEvents.addAll(eventList);
+					}
+				}
+				break;
 		}
-	}
-
-	private boolean isEarlier(ComputationState earliestMatch, ComputationState earliestPartialMatch) {
-		return NFAState.COMPUTATION_STATE_COMPARATOR.compare(earliestMatch, earliestPartialMatch) <= 0;
+		if (!discardEvents.isEmpty()) {
+			List<ComputationState> discardStates = new ArrayList<>();
+			for (ComputationState computationState : computationStates) {
+				boolean discard = false;
+				Map<String, List<T>> partialMatch = extractCurrentMatches(sharedBuffer, computationState);
+				for (List<T> list: partialMatch.values()) {
+					for (T e: list) {
+						if (discardEvents.contains(e)) {
+							// discard the computation state.
+							discard = true;
+							break;
+						}
+					}
+					if (discard) {
+						break;
+					}
+				}
+				if (discard) {
+					sharedBuffer.releaseNode(computationState.getPreviousBufferEntry());
+					discardStates.add(computationState);
+				}
+			}
+			computationStates.removeAll(discardStates);
+		}
 	}
 
 	private static <T> boolean isEquivalentState(final State<T> s1, final State<T> s2) {
@@ -468,19 +515,19 @@ public class NFA<T> {
 
 		private long timestamp;
 
-		private final SharedBufferAccessor<T> sharedBufferAccessor;
+		private final SharedBuffer<T> sharedBuffer;
 
 		private EventId eventId;
 
-		EventWrapper(T event, long timestamp, SharedBufferAccessor<T> sharedBufferAccessor) {
+		EventWrapper(T event, long timestamp, SharedBuffer<T> sharedBuffer) {
 			this.event = event;
 			this.timestamp = timestamp;
-			this.sharedBufferAccessor = sharedBufferAccessor;
+			this.sharedBuffer = sharedBuffer;
 		}
 
 		EventId getEventId() throws Exception {
 			if (eventId == null) {
-				this.eventId = sharedBufferAccessor.registerEvent(event, timestamp);
+				this.eventId = sharedBuffer.registerEvent(event, timestamp);
 			}
 
 			return eventId;
@@ -497,7 +544,7 @@ public class NFA<T> {
 		@Override
 		public void close() throws Exception {
 			if (eventId != null) {
-				sharedBufferAccessor.releaseEvent(eventId);
+				sharedBuffer.releaseEvent(eventId);
 			}
 		}
 	}
@@ -529,26 +576,25 @@ public class NFA<T> {
 	 *     <li>Release the corresponding entries in {@link SharedBuffer}.</li>
 	 *</ol>
 	 *
-	 * @param sharedBufferAccessor The accessor to shared buffer that we need to change
+	 * @param sharedBuffer The shared buffer that we need to change
 	 * @param computationState Current computation state
 	 * @param event Current event which is processed
-	 * @param timerService timer service which provides access to time related features
+	 * @param timestamp Timestamp of the current watermark or current processing time
 	 * @return Collection of computation states which result from the current one
 	 * @throws Exception Thrown if the system cannot access the state.
 	 */
 	private Collection<ComputationState> computeNextStates(
-			final SharedBufferAccessor<T> sharedBufferAccessor,
+			final SharedBuffer<T> sharedBuffer,
 			final ComputationState computationState,
-			final EventWrapper event,
-			final TimerService timerService) throws Exception {
+			@Nullable final EventWrapper event,
+			final long timestamp) throws Exception {
 
-		final ConditionContext context = new ConditionContext(
-			sharedBufferAccessor,
-			computationState,
-			timerService,
-			event.getTimestamp());
-
-		final OutgoingEdges<T> outgoingEdges = createDecisionGraph(context, computationState, event.getEvent());
+		final OutgoingEdges<T> outgoingEdges;
+		if (event != null) {
+			outgoingEdges = createDecisionGraph(sharedBuffer, computationState, event.getEvent(), timestamp);
+		} else {
+			outgoingEdges = createDecisionGraph(sharedBuffer, computationState, null, timestamp);
+		}
 
 		// Create the computing version based on the previously computed edges
 		// We need to defer the creation of computation states until we know how many edges start
@@ -579,13 +625,12 @@ public class NFA<T> {
 						}
 
 						addComputationState(
-							sharedBufferAccessor,
-							resultingComputationStates,
-							edge.getTargetState(),
-							computationState.getPreviousBufferEntry(),
-							version,
-							computationState.getStartTimestamp(),
-							computationState.getStartEventID()
+								sharedBuffer,
+								resultingComputationStates,
+								edge.getTargetState(),
+								computationState.getPreviousBufferEntry(),
+								version,
+								computationState.getStartTimestamp()
 						);
 					}
 				}
@@ -600,42 +645,37 @@ public class NFA<T> {
 					final DeweyNumber nextVersion = new DeweyNumber(currentVersion).addStage();
 					takeBranchesToVisit--;
 
-					final NodeId newEntry = sharedBufferAccessor.put(
+					final NodeId newEntry = sharedBuffer.put(
 						currentState.getName(),
 						event.getEventId(),
 						previousEntry,
 						currentVersion);
 
 					final long startTimestamp;
-					final EventId startEventId;
 					if (isStartState(computationState)) {
-						startTimestamp = event.getTimestamp();
-						startEventId = event.getEventId();
+						startTimestamp = timestamp;
 					} else {
 						startTimestamp = computationState.getStartTimestamp();
-						startEventId = computationState.getStartEventID();
 					}
 
 					addComputationState(
-							sharedBufferAccessor,
+							sharedBuffer,
 							resultingComputationStates,
 							nextState,
 							newEntry,
 							nextVersion,
-							startTimestamp,
-							startEventId);
+							startTimestamp);
 
 					//check if newly created state is optional (have a PROCEED path to Final state)
-					final State<T> finalState = findFinalStateAfterProceed(context, nextState, event.getEvent());
+					final State<T> finalState = findFinalStateAfterProceed(sharedBuffer, nextState, event.getEvent(), computationState, timestamp);
 					if (finalState != null) {
 						addComputationState(
-								sharedBufferAccessor,
+								sharedBuffer,
 								resultingComputationStates,
 								finalState,
 								newEntry,
 								nextVersion,
-								startTimestamp,
-								startEventId);
+								startTimestamp);
 					}
 					break;
 			}
@@ -645,47 +685,43 @@ public class NFA<T> {
 			int totalBranches = calculateIncreasingSelfState(
 					outgoingEdges.getTotalIgnoreBranches(),
 					outgoingEdges.getTotalTakeBranches());
-
 			DeweyNumber startVersion = computationState.getVersion().increase(totalBranches);
 			ComputationState startState = ComputationState.createStartState(computationState.getCurrentStateName(), startVersion);
 			resultingComputationStates.add(startState);
-		}
-
-		if (computationState.getPreviousBufferEntry() != null) {
-			// release the shared entry referenced by the current computation state.
-			sharedBufferAccessor.releaseNode(computationState.getPreviousBufferEntry());
 		}
 
 		return resultingComputationStates;
 	}
 
 	private void addComputationState(
-			SharedBufferAccessor<T> sharedBufferAccessor,
+			SharedBuffer<T> sharedBuffer,
 			List<ComputationState> computationStates,
 			State<T> currentState,
 			NodeId previousEntry,
 			DeweyNumber version,
-			long startTimestamp,
-			EventId startEventId) throws Exception {
+			long startTimestamp) throws Exception {
 		ComputationState computationState = ComputationState.createState(
-				currentState.getName(), previousEntry, version, startTimestamp, startEventId);
+				currentState.getName(), previousEntry, version, startTimestamp);
 		computationStates.add(computationState);
 
-		sharedBufferAccessor.lockNode(previousEntry);
+		sharedBuffer.lockNode(previousEntry);
 	}
 
 	private State<T> findFinalStateAfterProceed(
-			ConditionContext context,
+			SharedBuffer<T> sharedBuffer,
 			State<T> state,
-			T event) {
+			T event,
+			ComputationState computationState,
+			long timestamp) {
 		final Stack<State<T>> statesToCheck = new Stack<>();
 		statesToCheck.push(state);
+
 		try {
 			while (!statesToCheck.isEmpty()) {
 				final State<T> currentState = statesToCheck.pop();
 				for (StateTransition<T> transition : currentState.getStateTransitions()) {
 					if (transition.getAction() == StateTransitionAction.PROCEED &&
-							checkFilterCondition(context, transition.getCondition(), event)) {
+							checkFilterCondition(sharedBuffer, computationState, transition.getCondition(), event, timestamp)) {
 						if (transition.getTargetState().isFinal()) {
 							return transition.getTargetState();
 						} else {
@@ -706,9 +742,10 @@ public class NFA<T> {
 	}
 
 	private OutgoingEdges<T> createDecisionGraph(
-			ConditionContext context,
+			SharedBuffer<T> sharedBuffer,
 			ComputationState computationState,
-			T event) {
+			@Nullable T event,
+			long timestamp) {
 		State<T> state = getState(computationState);
 		final OutgoingEdges<T> outgoingEdges = new OutgoingEdges<>(state);
 
@@ -723,7 +760,24 @@ public class NFA<T> {
 			// check all state transitions for each state
 			for (StateTransition<T> stateTransition : stateTransitions) {
 				try {
-					if (checkFilterCondition(context, stateTransition.getCondition(), event)) {
+					boolean result;
+					if (event == null) {
+						// pick the transition should evaluated by time condition
+						if (stateTransition.getCondition() != null && stateTransition.getSourceState().isTimeEnd() && stateTransition.getCondition().isTimeCondition()){
+							result = checkFilterCondition(sharedBuffer, computationState, stateTransition.getCondition(), null, timestamp);
+						} else {
+							// skip the time bounded condition branch.
+							continue;
+						}
+					} else {
+						if (stateTransition.getCondition() != null && stateTransition.getSourceState().isTimeEnd() && stateTransition.getCondition().isTimeCondition()){
+							// skip the time bounded condition branch.
+							continue;
+						} else {
+							result = checkFilterCondition(sharedBuffer, computationState, stateTransition.getCondition(), event, timestamp);
+						}
+					}
+					if (result) {
 						// filter condition is true
 						switch (stateTransition.getAction()) {
 							case PROCEED:
@@ -746,10 +800,18 @@ public class NFA<T> {
 	}
 
 	private boolean checkFilterCondition(
-			ConditionContext context,
+			SharedBuffer<T> sharedBuffer,
+			ComputationState computationState,
 			IterativeCondition<T> condition,
-			T event) throws Exception {
-		return condition == null || condition.filter(event, context);
+			@Nullable T event,
+			long timestamp) throws Exception {
+		if (condition == null){
+			return true;
+		} else if (condition.isTimeCondition()){
+			return condition.filter(timestamp, new ConditionContext<>(this, sharedBuffer, computationState));
+		} else {
+			return condition.filter(event, new ConditionContext<>(this, sharedBuffer, computationState));
+		}
 	}
 
 	/**
@@ -757,19 +819,19 @@ public class NFA<T> {
 	 * sequence is returned as a map which contains the events and the names of the states to which
 	 * the events were mapped.
 	 *
-	 * @param sharedBufferAccessor The accessor to {@link SharedBuffer} from which to extract the matches
+	 * @param sharedBuffer The {@link SharedBuffer} from which to extract the matches
 	 * @param computationState The end computation state of the extracted event sequences
 	 * @return Collection of event sequences which end in the given computation state
 	 * @throws Exception Thrown if the system cannot access the state.
 	 */
-	private Map<String, List<EventId>> extractCurrentMatches(
-			final SharedBufferAccessor<T> sharedBufferAccessor,
+	private Map<String, List<T>> extractCurrentMatches(
+			final SharedBuffer<T> sharedBuffer,
 			final ComputationState computationState) throws Exception {
 		if (computationState.getPreviousBufferEntry() == null) {
 			return new HashMap<>();
 		}
 
-		List<Map<String, List<EventId>>> paths = sharedBufferAccessor.extractPatterns(
+		List<Map<String, List<T>>> paths = sharedBuffer.extractPatterns(
 				computationState.getPreviousBufferEntry(),
 				computationState.getVersion());
 
@@ -779,17 +841,27 @@ public class NFA<T> {
 		// for a given computation state, we cannot have more than one matching patterns.
 		Preconditions.checkState(paths.size() == 1);
 
-		return paths.get(0);
+		Map<String, List<T>> result = new LinkedHashMap<>();
+		Map<String, List<T>> path = paths.get(0);
+		for (String key: path.keySet()) {
+			List<T> events = path.get(key);
+
+			List<T> values = result.computeIfAbsent(key, k -> new ArrayList<>(events.size()));
+			values.addAll(events);
+		}
+		return result;
 	}
 
 	/**
 	 * The context used when evaluating this computation state.
 	 */
-	private class ConditionContext implements IterativeCondition.Context<T> {
+	private static class ConditionContext<T> implements IterativeCondition.Context<T> {
 
-		private final TimerService timerService;
-
-		private final long eventTimestamp;
+		/**
+		 * A flag indicating if we should recompute the matching pattern, so that
+		 * the {@link IterativeCondition iterative condition} can be evaluated.
+		 */
+		private boolean shouldUpdate;
 
 		/** The current computation state. */
 		private ComputationState computationState;
@@ -801,17 +873,18 @@ public class NFA<T> {
 		 */
 		private Map<String, List<T>> matchedEvents;
 
-		private SharedBufferAccessor<T> sharedBufferAccessor;
+		private NFA<T> nfa;
+
+		private SharedBuffer<T> sharedBuffer;
 
 		ConditionContext(
-				final SharedBufferAccessor<T> sharedBufferAccessor,
-				final ComputationState computationState,
-				final TimerService timerService,
-				final long eventTimestamp) {
+				final NFA<T> nfa,
+				final SharedBuffer<T> sharedBuffer,
+				final ComputationState computationState) {
 			this.computationState = computationState;
-			this.sharedBufferAccessor = sharedBufferAccessor;
-			this.timerService = timerService;
-			this.eventTimestamp = eventTimestamp;
+			this.nfa = nfa;
+			this.sharedBuffer = sharedBuffer;
+			this.shouldUpdate = true;
 		}
 
 		@Override
@@ -821,10 +894,9 @@ public class NFA<T> {
 			// the (partially) matched pattern is computed lazily when this method is called.
 			// this is to avoid any overheads when using a simple, non-iterative condition.
 
-			if (matchedEvents == null) {
-				this.matchedEvents = sharedBufferAccessor.materializeMatch(extractCurrentMatches(
-					sharedBufferAccessor,
-					computationState));
+			if (shouldUpdate) {
+				this.matchedEvents = nfa.extractCurrentMatches(sharedBuffer, computationState);
+				shouldUpdate = false;
 			}
 
 			return new Iterable<T>() {
@@ -836,16 +908,6 @@ public class NFA<T> {
 						: elements.iterator();
 				}
 			};
-		}
-
-		@Override
-		public long timestamp() {
-			return eventTimestamp;
-		}
-
-		@Override
-		public long currentProcessingTime() {
-			return timerService.currentProcessingTime();
 		}
 	}
 
@@ -876,11 +938,10 @@ public class NFA<T> {
 	}
 
 	/**
-	 * @deprecated This snapshot class is no longer in use, and only maintained for backwards compatibility
-	 *             purposes. It is fully replaced by {@link MigratedNFASerializerSnapshot}.
+	 * The {@link TypeSerializerConfigSnapshot} serializer configuration to be stored with the managed state.
 	 */
 	@Deprecated
-	public static final class NFASerializerConfigSnapshot<T> extends CompositeTypeSerializerConfigSnapshot<MigratedNFA<T>> {
+	public static final class NFASerializerConfigSnapshot<T> extends CompositeTypeSerializerConfigSnapshot {
 
 		private static final int VERSION = 1;
 
@@ -897,53 +958,6 @@ public class NFA<T> {
 		@Override
 		public int getVersion() {
 			return VERSION;
-		}
-
-		@Override
-		public TypeSerializerSchemaCompatibility<MigratedNFA<T>> resolveSchemaCompatibility(TypeSerializer<MigratedNFA<T>> newSerializer) {
-			return CompositeTypeSerializerUtil.delegateCompatibilityCheckToNewSnapshot(
-				newSerializer,
-				new MigratedNFASerializerSnapshot<>(),
-				getNestedSerializerSnapshots());
-		}
-	}
-
-	/**
-	 * A {@link TypeSerializerSnapshot} for the legacy {@link NFASerializer}.
-	 */
-	@SuppressWarnings("deprecation")
-	public static final class MigratedNFASerializerSnapshot<T> extends CompositeTypeSerializerSnapshot<MigratedNFA<T>, NFASerializer<T>> {
-
-		private static final int VERSION = 2;
-
-		public MigratedNFASerializerSnapshot() {
-			super(NFASerializer.class);
-		}
-
-		MigratedNFASerializerSnapshot(NFASerializer<T> legacyNfaSerializer) {
-			super(legacyNfaSerializer);
-		}
-
-		@Override
-		protected int getCurrentOuterSnapshotVersion() {
-			return VERSION;
-		}
-
-		@Override
-		protected TypeSerializer<?>[] getNestedSerializers(NFASerializer<T> outerSerializer) {
-			return new TypeSerializer<?>[]{ outerSerializer.eventSerializer, outerSerializer.sharedBufferSerializer };
-		}
-
-		@Override
-		protected NFASerializer<T> createOuterSerializerWithNestedSerializers(TypeSerializer<?>[] nestedSerializers) {
-			@SuppressWarnings("unchecked")
-			TypeSerializer<T> eventSerializer = (TypeSerializer<T>) nestedSerializers[0];
-
-			@SuppressWarnings("unchecked")
-			TypeSerializer<org.apache.flink.cep.nfa.SharedBuffer<T>> sharedBufferSerializer =
-				(TypeSerializer<org.apache.flink.cep.nfa.SharedBuffer<T>>) nestedSerializers[1];
-
-			return new NFASerializer<>(eventSerializer, sharedBufferSerializer);
 		}
 	}
 
@@ -1041,13 +1055,53 @@ public class NFA<T> {
 		}
 
 		@Override
+		public boolean canEqual(Object obj) {
+			return true;
+		}
+
+		@Override
 		public int hashCode() {
 			return 37 * sharedBufferSerializer.hashCode() + eventSerializer.hashCode();
 		}
 
 		@Override
-		public MigratedNFASerializerSnapshot<T> snapshotConfiguration() {
-			return new MigratedNFASerializerSnapshot<>(this);
+		public TypeSerializerConfigSnapshot snapshotConfiguration() {
+			return new NFASerializerConfigSnapshot<>(eventSerializer, sharedBufferSerializer);
+		}
+
+		@Override
+		public CompatibilityResult<MigratedNFA<T>> ensureCompatibility(TypeSerializerConfigSnapshot configSnapshot) {
+			if (configSnapshot instanceof NFASerializerConfigSnapshot) {
+				List<Tuple2<TypeSerializer<?>, TypeSerializerConfigSnapshot>> serializersAndConfigs =
+					((NFASerializerConfigSnapshot) configSnapshot).getNestedSerializersAndConfigs();
+
+				CompatibilityResult<T> eventCompatResult = CompatibilityUtil.resolveCompatibilityResult(
+					serializersAndConfigs.get(0).f0,
+					UnloadableDummyTypeSerializer.class,
+					serializersAndConfigs.get(0).f1,
+					eventSerializer);
+
+				CompatibilityResult<org.apache.flink.cep.nfa.SharedBuffer<T>> sharedBufCompatResult =
+					CompatibilityUtil.resolveCompatibilityResult(
+						serializersAndConfigs.get(1).f0,
+						UnloadableDummyTypeSerializer.class,
+						serializersAndConfigs.get(1).f1,
+						sharedBufferSerializer);
+
+				if (!sharedBufCompatResult.isRequiresMigration() && !eventCompatResult.isRequiresMigration()) {
+					return CompatibilityResult.compatible();
+				} else {
+					if (eventCompatResult.getConvertDeserializer() != null &&
+						sharedBufCompatResult.getConvertDeserializer() != null) {
+						return CompatibilityResult.requiresMigration(
+							new NFASerializer<>(
+								new TypeDeserializerAdapter<>(eventCompatResult.getConvertDeserializer()),
+								new TypeDeserializerAdapter<>(sharedBufCompatResult.getConvertDeserializer())));
+					}
+				}
+			}
+
+			return CompatibilityResult.requiresMigration();
 		}
 	}
 }
