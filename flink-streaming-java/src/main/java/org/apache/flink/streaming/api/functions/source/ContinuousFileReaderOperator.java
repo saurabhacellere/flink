@@ -14,54 +14,59 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.flink.streaming.api.functions.source;
 
+import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkState;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.io.CheckpointableInputFormat;
 import org.apache.flink.api.common.io.FileInputFormat;
 import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FSDataInputStream;
+import org.apache.flink.core.fs.FileInputSplit;
+import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.CheckpointedRestoringOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OutputTypeConfigurable;
 import org.apache.flink.streaming.api.operators.StreamSourceContexts;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-
+import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.PriorityQueue;
-import java.util.Queue;
-
-import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkState;
 
 /**
  * The operator that reads the {@link TimestampedFileInputSplit splits} received from the preceding
  * {@link ContinuousFileMonitoringFunction}. Contrary to the {@link ContinuousFileMonitoringFunction}
  * which has a parallelism of 1, this operator can have DOP > 1.
- *
- * <p>As soon as a split descriptor is received, it is put in a queue, and have another
+ * <p/>
+ * As soon as a split descriptor is received, it is put in a queue, and have another
  * thread read the actual data of the split. This architecture allows the separation of the
  * reading thread from the one emitting the checkpoint barriers, thus removing any potential
  * back-pressure.
  */
 @Internal
 public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OUT>
-	implements OneInputStreamOperator<TimestampedFileInputSplit, OUT>, OutputTypeConfigurable<OUT> {
+	implements OneInputStreamOperator<TimestampedFileInputSplit, OUT>, OutputTypeConfigurable<OUT>, CheckpointedRestoringOperator {
 
 	private static final long serialVersionUID = 1L;
 
@@ -69,6 +74,9 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 
 	private FileInputFormat<OUT> format;
 	private TypeSerializer<OUT> serializer;
+
+	private ListStateDescriptor<TimestampedFileInputSplit> timestampedFileInputSplitDescriptor =
+					new ListStateDescriptor<>("splits", TimestampedFileInputSplit.class);
 
 	private transient Object checkpointLock;
 
@@ -93,7 +101,7 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 
 		checkState(checkpointedState == null,	"The reader state has already been initialized.");
 
-		checkpointedState = context.getOperatorStateStore().getSerializableListState("splits");
+		checkpointedState = context.getOperatorStateStore().getSerializableListState(timestampedFileInputSplitDescriptor.getName());
 
 		int subtaskIdx = getRuntimeContext().getIndexOfThisSubtask();
 		if (context.isRestored()) {
@@ -196,20 +204,11 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 	public void close() throws Exception {
 		super.close();
 
-		waitSplitReaderFinished();
-
-		output.close();
-	}
-
-	private void waitSplitReaderFinished() throws InterruptedException {
-		// make sure that we hold the checkpointing lock
-		assert Thread.holdsLock(checkpointLock);
-
 		// close the reader to signal that no more splits will come. By doing this,
 		// the reader will exit as soon as it finishes processing the already pending splits.
 		// This method will wait until then. Further cleaning up is handled by the dispose().
 
-		while (reader != null && reader.isAlive() && reader.isRunning()) {
+		if (reader != null && reader.isAlive() && reader.isRunning()) {
 			reader.close();
 			checkpointLock.wait();
 		}
@@ -221,8 +220,8 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 		if (readerContext != null) {
 			readerContext.emitWatermark(Watermark.MAX_WATERMARK);
 			readerContext.close();
-			readerContext = null;
 		}
+		output.close();
 	}
 
 	private class SplitReader<OT> extends Thread {
@@ -423,5 +422,84 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 			LOG.debug("{} (taskIdx={}) checkpointed {} splits: {}.",
 				getClass().getSimpleName(), subtaskIdx, readerState.size(), readerState);
 		}
+	}
+
+	// ------------------------------------------------------------------------
+	//  Restoring / Migrating from an older Flink version.
+	// ------------------------------------------------------------------------
+
+	@Override
+	public void restoreState(FSDataInputStream in) throws Exception {
+
+		LOG.info("{} (taskIdx={}) restoring state from an older Flink version.",
+			getClass().getSimpleName(), getRuntimeContext().getIndexOfThisSubtask());
+
+		// this is just to read the byte indicating if we have udf state or not
+		int hasUdfState = in.read();
+
+		Preconditions.checkArgument(hasUdfState == 0);
+
+		final ObjectInputStream ois = new ObjectInputStream(in);
+		final DataInputViewStreamWrapper div = new DataInputViewStreamWrapper(in);
+
+		// read the split that was being read
+		FileInputSplit currSplit = (FileInputSplit) ois.readObject();
+
+		// read the pending splits list
+		List<FileInputSplit> pendingSplits = new LinkedList<>();
+		int noOfSplits = div.readInt();
+		for (int i = 0; i < noOfSplits; i++) {
+			FileInputSplit split = (FileInputSplit) ois.readObject();
+			pendingSplits.add(split);
+		}
+
+		// read the state of the format
+		Serializable formatState = (Serializable) ois.readObject();
+
+		div.close();
+
+		if (restoredReaderState == null) {
+			restoredReaderState = new ArrayList<>();
+		}
+
+		// we do not know the modification time of the retrieved splits, so we assign them
+		// artificial ones, with the only constraint that they respect the relative order of the
+		// retrieved splits, because modification time is going to be used to sort the splits within
+		// the "pending splits" priority queue.
+
+		long now = getProcessingTimeService().getCurrentProcessingTime();
+		long runningModTime = Math.max(now, noOfSplits + 1);
+
+		TimestampedFileInputSplit currentSplit = createTimestampedFileSplit(currSplit, --runningModTime, formatState);
+		restoredReaderState.add(currentSplit);
+		for (FileInputSplit split : pendingSplits) {
+			TimestampedFileInputSplit timestampedSplit = createTimestampedFileSplit(split, --runningModTime);
+			restoredReaderState.add(timestampedSplit);
+		}
+
+		if (LOG.isDebugEnabled()) {
+			if (LOG.isDebugEnabled()) {
+				LOG.debug("{} (taskIdx={}) restored {} splits from legacy: {}.",
+					getClass().getSimpleName(),
+					getRuntimeContext().getIndexOfThisSubtask(),
+					restoredReaderState.size(),
+					restoredReaderState);
+			}
+		}
+	}
+
+	private TimestampedFileInputSplit createTimestampedFileSplit(FileInputSplit split, long modificationTime) {
+		return createTimestampedFileSplit(split, modificationTime, null);
+	}
+
+	private TimestampedFileInputSplit createTimestampedFileSplit(FileInputSplit split, long modificationTime, Serializable state) {
+		TimestampedFileInputSplit timestampedSplit = new TimestampedFileInputSplit(
+			modificationTime, split.getSplitNumber(), split.getPath(),
+			split.getStart(), split.getLength(), split.getHostnames());
+
+		if (state != null) {
+			timestampedSplit.setSplitState(state);
+		}
+		return timestampedSplit;
 	}
 }
