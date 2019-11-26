@@ -19,7 +19,7 @@
 package org.apache.flink.test.runtime;
 
 import org.apache.flink.api.common.ExecutionConfig;
-import org.apache.flink.api.common.JobSubmissionResult;
+import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.client.program.MiniClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
@@ -34,7 +34,6 @@ import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.ScheduleMode;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup;
-import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.minicluster.MiniClusterConfiguration;
 import org.apache.flink.runtime.testtasks.NoOpInvokable;
@@ -48,11 +47,10 @@ import org.junit.experimental.categories.Category;
 import javax.annotation.Nonnull;
 
 import java.io.IOException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.flink.configuration.JobManagerOptions.EXECUTION_FAILOVER_STRATEGY;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
 /**
@@ -118,16 +116,13 @@ public class SchedulingITCase extends TestLogger {
 			MiniClusterClient miniClusterClient = new MiniClusterClient(configuration, miniCluster);
 
 			JobGraph jobGraph = createJobGraph(slotIdleTimeout << 1, parallelism);
-			CompletableFuture<JobSubmissionResult> submissionFuture = miniClusterClient.submitJob(jobGraph);
 
-			// wait for the submission to succeed
-			JobSubmissionResult jobSubmissionResult = submissionFuture.get();
+			JobExecutionResult jobResult = miniClusterClient
+				.submitJob(jobGraph)
+				.thenCompose(jobClient -> jobClient.getJobExecutionResult(getClass().getClassLoader()))
+				.get();
 
-			CompletableFuture<JobResult> resultFuture = miniClusterClient.requestJobResult(jobSubmissionResult.getJobID());
-
-			JobResult jobResult = resultFuture.get();
-
-			assertThat(jobResult.getSerializedThrowable().isPresent(), is(false));
+			assertThat(jobResult.getJobID(), is(jobGraph.getJobID()));
 		}
 	}
 

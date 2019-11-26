@@ -20,15 +20,16 @@ package org.apache.flink.client.program.rest;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.api.common.accumulators.AccumulatorHelper;
 import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.client.deployment.ClusterClientJobClientAdapter;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.rest.retry.ExponentialWaitStrategy;
 import org.apache.flink.client.program.rest.retry.WaitStrategy;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.client.JobSubmissionException;
@@ -258,14 +259,8 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 			});
 	}
 
-	/**
-	 * Submits the given {@link JobGraph} to the dispatcher.
-	 *
-	 * @param jobGraph to submit
-	 * @return Future which is completed with the submission response
-	 */
 	@Override
-	public CompletableFuture<JobSubmissionResult> submitJob(@Nonnull JobGraph jobGraph) {
+	public CompletableFuture<? extends JobClient> submitJob(@Nonnull JobGraph jobGraph) {
 		CompletableFuture<java.nio.file.Path> jobGraphFileFuture = CompletableFuture.supplyAsync(() -> {
 			try {
 				final java.nio.file.Path jobGraphFile = Files.createTempFile("flink-jobgraph", ".bin");
@@ -323,11 +318,14 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		});
 
 		return submissionFuture
-			.thenApply(
-				(JobSubmitResponseBody jobSubmitResponseBody) -> new JobSubmissionResult(jobGraph.getJobID()))
+			.thenApply(ignore -> new ClusterClientJobClientAdapter<>(this, jobGraph.getJobID()))
 			.exceptionally(
-				(Throwable throwable) -> {
-					throw new CompletionException(new JobSubmissionException(jobGraph.getJobID(), "Failed to submit JobGraph.", ExceptionUtils.stripCompletionException(throwable)));
+				t -> {
+					throw new CompletionException(
+						new JobSubmissionException(
+							jobGraph.getJobID(),
+							"Failed to submit JobGraph.",
+							ExceptionUtils.stripCompletionException(t)));
 				});
 	}
 

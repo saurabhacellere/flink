@@ -19,8 +19,8 @@
 package org.apache.flink.client.program;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
@@ -95,7 +95,7 @@ public class TestingClusterClient<T> implements ClusterClient<T> {
 	}
 
 	@Override
-	public CompletableFuture<JobSubmissionResult> submitJob(@Nonnull JobGraph jobGraph) {
+	public CompletableFuture<? extends JobClient> submitJob(@Nonnull JobGraph jobGraph) {
 		throw new UnsupportedOperationException();
 	}
 

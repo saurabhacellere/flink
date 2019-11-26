@@ -31,10 +31,9 @@ import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.DeploymentOptions;
 import org.apache.flink.core.execution.DetachedJobExecutionResult;
 import org.apache.flink.core.execution.ExecutorServiceLoader;
-import org.apache.flink.runtime.client.JobExecutionException;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.runtime.execution.librarycache.FlinkUserCodeClassLoaders;
 import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.util.ExceptionUtils;
 
 import org.slf4j.Logger;
@@ -45,7 +44,6 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarFile;
 
@@ -105,13 +103,9 @@ public enum ClientUtils {
 			JobGraph jobGraph) throws ProgramInvocationException {
 		checkNotNull(client);
 		checkNotNull(jobGraph);
-		try {
-			return client
-				.submitJob(jobGraph)
-				.thenApply(JobSubmissionResult::getJobID)
-				.thenApply(DetachedJobExecutionResult::new)
-				.get();
-		} catch (InterruptedException | ExecutionException e) {
+		try (JobClient jobClient = client.submitJob(jobGraph).get()){
+			return new DetachedJobExecutionResult(jobClient.getJobID());
+		} catch (Exception e) {
 			ExceptionUtils.checkInterrupted(e);
 			throw new ProgramInvocationException("Could not run job in detached mode.", jobGraph.getJobID(), e);
 		}
@@ -125,23 +119,15 @@ public enum ClientUtils {
 		checkNotNull(jobGraph);
 		checkNotNull(classLoader);
 
-		JobResult jobResult;
-
-		try {
-			jobResult = client
-				.submitJob(jobGraph)
-				.thenApply(JobSubmissionResult::getJobID)
-				.thenCompose(client::requestJobResult)
-				.get();
-		} catch (InterruptedException | ExecutionException e) {
-			ExceptionUtils.checkInterrupted(e);
-			throw new ProgramInvocationException("Could not run job", jobGraph.getJobID(), e);
-		}
-
-		try {
-			return jobResult.toJobExecutionResult(classLoader);
-		} catch (JobExecutionException | IOException | ClassNotFoundException e) {
-			throw new ProgramInvocationException("Job failed", jobGraph.getJobID(), e);
+		try (JobClient jobClient = client.submitJob(jobGraph).join()){
+			return jobClient.getJobExecutionResult(classLoader).join();
+		} catch (Exception e) {
+			Throwable t = ExceptionUtils.stripCompletionException(e);
+			if (t instanceof ProgramInvocationException) {
+				throw (ProgramInvocationException) t;
+			} else {
+				throw new ProgramInvocationException("Unhandled exception in ClientUtils#submitJobAndWaitForResult", t);
+			}
 		}
 	}
 

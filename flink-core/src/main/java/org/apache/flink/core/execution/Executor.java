@@ -41,5 +41,5 @@ public interface Executor {
 	 * @param configuration the {@link Configuration} with the required execution parameters
 	 * @return a {@link CompletableFuture} with the {@link JobClient} corresponding to the pipeline.
 	 */
-	CompletableFuture<JobClient> execute(final Pipeline pipeline, final Configuration configuration) throws Exception;
+	CompletableFuture<? extends JobClient> execute(final Pipeline pipeline, final Configuration configuration) throws Exception;
 }
