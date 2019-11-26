@@ -52,7 +52,7 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     val fieldTypes: Array[TypeInformation[_]] = Array(Types.STRING, Types.SQL_TIMESTAMP, Types.LONG)
     val sink = new MemoryTableSourceSinkUtil.UnsafeMemoryAppendTableSink
 
-    tEnv.registerTableSink("targetTable", sink.configure(fieldNames, fieldTypes))
+    tEnv.registerTableSink("targetTable", fieldNames, fieldTypes, sink)
 
     tEnv.sqlUpdate(
       s"""INSERT INTO targetTable
@@ -64,10 +64,10 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     env.execute()
 
     val expected = Seq(
-      "Hi,1970-01-01 00:00:00.001,1",
-      "Hello,1970-01-01 00:00:00.002,2",
-      "Comment#14,1970-01-01 00:00:00.006,6",
-      "Comment#15,1970-01-01 00:00:00.006,6").mkString("\n")
+      "(Hi,1970-01-01 00:00:00.001,1)",
+      "(Hello,1970-01-01 00:00:00.002,2)",
+      "(Comment#14,1970-01-01 00:00:00.006,6)",
+      "(Comment#15,1970-01-01 00:00:00.006,6)").mkString("\n")
 
     TestBaseUtils.compareResultAsText(MemoryTableSourceSinkUtil.tableData.asJava, expected)
   }
@@ -85,9 +85,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text)
     tEnv.registerTableSink(
       "targetTable",
-      new TestRetractSink().configure(
-        Array("len", "cntid", "sumnum"),
-        Array(Types.INT, Types.LONG, Types.LONG)))
+      Array("len", "cntid", "sumnum"),
+      Array(Types.INT, Types.LONG, Types.LONG),
+      new TestRetractSink)
 
     tEnv.sqlUpdate(
       s"""INSERT INTO targetTable
@@ -101,13 +101,13 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = RowCollector.retractResults(results).sorted
     val expected = List(
-      "2,1,1",
-      "5,1,2",
-      "11,1,2",
-      "25,1,3",
-      "10,7,39",
-      "14,1,3",
-      "9,9,41").sorted
+      "(2,1,1)",
+      "(5,1,2)",
+      "(11,1,2)",
+      "(25,1,3)",
+      "(10,7,39)",
+      "(14,1,3)",
+      "(9,9,41)").sorted
     assertEquals(expected, retracted)
 
   }
@@ -125,10 +125,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text, 'rowtime.rowtime)
     tEnv.registerTableSink(
       "targetTable",
-      new TestRetractSink().configure(
-        Array("wend", "cntid", "sumnum"),
-        Array(Types.SQL_TIMESTAMP, Types.LONG, Types.LONG)
-      )
+      Array("wend", "cntid", "sumnum"),
+      Array(Types.SQL_TIMESTAMP, Types.LONG, Types.LONG),
+      new TestRetractSink
     )
 
     tEnv.sqlUpdate(
@@ -150,11 +149,11 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = RowCollector.retractResults(results).sorted
     val expected = List(
-      "1970-01-01 00:00:00.005,4,8",
-      "1970-01-01 00:00:00.01,5,18",
-      "1970-01-01 00:00:00.015,5,24",
-      "1970-01-01 00:00:00.02,5,29",
-      "1970-01-01 00:00:00.025,2,12")
+      "(1970-01-01 00:00:00.005,4,8)",
+      "(1970-01-01 00:00:00.01,5,18)",
+      "(1970-01-01 00:00:00.015,5,24)",
+      "(1970-01-01 00:00:00.02,5,29)",
+      "(1970-01-01 00:00:00.025,2,12)")
       .sorted
     assertEquals(expected, retracted)
 
@@ -173,10 +172,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text)
     tEnv.registerTableSink(
       "targetTable",
-      new TestUpsertSink(Array("cnt", "cTrue"), false).configure(
-        Array("cnt", "cntid", "cTrue"),
-        Array(Types.LONG, Types.LONG, Types.BOOLEAN)
-      )
+      Array("cnt", "cntid", "cTrue"),
+      Array(Types.LONG, Types.LONG, Types.BOOLEAN),
+      new TestUpsertSink(Array("cnt", "cTrue"), false)
     )
 
     tEnv.sqlUpdate(
@@ -200,9 +198,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 2)).sorted
     val expected = List(
-      "1,5,true",
-      "7,1,true",
-      "9,1,true").sorted
+      "(1,5,true)",
+      "(7,1,true)",
+      "(9,1,true)").sorted
     assertEquals(expected, retracted)
 
   }
@@ -220,10 +218,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text, 'rowtime.rowtime)
     tEnv.registerTableSink(
       "targetTable",
-      new TestUpsertSink(Array("wend", "num"), true).configure(
-        Array("num", "wend", "cntid"),
-        Array(Types.LONG, Types.SQL_TIMESTAMP, Types.LONG)
-      )
+      Array("num", "wend", "cntid"),
+      Array(Types.LONG, Types.SQL_TIMESTAMP, Types.LONG),
+      new TestUpsertSink(Array("wend", "num"), true)
     )
 
     tEnv.sqlUpdate(
@@ -245,16 +242,16 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 1)).sorted
     val expected = List(
-      "1,1970-01-01 00:00:00.005,1",
-      "2,1970-01-01 00:00:00.005,2",
-      "3,1970-01-01 00:00:00.005,1",
-      "3,1970-01-01 00:00:00.01,2",
-      "4,1970-01-01 00:00:00.01,3",
-      "4,1970-01-01 00:00:00.015,1",
-      "5,1970-01-01 00:00:00.015,4",
-      "5,1970-01-01 00:00:00.02,1",
-      "6,1970-01-01 00:00:00.02,4",
-      "6,1970-01-01 00:00:00.025,2").sorted
+      "(1,1970-01-01 00:00:00.005,1)",
+      "(2,1970-01-01 00:00:00.005,2)",
+      "(3,1970-01-01 00:00:00.005,1)",
+      "(3,1970-01-01 00:00:00.01,2)",
+      "(4,1970-01-01 00:00:00.01,3)",
+      "(4,1970-01-01 00:00:00.015,1)",
+      "(5,1970-01-01 00:00:00.015,4)",
+      "(5,1970-01-01 00:00:00.02,1)",
+      "(6,1970-01-01 00:00:00.02,4)",
+      "(6,1970-01-01 00:00:00.025,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -271,10 +268,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text, 'rowtime.rowtime)
     tEnv.registerTableSink(
       "targetTable",
-      new TestUpsertSink(Array("wstart", "wend", "num"), true).configure(
-        Array("wstart", "wend", "num", "cntid"),
-        Array(Types.SQL_TIMESTAMP, Types.SQL_TIMESTAMP, Types.LONG, Types.LONG)
-      )
+      Array("wstart", "wend", "num", "cntid"),
+      Array(Types.SQL_TIMESTAMP, Types.SQL_TIMESTAMP, Types.LONG, Types.LONG),
+      new TestUpsertSink(Array("wstart", "wend", "num"), true)
     )
 
     tEnv.sqlUpdate(
@@ -297,16 +293,16 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = RowCollector.upsertResults(results, Array(0, 1, 2)).sorted
     val expected = List(
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,1,1",
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,2,2",
-      "1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,3,1",
-      "1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,3,2",
-      "1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,4,3",
-      "1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,4,1",
-      "1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,5,4",
-      "1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,5,1",
-      "1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,6,4",
-      "1970-01-01 00:00:00.02,1970-01-01 00:00:00.025,6,2").sorted
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,1,1)",
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,2,2)",
+      "(1970-01-01 00:00:00.0,1970-01-01 00:00:00.005,3,1)",
+      "(1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,3,2)",
+      "(1970-01-01 00:00:00.005,1970-01-01 00:00:00.01,4,3)",
+      "(1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,4,1)",
+      "(1970-01-01 00:00:00.01,1970-01-01 00:00:00.015,5,4)",
+      "(1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,5,1)",
+      "(1970-01-01 00:00:00.015,1970-01-01 00:00:00.02,6,4)",
+      "(1970-01-01 00:00:00.02,1970-01-01 00:00:00.025,6,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -323,10 +319,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text, 'rowtime.rowtime)
     tEnv.registerTableSink(
       "targetTable",
-      new TestUpsertSink(null, true).configure(
-        Array("wend", "cntid"),
-        Array(Types.SQL_TIMESTAMP, Types.LONG)
-      )
+      Array("wend", "cntid"),
+      Array(Types.SQL_TIMESTAMP, Types.LONG),
+      new TestUpsertSink(null, true)
     )
 
     tEnv.sqlUpdate(
@@ -347,16 +342,16 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = results.map(_.f1.toString).sorted
     val expected = List(
-      "1970-01-01 00:00:00.005,1",
-      "1970-01-01 00:00:00.005,2",
-      "1970-01-01 00:00:00.005,1",
-      "1970-01-01 00:00:00.01,2",
-      "1970-01-01 00:00:00.01,3",
-      "1970-01-01 00:00:00.015,1",
-      "1970-01-01 00:00:00.015,4",
-      "1970-01-01 00:00:00.02,1",
-      "1970-01-01 00:00:00.02,4",
-      "1970-01-01 00:00:00.025,2").sorted
+      "(1970-01-01 00:00:00.005,1)",
+      "(1970-01-01 00:00:00.005,2)",
+      "(1970-01-01 00:00:00.005,1)",
+      "(1970-01-01 00:00:00.01,2)",
+      "(1970-01-01 00:00:00.01,3)",
+      "(1970-01-01 00:00:00.015,1)",
+      "(1970-01-01 00:00:00.015,4)",
+      "(1970-01-01 00:00:00.02,1)",
+      "(1970-01-01 00:00:00.02,4)",
+      "(1970-01-01 00:00:00.025,2)").sorted
     assertEquals(expected, retracted)
   }
 
@@ -373,10 +368,9 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
     tEnv.registerDataStream("sourceTable", t, 'id, 'num, 'text, 'rowtime.rowtime)
     tEnv.registerTableSink(
       "targetTable",
-      new TestUpsertSink(null, true).configure(
-        Array("num", "cntid"),
-        Array(Types.LONG, Types.LONG)
-      )
+      Array("num", "cntid"),
+      Array(Types.LONG, Types.LONG),
+      new TestUpsertSink(null, true)
     )
 
     tEnv.sqlUpdate(
@@ -397,16 +391,16 @@ class InsertIntoITCase extends StreamingWithStateTestBase {
 
     val retracted = results.map(_.f1.toString).sorted
     val expected = List(
-      "1,1",
-      "2,2",
-      "3,1",
-      "3,2",
-      "4,3",
-      "4,1",
-      "5,4",
-      "5,1",
-      "6,4",
-      "6,2").sorted
+      "(1,1)",
+      "(2,2)",
+      "(3,1)",
+      "(3,2)",
+      "(4,3)",
+      "(4,1)",
+      "(5,4)",
+      "(5,1)",
+      "(6,4)",
+      "(6,2)").sorted
     assertEquals(expected, retracted)
   }
 }

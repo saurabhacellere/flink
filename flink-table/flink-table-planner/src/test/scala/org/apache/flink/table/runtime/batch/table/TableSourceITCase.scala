@@ -27,7 +27,7 @@ import org.apache.flink.api.java.typeutils.{GenericTypeInfo, RowTypeInfo}
 import org.apache.flink.api.java.{DataSet, ExecutionEnvironment => JExecEnv}
 import org.apache.flink.api.scala.ExecutionEnvironment
 import org.apache.flink.table.api.scala._
-import org.apache.flink.table.api.{TableException, TableSchema, Tumble, Types}
+import org.apache.flink.table.api.{TableException, TableSchema, Types}
 import org.apache.flink.table.runtime.utils.TableProgramsTestBase.TableConfigMode
 import org.apache.flink.table.runtime.utils.{CommonTestData, TableProgramsCollectionTestBase}
 import org.apache.flink.table.sources.BatchTableSource
@@ -73,39 +73,6 @@ class TableSourceITCase(
   }
 
   @Test
-  def testBoundedTableSource(): Unit = {
-    val tableName = "MyTable"
-    val env = ExecutionEnvironment.getExecutionEnvironment
-    val tEnv = BatchTableEnvironment.create(env)
-
-    val data = Seq(
-      Row.of("Mary", new JLong(1L), new JInt(10)),
-      Row.of("Bob", new JLong(2L), new JInt(20)),
-      Row.of("Mary", new JLong(2L), new JInt(30)),
-      Row.of("Liz", new JLong(2001L), new JInt(40)))
-
-    val fieldNames = Array("name", "rtime", "amount")
-    val schema = new TableSchema(fieldNames, Array(Types.STRING, Types.LONG(), Types.INT))
-    val rowType = new RowTypeInfo(
-      Array(Types.STRING, Types.LONG, Types.INT).asInstanceOf[Array[TypeInformation[_]]],
-      fieldNames)
-
-    val tableSource = new TestInputFormatTableSource(schema, rowType, data)
-    tEnv.registerTableSource(tableName, tableSource)
-
-    val results = tEnv.scan(tableName)
-      .groupBy('name)
-      .select('name, 'amount.sum)
-      .collect()
-
-    val expected = Seq(
-      "Mary,40",
-      "Bob,20",
-      "Liz,40").mkString("\n")
-    TestBaseUtils.compareResultAsText(results.asJava, expected)
-  }
-
-  @Test
   def testCsvTableSourceWithProjection(): Unit = {
     val csvTable = CommonTestData.getCsvTableSource
 
@@ -121,11 +88,11 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Smith,1,24.6",
-      "Miller,3,15.78",
-      "Smith,4,0.24",
-      "Miller,6,13.56",
-      "Williams,8,4.68").mkString("\n")
+      "(Smith,1,24.6)",
+      "(Miller,3,15.78)",
+      "(Smith,4,0.24)",
+      "(Miller,6,13.56)",
+      "(Williams,8,4.68)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -142,7 +109,7 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "5,Record_5", "6,Record_6", "7,Record_7", "8,Record_8").mkString("\n")
+      "(5,Record_5)", "(6,Record_6)", "(7,Record_7)", "(8,Record_8)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -174,9 +141,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40").mkString("\n")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -209,10 +176,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,10",
-      "Bob,20",
-      "Mary,30",
-      "Liz,40").mkString("\n")
+      "(Mary,10)",
+      "(Bob,20)",
+      "(Mary,30)",
+      "(Liz,40)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -246,9 +213,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40").mkString("\n")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -280,9 +247,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40").mkString("\n")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)").mkString("\n")
   }
 
   @Test
@@ -313,7 +280,7 @@ class TableSourceITCase(
       .sqlQuery(query)
       .collect()
 
-    val expected = Seq(24, 25).mkString("\n")
+    val expected = Seq("(24)", "(25)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -338,9 +305,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.0,3",
-      "1970-01-01 00:00:02.0,1",
-      "1970-01-01 00:00:04.0,1").mkString("\n")
+      "(1970-01-01 00:00:00.0,3)",
+      "(1970-01-01 00:00:02.0,1)",
+      "(1970-01-01 00:00:04.0,1)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -363,7 +330,7 @@ class TableSourceITCase(
       .select('name)
       .collect()
 
-    val expected = Seq("Mary", "Peter", "Bob", "Liz").mkString("\n")
+    val expected = Seq("(Mary)", "(Peter)", "(Bob)", "(Liz)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -391,9 +358,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.0,3",
-      "1970-01-01 00:00:02.0,1",
-      "1970-01-01 00:00:04.0,1").mkString("\n")
+      "(1970-01-01 00:00:00.0,3)",
+      "(1970-01-01 00:00:02.0,1)",
+      "(1970-01-01 00:00:04.0,1)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -425,9 +392,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.0,40",
-      "Bob,1970-01-01 00:00:00.0,20",
-      "Liz,1970-01-01 00:00:02.0,40").mkString("\n")
+      "(Mary,1970-01-01 00:00:00.0,40)",
+      "(Bob,1970-01-01 00:00:00.0,20)",
+      "(Liz,1970-01-01 00:00:02.0,40)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -459,10 +426,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,10,1",
-      "Bob,20,2",
-      "Mike,30,3",
-      "Liz,40,4").mkString("\n")
+      "(Mary,10,1)",
+      "(Bob,20,2)",
+      "(Mike,30,3)",
+      "(Liz,40,4)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -494,10 +461,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.001,Mary,1",
-      "1970-01-01 00:00:00.002,Bob,2",
-      "1970-01-01 00:00:00.002,Mike,3",
-      "1970-01-01 00:00:02.001,Liz,4").mkString("\n")
+      "(1970-01-01 00:00:00.001,Mary,1)",
+      "(1970-01-01 00:00:00.002,Bob,2)",
+      "(1970-01-01 00:00:00.002,Mike,3)",
+      "(1970-01-01 00:00:02.001,Liz,4)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -530,10 +497,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1",
-      "Bob,2",
-      "Mike,3",
-      "Liz,4").mkString("\n")
+      "(Mary,1)",
+      "(Bob,2)",
+      "(Mike,3)",
+      "(Liz,4)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -565,7 +532,7 @@ class TableSourceITCase(
       .select(1.count)
       .collect()
 
-    val expected = Seq("4").mkString("\n")
+    val expected = Seq("(4)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -597,10 +564,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "1970-01-01 00:00:00.001",
-      "1970-01-01 00:00:00.002",
-      "1970-01-01 00:00:00.002",
-      "1970-01-01 00:00:02.001").mkString("\n")
+      "(1970-01-01 00:00:00.001)",
+      "(1970-01-01 00:00:00.002)",
+      "(1970-01-01 00:00:00.002)",
+      "(1970-01-01 00:00:02.001)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -633,10 +600,10 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "Mary,1970-01-01 00:00:00.001,10",
-      "Bob,1970-01-01 00:00:00.002,20",
-      "Mike,1970-01-01 00:00:00.002,30",
-      "Liz,1970-01-01 00:00:02.001,40").mkString("\n")
+      "(Mary,1970-01-01 00:00:00.001,10)",
+      "(Bob,1970-01-01 00:00:00.002,20)",
+      "(Mike,1970-01-01 00:00:00.002,30)",
+      "(Liz,1970-01-01 00:00:02.001,40)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -703,9 +670,9 @@ class TableSourceITCase(
       .collect()
 
     val expected = Seq(
-      "1,Sarah,10000,true,1000",
-      "2,Rob,20000,false,2000",
-      "3,Mike,30000,true,3000").mkString("\n")
+      "(1,Sarah,10000,true,1000)",
+      "(2,Rob,20000,false,2000)",
+      "(3,Mike,30000,true,3000)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -738,7 +705,7 @@ class TableSourceITCase(
       .sqlQuery(query)
       .collect()
 
-    val expected = Seq(2, 3).mkString("\n")
+    val expected = Seq("(2)", "(3)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 
@@ -771,7 +738,7 @@ class TableSourceITCase(
       .sqlQuery(query)
       .collect()
 
-    val expected = Seq(2, 3, 5).mkString("\n")
+    val expected = Seq("(2)", "(3)", "(5)").mkString("\n")
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
 

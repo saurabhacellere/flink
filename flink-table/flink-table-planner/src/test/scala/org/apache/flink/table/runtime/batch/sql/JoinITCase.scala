@@ -18,12 +18,8 @@
 
 package org.apache.flink.table.runtime.batch.sql
 
-import java.util
-
-import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.api.scala.util.CollectionDataSets
-import org.apache.flink.table.api.Types
 import org.apache.flink.table.api.scala._
 import org.apache.flink.table.runtime.utils.TableProgramsCollectionTestBase
 import org.apache.flink.table.runtime.utils.TableProgramsTestBase.TableConfigMode
@@ -54,7 +50,7 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "Hi,Hallo\n" + "Hello,Hallo Welt\n" + "Hello world,Hallo Welt\n"
+    val expected = "(Hi,Hallo)\n" + "(Hello,Hallo Welt)\n" + "(Hello world,Hallo Welt)\n"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -74,7 +70,7 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "Hi,Hallo\n"
+    val expected = "(Hi,Hallo)\n"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -94,7 +90,7 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "Hello world, how are you?,Hallo Welt wie\n" + "I am fine.,Hallo Welt wie\n"
+    val expected = "(Hello world, how are you?,Hallo Welt wie)\n" + "(I am fine.,Hallo Welt wie)\n"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -114,8 +110,9 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "Hi,Hallo\n" + "Hello,Hallo Welt\n" + "Hello world,Hallo Welt wie gehts?\n" +
-      "Hello world,ABC\n" + "I am fine.,HIJ\n" + "I am fine.,IJK\n"
+    val expected = "(Hi,Hallo)\n" + "(Hello,Hallo Welt)\n" +
+      "(Hello world,Hallo Welt wie gehts?)\n" + "(Hello world,ABC)\n" +
+      "(I am fine.,HIJ)\n" + "(I am fine.,IJK)\n"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -136,8 +133,8 @@ class JoinITCase(
     tEnv.registerTable("Table5", ds2)
 
     val result = tEnv.sqlQuery(sqlQuery)
-    val expected = "1,Hi\n" + "2,Hello\n" + "1,Hello\n" +
-      "2,Hello world\n" + "2,Hello world\n" + "3,Hello world\n"
+    val expected = "(1,Hi)\n" + "(2,Hello)\n" + "(1,Hello)\n" +
+      "(2,Hello world)\n" + "(2,Hello world)\n" + "(3,Hello world)\n"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -157,7 +154,7 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "6,6"
+    val expected = "(6,6)"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -177,7 +174,7 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "6,6"
+    val expected = "(6,6)"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -196,10 +193,10 @@ class JoinITCase(
     tEnv.registerTable("Table3", ds1)
     tEnv.registerTable("Table5", ds2)
 
-    val expected = "Hi,Hallo\n" + "Hello,Hallo Welt\n" + "Hello world,Hallo Welt\n" +
-      "null,Hallo Welt wie\n" + "null,Hallo Welt wie gehts?\n" + "null,ABC\n" + "null,BCD\n" +
-      "null,CDE\n" + "null,DEF\n" + "null,EFG\n" + "null,FGH\n" + "null,GHI\n" + "null,HIJ\n" +
-      "null,IJK\n" + "null,JKL\n" + "null,KLM"
+    val expected = "(Hi,Hallo)\n" + "(Hello,Hallo Welt)\n" + "(Hello world,Hallo Welt)\n" +
+      "(null,Hallo Welt wie)\n" + "(null,Hallo Welt wie gehts?)\n" + "(null,ABC)\n" +
+      "(null,BCD)\n" + "(null,CDE)\n" + "(null,DEF)\n" + "(null,EFG)\n" + "(null,FGH)\n" +
+      "(null,GHI)\n" + "(null,HIJ)\n" + "(null,IJK)\n" + "(null,JKL)\n" + "(null,KLM)"
 
     val results = tEnv.sqlQuery(sqlQuery).toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
@@ -219,10 +216,10 @@ class JoinITCase(
     tEnv.registerTable("Table3", ds1)
     tEnv.registerTable("Table5", ds2)
 
-    val expected = "Hi,Hallo\n" + "Hello,Hallo Welt\n" + "Hello world,Hallo Welt\n" +
-      "null,Hallo Welt wie\n" + "null,Hallo Welt wie gehts?\n" + "null,ABC\n" + "null,BCD\n" +
-      "null,CDE\n" + "null,DEF\n" + "null,EFG\n" + "null,FGH\n" + "null,GHI\n" + "null,HIJ\n" +
-      "null,IJK\n" + "null,JKL\n" + "null,KLM"
+    val expected = "(Hi,Hallo)\n" + "(Hello,Hallo Welt)\n" + "(Hello world,Hallo Welt)\n" +
+      "(null,Hallo Welt wie)\n" + "(null,Hallo Welt wie gehts?)\n" + "(null,ABC)\n" +
+      "(null,BCD)\n" + "(null,CDE)\n" + "(null,DEF)\n" + "(null,EFG)\n" + "(null,FGH)\n" +
+      "(null,GHI)\n" + "(null,HIJ)\n" + "(null,IJK)\n" + "(null,JKL)\n" + "(null,KLM)"
     val results = tEnv.sqlQuery(sqlQuery).toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -241,10 +238,10 @@ class JoinITCase(
     tEnv.registerTable("Table3", ds1)
     tEnv.registerTable("Table5", ds2)
 
-    val expected = "Hi,Hallo\n" + "Hello,Hallo Welt\n" + "Hello world,Hallo Welt\n" +
-      "null,Hallo Welt wie\n" + "null,Hallo Welt wie gehts?\n" + "null,ABC\n" + "null,BCD\n" +
-      "null,CDE\n" + "null,DEF\n" + "null,EFG\n" + "null,FGH\n" + "null,GHI\n" + "null,HIJ\n" +
-      "null,IJK\n" + "null,JKL\n" + "null,KLM"
+    val expected = "(Hi,Hallo)\n" + "(Hello,Hallo Welt)\n" + "(Hello world,Hallo Welt)\n" +
+      "(null,Hallo Welt wie)\n" + "(null,Hallo Welt wie gehts?)\n" + "(null,ABC)\n" +
+      "(null,BCD)\n" + "(null,CDE)\n" + "(null,DEF)\n" + "(null,EFG)\n" + "(null,FGH)\n" +
+      "(null,GHI)\n" + "(null,HIJ)\n" + "(null,IJK)\n" + "(null,JKL)\n" + "(null,KLM)"
     val results = tEnv.sqlQuery(sqlQuery).toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -259,9 +256,9 @@ class JoinITCase(
 
     val sqlQuery2 = "SELECT * FROM (SELECT count(*) FROM A) CROSS JOIN A"
     val expected =
-      "3,1,1,Hi\n" +
-      "3,2,2,Hello\n" +
-      "3,3,2,Hello world"
+      "(3,1,1,Hi)\n" +
+      "(3,2,2,Hello)\n" +
+      "(3,3,2,Hello world)"
     val result = tEnv.sqlQuery(sqlQuery2).collect()
     TestBaseUtils.compareResultAsText(result.asJava, expected)
   }
@@ -276,9 +273,9 @@ class JoinITCase(
 
     val sqlQuery1 = "SELECT * FROM A CROSS JOIN (SELECT count(*) FROM A)"
     val expected =
-      "1,1,Hi,3\n" +
-      "2,2,Hello,3\n" +
-      "3,2,Hello world,3"
+      "(1,1,Hi,3)\n" +
+      "(2,2,Hello,3)\n" +
+      "(3,2,Hello world,3)"
     val result = tEnv.sqlQuery(sqlQuery1).collect()
     TestBaseUtils.compareResultAsText(result.asJava, expected)
   }
@@ -312,11 +309,11 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
     val expected = Seq(
-          "1,null",
-          "2,null", "2,null",
-          "3,null", "3,null", "3,null",
-          "4,null", "4,null", "4,null", "4,null",
-          "5,null", "5,null", "5,null", "5,null", "5,null").mkString("\n")
+          "(1,null)",
+          "(2,null)", "(2,null)",
+          "(3,null)", "(3,null)", "(3,null)",
+          "(4,null)", "(4,null)", "(4,null)", "(4,null)",
+          "(5,null)", "(5,null)", "(5,null)", "(5,null)", "(5,null)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -338,10 +335,10 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
     val expected = Seq(
-      "1,null", "2,null", "2,null", "3,3", "3,3",
-      "3,3", "4,null", "4,null", "4,null",
-      "4,null", "5,null", "5,null", "5,null",
-      "5,null", "5,null").mkString("\n")
+      "(1,null)", "(2,null)", "(2,null)", "(3,3)", "(3,3)",
+      "(3,3)", "(4,null)", "(4,null)", "(4,null)",
+      "(4,null)", "(5,null)", "(5,null)", "(5,null)",
+      "(5,null)", "(5,null)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -362,10 +359,10 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
     val expected = Seq(
-      "1,3", "2,3", "2,3", "3,null", "3,null",
-      "3,null", "4,null", "4,null", "4,null",
-      "4,null", "5,null", "5,null", "5,null",
-      "5,null", "5,null").mkString("\n")
+      "(1,3)", "(2,3)", "(2,3)", "(3,null)", "(3,null)",
+      "(3,null)", "(4,null)", "(4,null)", "(4,null)",
+      "(4,null)", "(5,null)", "(5,null)", "(5,null)",
+      "(5,null)", "(5,null)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -388,7 +385,7 @@ class JoinITCase(
     val result = tEnv.sqlQuery(sqlQuery)
 
     val expected = Seq(
-      "2,null", "3,null", "1,null").mkString("\n")
+      "(2,null)", "(3,null)", "(1,null)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -410,10 +407,10 @@ class JoinITCase(
     val result = tEnv.sqlQuery(sqlQuery)
 
     val expected = Seq(
-      "1,null", "2,null", "2,null", "3,3", "3,3",
-      "3,3", "4,null", "4,null", "4,null",
-      "4,null", "5,null", "5,null", "5,null",
-      "5,null", "5,null").mkString("\n")
+      "(1,null)", "(2,null)", "(2,null)", "(3,3)", "(3,3)",
+      "(3,3)", "(4,null)", "(4,null)", "(4,null)",
+      "(4,null)", "(5,null)", "(5,null)", "(5,null)",
+      "(5,null)", "(5,null)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -435,10 +432,10 @@ class JoinITCase(
     val result = tEnv.sqlQuery(sqlQuery)
 
     val expected = Seq(
-      "1,null", "2,null", "2,null", "3,null", "3,null",
-      "3,null", "4,3", "4,3", "4,3",
-      "4,3", "5,3", "5,3", "5,3",
-      "5,3", "5,3").mkString("\n")
+      "(1,null)", "(2,null)", "(2,null)", "(3,null)", "(3,null)",
+      "(3,null)", "(4,3)", "(4,3)", "(4,3)",
+      "(4,3)", "(5,3)", "(5,3)", "(5,3)",
+      "(5,3)", "(5,3)").mkString("\n")
 
     val results = result.toDataSet[Row].collect()
 
@@ -460,11 +457,12 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
     val expected = Seq(
-      "1,null,null",
-      "2,null,null", "2,null,null",
-      "3,3,3", "3,3,3", "3,3,3",
-      "4,null,null", "4,null,null", "4,null,null", "4,null,null",
-      "5,null,null", "5,null,null", "5,null,null", "5,null,null", "5,null,null").mkString("\n")
+      "(1,null,null)",
+      "(2,null,null)", "(2,null,null)",
+      "(3,3,3)", "(3,3,3)", "(3,3,3)",
+      "(4,null,null)", "(4,null,null)", "(4,null,null)", "(4,null,null)",
+      "(5,null,null)", "(5,null,null)", "(5,null,null)", "(5,null,null)", "(5,null,null)")
+      .mkString("\n")
 
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
@@ -488,58 +486,8 @@ class JoinITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = List("1,Hi", "1,w", "2,Hello", "2,k", "3,Hello world", "3,x")
+    val expected = List("(1,Hi)", "(1,w)", "(2,Hello)", "(2,k)", "(3,Hello world)", "(3,x)")
     val results = result.toDataSet[Row].collect().toList
-    assertEquals(expected.toString(), results.sortWith(_.toString < _.toString).toString())
-  }
-
-  @Test
-  def testCrossWithUnnestForMap(): Unit = {
-    val env = ExecutionEnvironment.getExecutionEnvironment
-    val tEnv = BatchTableEnvironment.create(env, config)
-
-    val data = List(
-      Row.of(Int.box(1),
-        Long.box(11L), {
-          val map = new util.HashMap[String, String]()
-          map.put("a", "10")
-          map.put("b", "11")
-          map
-        }),
-      Row.of(Int.box(2),
-        Long.box(22L), {
-          val map = new util.HashMap[String, String]()
-          map.put("c", "20")
-          map
-        }),
-      Row.of(Int.box(3),
-        Long.box(33L), {
-          val map = new util.HashMap[String, String]()
-          map.put("d", "30")
-          map.put("e", "31")
-          map
-        })
-    )
-
-    implicit val typeInfo = Types.ROW(
-      Array[String]("a", "b", "c"),
-      Array[TypeInformation[_]](Types.INT,
-        Types.LONG,
-        Types.MAP(Types.STRING, Types.STRING))
-    )
-    val table = tEnv.fromDataSet(env.fromCollection(data))
-    tEnv.registerTable("src", table)
-
-
-    val sqlQuery =
-      """
-        |SELECT a,b,v FROM src
-        |CROSS JOIN UNNEST(c) as f (k,v)
-      """.stripMargin
-    val result = tEnv.sqlQuery(sqlQuery)
-
-    val expected = List("1,11,10", "1,11,11", "2,22,20", "3,33,30", "3,33,31")
-    val results = result.collect().toList
     assertEquals(expected.toString(), results.sortWith(_.toString < _.toString).toString())
   }
 
@@ -566,9 +514,9 @@ class JoinITCase(
     val result = tEnv.sqlQuery(sqlQuery)
 
     val expected = List(
-      "1,[(12,45.6), (2,45.612)],12,45.6",
-      "1,[(12,45.6), (2,45.612)],2,45.612",
-      "2,[(13,41.6), (1,45.2136)],13,41.6").mkString(", ")
+      "(1,[(12,45.6), (2,45.612)],12,45.6)",
+      "(1,[(12,45.6), (2,45.612)],2,45.612)",
+      "(2,[(13,41.6), (1,45.2136)],13,41.6)").mkString(", ")
     val results = result.toDataSet[Row].collect().map(_.toString)
     assertEquals(expected, results.sorted.mkString(", "))
   }

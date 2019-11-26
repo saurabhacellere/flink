@@ -51,7 +51,7 @@ class TableEnvironmentITCase(
 
     val result = tEnv.sqlQuery(sqlQuery).select('a.avg, 'b.sum, 'c.count)
 
-    val expected = "15,65,12"
+    val expected = "(15,65,12)"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -71,7 +71,7 @@ class TableEnvironmentITCase(
 
     val result = tEnv.sqlQuery(sqlQuery).select('a1 + 1, 'b1 - 5, 'c1)
 
-    val expected = "16,60,12"
+    val expected = "(16,60,12)"
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -92,7 +92,7 @@ class TableEnvironmentITCase(
     val sqlQuery2 = "SELECT count(aa) FROM ResTable"
     val result2 = tEnv.sqlQuery(sqlQuery2)
 
-    val expected = "6"
+    val expected = "(6)"
     val results = result2.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
   }
@@ -109,7 +109,7 @@ class TableEnvironmentITCase(
 
     val result = tEnv.sqlQuery(sqlQuery)
 
-    val expected = "Hello,true\n"
+    val expected = "(Hello,true)\n"
 
     val results = result.toDataSet[Row].collect()
     TestBaseUtils.compareResultAsText(results.asJava, expected)
@@ -127,13 +127,13 @@ class TableEnvironmentITCase(
     val fieldNames = Array("d", "e", "f")
     val fieldTypes = tEnv.scan("sourceTable").getSchema.getFieldTypes
     val sink = new MemoryTableSourceSinkUtil.UnsafeMemoryAppendTableSink
-    tEnv.registerTableSink("targetTable", sink.configure(fieldNames, fieldTypes))
+    tEnv.registerTableSink("targetTable", fieldNames, fieldTypes, sink)
 
     val sql = "INSERT INTO targetTable SELECT a, b, c FROM sourceTable"
     tEnv.sqlUpdate(sql)
     env.execute()
 
-    val expected = List("1,1,Hi", "2,2,Hello", "3,2,Hello world")
+    val expected = List("(1,1,Hi)", "(2,2,Hello)", "(3,2,Hello world)")
     assertEquals(expected.sorted, MemoryTableSourceSinkUtil.tableDataStrings.sorted)
   }
 
