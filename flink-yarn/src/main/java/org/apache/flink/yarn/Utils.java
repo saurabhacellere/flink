@@ -19,12 +19,11 @@
 package org.apache.flink.yarn;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ResourceManagerOptions;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
-import org.apache.flink.runtime.entrypoint.parser.CommandLineOptions;
 import org.apache.flink.runtime.util.HadoopUtils;
+import org.apache.flink.util.FileUtils;
 import org.apache.flink.util.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
@@ -46,14 +45,12 @@ import org.apache.hadoop.yarn.api.records.LocalResource;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
-import org.apache.hadoop.yarn.security.AMRMTokenIdentifier;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -63,8 +60,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
+import java.util.UUID;
 
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_FLINK_CLASSPATH;
 
@@ -76,19 +72,16 @@ public final class Utils {
 	private static final Logger LOG = LoggerFactory.getLogger(Utils.class);
 
 	/** Keytab file name populated in YARN container. */
-	public static final String KEYTAB_FILE_NAME = "krb5.keytab";
+	public static final Boolean DEFAULT_KEYTAB_LOCALIZE_STATE = true;
+
+	/** Keytab file name populated in YARN container. */
+	public static final String DEFAULT_KEYTAB_FILE_NAME = "krb5.keytab";
 
 	/** KRB5 file name populated in YARN container for secure IT run. */
 	public static final String KRB5_FILE_NAME = "krb5.conf";
 
 	/** Yarn site xml file name populated in YARN container for secure IT run. */
 	public static final String YARN_SITE_FILE_NAME = "yarn-site.xml";
-
-	/** Number of total retries to fetch the remote resources after uploaded in case of FileNotFoundException. */
-	public static final int REMOTE_RESOURCES_FETCH_NUM_RETRY = 3;
-
-	/** Time to wait in milliseconds between each remote resources fetch in case of FileNotFoundException. */
-	public static final int REMOTE_RESOURCES_FETCH_WAIT_IN_MILLI = 100;
 
 	/**
 	 * See documentation.
@@ -171,40 +164,15 @@ public final class Utils {
 
 		fs.copyFromLocalFile(false, true, localSrcPath, dst);
 
-		// Note: If we directly used registerLocalResource(FileSystem, Path) here, we would access the remote
+		// Note: If we used registerLocalResource(FileSystem, Path) here, we would access the remote
 		//       file once again which has problems with eventually consistent read-after-write file
-		//       systems. Instead, we decide to wait until the remote file be available.
-
-		FileStatus[] fss = null;
-		int iter = 1;
-		while (iter <= REMOTE_RESOURCES_FETCH_NUM_RETRY + 1) {
-			try {
-				fss = fs.listStatus(dst);
-				break;
-			} catch (FileNotFoundException e) {
-				LOG.debug("Got FileNotFoundException while fetching uploaded remote resources at retry num {}", iter);
-				try {
-					LOG.debug("Sleeping for {}ms", REMOTE_RESOURCES_FETCH_WAIT_IN_MILLI);
-					TimeUnit.MILLISECONDS.sleep(REMOTE_RESOURCES_FETCH_WAIT_IN_MILLI);
-				} catch (InterruptedException ie) {
-					LOG.warn("Failed to sleep for {}ms at retry num {} while fetching uploaded remote resources",
-						REMOTE_RESOURCES_FETCH_WAIT_IN_MILLI, iter, ie);
-				}
-				iter++;
-			}
-		}
-
-		final long dstModificationTime;
-		if (fss != null && fss.length >  0) {
-			dstModificationTime = fss[0].getModificationTime();
-			LOG.debug("Got modification time {} from remote path {}", dstModificationTime, dst);
-		} else {
-			dstModificationTime = localFile.lastModified();
-			LOG.debug("Failed to fetch remote modification time from {}, using local timestamp {}", dst, dstModificationTime);
-		}
-
+		//       systems. Instead, we decide to preserve the modification time at the remote
+		//       location because this and the size of the resource will be checked by YARN based on
+		//       the values we provide to #registerLocalResource() below.
+		fs.setTimes(dst, localFile.lastModified(), -1);
 		// now create the resource instance
-		LocalResource resource = registerLocalResource(dst, localFile.length(), dstModificationTime);
+		LocalResource resource = registerLocalResource(dst, localFile.length(), localFile.lastModified());
+
 		return Tuple2.of(dst, resource);
 	}
 
@@ -367,7 +335,7 @@ public final class Utils {
 	 * Method to extract environment variables from the flinkConfiguration based on the given prefix String.
 	 *
 	 * @param envPrefix Prefix for the environment variables key
-	 * @param flinkConfiguration The Flink config to get the environment variable definition from
+	 * @param flinkConfiguration The Flink config to get the environment variable defintion from
 	 */
 	public static Map<String, String> getEnvironmentVariables(String envPrefix, org.apache.flink.configuration.Configuration flinkConfiguration) {
 		Map<String, String> result  = new HashMap<>();
@@ -398,8 +366,8 @@ public final class Utils {
 	 *		 The environment variables.
 	 * @param tmParams
 	 *		 The TaskExecutor container memory parameters.
-	 * @param taskManagerDynamicProperties
-	 *		 The dynamic configurations to be updated for the TaskExecutors based on client uploaded Flink config.
+	 * @param taskManagerConfig
+	 *		 The configuration for the TaskExecutors.
 	 * @param workingDirectory
 	 *		 The current application master container's working directory.
 	 * @param taskManagerMainClass
@@ -417,7 +385,7 @@ public final class Utils {
 		YarnConfiguration yarnConfig,
 		Map<String, String> env,
 		ContaineredTaskManagerParameters tmParams,
-		String taskManagerDynamicProperties,
+		org.apache.flink.configuration.Configuration taskManagerConfig,
 		String workingDirectory,
 		Class<?> taskManagerMainClass,
 		Logger log) throws Exception {
@@ -439,14 +407,16 @@ public final class Utils {
 		String yarnClientUsername = env.get(YarnConfigKeys.ENV_HADOOP_USER_NAME);
 		require(yarnClientUsername != null, "Environment variable %s not set", YarnConfigKeys.ENV_HADOOP_USER_NAME);
 
-		final String remoteKeytabPath = env.get(YarnConfigKeys.KEYTAB_PATH);
-		final String remoteKeytabPrincipal = env.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
+		final String remoteKeytabPath = env.get(YarnConfigKeys.REMOTE_KEYTAB_PATH);
+		final String localKeytabPath = env.get(YarnConfigKeys.LOCAL_KEYTAB_PATH);
+		final String keytabPrincipal = env.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
 		final String remoteYarnConfPath = env.get(YarnConfigKeys.ENV_YARN_SITE_XML_PATH);
 		final String remoteKrb5Path = env.get(YarnConfigKeys.ENV_KRB5_PATH);
 
 		if (log.isDebugEnabled()) {
 			log.debug("TM:remote keytab path obtained {}", remoteKeytabPath);
-			log.debug("TM:remote keytab principal obtained {}", remoteKeytabPrincipal);
+			log.debug("TM:local keytab path obtained {}", localKeytabPath);
+			log.debug("TM:keytab principal obtained {}", keytabPrincipal);
 			log.debug("TM:remote yarn conf path obtained {}", remoteYarnConfPath);
 			log.debug("TM:remote krb5 path obtained {}", remoteKrb5Path);
 		}
@@ -467,44 +437,71 @@ public final class Utils {
 		LocalResource yarnConfResource = null;
 		LocalResource krb5ConfResource = null;
 		boolean hasKrb5 = false;
-		if (remoteYarnConfPath != null) {
+		if (remoteYarnConfPath != null && remoteKrb5Path != null) {
 			log.info("TM:Adding remoteYarnConfPath {} to the container local resource bucket", remoteYarnConfPath);
 			Path yarnConfPath = new Path(remoteYarnConfPath);
 			FileSystem fs = yarnConfPath.getFileSystem(yarnConfig);
 			yarnConfResource = registerLocalResource(fs, yarnConfPath);
-		}
 
-		if (remoteKrb5Path != null) {
 			log.info("TM:Adding remoteKrb5Path {} to the container local resource bucket", remoteKrb5Path);
 			Path krb5ConfPath = new Path(remoteKrb5Path);
-			FileSystem fs = krb5ConfPath.getFileSystem(yarnConfig);
+			fs = krb5ConfPath.getFileSystem(yarnConfig);
 			krb5ConfResource = registerLocalResource(fs, krb5ConfPath);
+
 			hasKrb5 = true;
 		}
 
 		// register Flink Jar with remote HDFS
-		final String flinkJarPath;
 		final LocalResource flinkJar;
 		{
 			Path remoteJarPath = new Path(remoteFlinkJarPath);
 			FileSystem fs = remoteJarPath.getFileSystem(yarnConfig);
-			flinkJarPath = remoteJarPath.getName();
 			flinkJar = registerLocalResource(fs, remoteJarPath);
 		}
 
-		Map<String, LocalResource> taskManagerLocalResources = new HashMap<>();
+		// register conf with local fs
+		final LocalResource flinkConf;
+		{
+			// write the TaskManager configuration to a local file
+			final File taskManagerConfigFile =
+					new File(workingDirectory, UUID.randomUUID() + "-taskmanager-conf.yaml");
+			log.debug("Writing TaskManager configuration to {}", taskManagerConfigFile.getAbsolutePath());
+			BootstrapTools.writeConfiguration(taskManagerConfig, taskManagerConfigFile);
 
-		taskManagerLocalResources.put(flinkJarPath, flinkJar);
+			try {
+				Path homeDirPath = new Path(clientHomeDir);
+				FileSystem fs = homeDirPath.getFileSystem(yarnConfig);
+
+				flinkConf = setupLocalResource(
+					fs,
+					appId,
+					new Path(taskManagerConfigFile.toURI()),
+					homeDirPath,
+					"").f1;
+
+				log.debug("Prepared local resource for modified yaml: {}", flinkConf);
+			} finally {
+				try {
+					FileUtils.deleteFileOrDirectory(taskManagerConfigFile);
+				} catch (IOException e) {
+					log.info("Could not delete temporary configuration file " +
+						taskManagerConfigFile.getAbsolutePath() + '.', e);
+				}
+			}
+		}
+
+		Map<String, LocalResource> taskManagerLocalResources = new HashMap<>();
+		taskManagerLocalResources.put("flink.jar", flinkJar);
+		taskManagerLocalResources.put("flink-conf.yaml", flinkConf);
 
 		//To support Yarn Secure Integration Test Scenario
-		if (yarnConfResource != null) {
+		if (yarnConfResource != null && krb5ConfResource != null) {
 			taskManagerLocalResources.put(YARN_SITE_FILE_NAME, yarnConfResource);
-		}
-		if (krb5ConfResource != null) {
 			taskManagerLocalResources.put(KRB5_FILE_NAME, krb5ConfResource);
 		}
+
 		if (keytabResource != null) {
-			taskManagerLocalResources.put(KEYTAB_FILE_NAME, keytabResource);
+			taskManagerLocalResources.put(localKeytabPath, keytabResource);
 		}
 
 		// prepare additional files to be shipped
@@ -527,7 +524,7 @@ public final class Utils {
 
 		String launchCommand = BootstrapTools.getTaskManagerShellCommand(
 				flinkConfig, tmParams, ".", ApplicationConstants.LOG_DIR_EXPANSION_VAR,
-				hasLogback, hasLog4j, hasKrb5, taskManagerMainClass, taskManagerDynamicProperties);
+				hasLogback, hasLog4j, hasKrb5, taskManagerMainClass);
 
 		if (log.isDebugEnabled()) {
 			log.debug("Starting TaskManagers with command: " + launchCommand);
@@ -548,9 +545,13 @@ public final class Utils {
 
 		containerEnv.put(YarnConfigKeys.ENV_HADOOP_USER_NAME, UserGroupInformation.getCurrentUser().getUserName());
 
-		if (remoteKeytabPath != null && remoteKeytabPrincipal != null) {
-			containerEnv.put(YarnConfigKeys.KEYTAB_PATH, remoteKeytabPath);
-			containerEnv.put(YarnConfigKeys.KEYTAB_PRINCIPAL, remoteKeytabPrincipal);
+		if (remoteKeytabPath != null && localKeytabPath != null && keytabPrincipal != null) {
+			containerEnv.put(YarnConfigKeys.REMOTE_KEYTAB_PATH, remoteKeytabPath);
+			containerEnv.put(YarnConfigKeys.LOCAL_KEYTAB_PATH, localKeytabPath);
+			containerEnv.put(YarnConfigKeys.KEYTAB_PRINCIPAL, keytabPrincipal);
+		} else if (localKeytabPath != null && keytabPrincipal != null) {
+			containerEnv.put(YarnConfigKeys.LOCAL_KEYTAB_PATH, localKeytabPath);
+			containerEnv.put(YarnConfigKeys.KEYTAB_PRINCIPAL, keytabPrincipal);
 		}
 
 		ctx.setEnvironment(containerEnv);
@@ -573,17 +574,7 @@ public final class Utils {
 						new File(fileLocation),
 						HadoopUtils.getHadoopConfiguration(flinkConfig));
 
-				// Filter out AMRMToken before setting the tokens to the TaskManager container context.
-				Credentials taskManagerCred = new Credentials();
-				Collection<Token<? extends TokenIdentifier>> userTokens = cred.getAllTokens();
-				for (Token<? extends TokenIdentifier> token : userTokens) {
-					if (!token.getKind().equals(AMRMTokenIdentifier.KIND_NAME)) {
-						final Text id = new Text(token.getIdentifier());
-						taskManagerCred.addToken(id, token);
-					}
-				}
-
-				taskManagerCred.writeTokenStorageToStream(dob);
+				cred.writeTokenStorageToStream(dob);
 				ByteBuffer securityTokens = ByteBuffer.wrap(dob.getData(), 0, dob.getLength());
 				ctx.setTokens(securityTokens);
 			} catch (Throwable t) {
@@ -608,34 +599,6 @@ public final class Utils {
 		if (!condition) {
 			throw new RuntimeException(String.format(message, values));
 		}
-	}
-
-	/**
-	 * Get dynamic properties based on two Flink configuration. If base config does not contain and target config
-	 * contains the key or the value is different, it should be added to results. Otherwise, if the base config contains
-	 * and target config does not contain the key, it will be ignored.
-	 * @param baseConfig The base configuration.
-	 * @param targetConfig The target configuration.
-	 * @return Dynamic properties as string, separated by space.
-	 */
-	static String getDynamicProperties(
-		org.apache.flink.configuration.Configuration baseConfig,
-		org.apache.flink.configuration.Configuration targetConfig) {
-
-		String[] newAddedConfigs = targetConfig.keySet().stream().flatMap(
-			(String key) -> {
-				final String baseValue = baseConfig.getString(ConfigOptions.key(key).stringType().noDefaultValue());
-				final String targetValue = targetConfig.getString(ConfigOptions.key(key).stringType().noDefaultValue());
-
-				if (!baseConfig.keySet().contains(key) || !baseValue.equals(targetValue)) {
-					return Stream.of("-" + CommandLineOptions.DYNAMIC_PROPERTY_OPTION.getOpt() + key +
-						CommandLineOptions.DYNAMIC_PROPERTY_OPTION.getValueSeparator() + targetValue);
-				} else {
-					return Stream.empty();
-				}
-			})
-			.toArray(String[]::new);
-		return String.join(" ", newAddedConfigs);
 	}
 
 }

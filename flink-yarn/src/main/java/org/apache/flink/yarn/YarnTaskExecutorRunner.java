@@ -21,18 +21,12 @@ package org.apache.flink.yarn;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.AkkaOptions;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ConfigurationUtils;
 import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.configuration.SecurityOptions;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.plugin.PluginUtils;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
-import org.apache.flink.runtime.entrypoint.ClusterConfiguration;
-import org.apache.flink.runtime.entrypoint.ClusterConfigurationParserFactory;
-import org.apache.flink.runtime.entrypoint.FlinkParseException;
-import org.apache.flink.runtime.entrypoint.parser.CommandLineParser;
 import org.apache.flink.runtime.security.SecurityConfiguration;
 import org.apache.flink.runtime.security.SecurityUtils;
 import org.apache.flink.runtime.taskexecutor.TaskManagerRunner;
@@ -97,24 +91,8 @@ public class YarnTaskExecutorRunner {
 			final String currDir = ENV.get(Environment.PWD.key());
 			LOG.info("Current working Directory: {}", currDir);
 
-      // Some dynamic properties for task manager are added to args, such as managed memory size.
-			final CommandLineParser<ClusterConfiguration> commandLineParser =
-				new CommandLineParser<>(new ClusterConfigurationParserFactory());
-
-			ClusterConfiguration clusterConfiguration = null;
-			try {
-				clusterConfiguration = commandLineParser.parse(args);
-			} catch (FlinkParseException e) {
-				LOG.error("Could not parse command line arguments {}.", args, e);
-				commandLineParser.printHelp(YarnTaskExecutorRunner.class.getSimpleName());
-				System.exit(1);
-			}
-
-			final Configuration dynamicProperties = ConfigurationUtils.createConfiguration(
-				clusterConfiguration.getDynamicProperties());
-			final Configuration configuration = GlobalConfiguration.loadConfiguration(currDir, dynamicProperties);
-
-			FileSystem.initialize(configuration, PluginUtils.createPluginManagerFromRootFolder(configuration));
+			final Configuration configuration = GlobalConfiguration.loadConfiguration(currDir);
+			FileSystem.initialize(configuration);
 
 			setupConfigurationAndInstallSecurityContext(configuration, currDir, ENV);
 
@@ -150,18 +128,25 @@ public class YarnTaskExecutorRunner {
 	private static void setupConfigurationFromVariables(Configuration configuration, String currDir, Map<String, String> variables) throws IOException {
 		final String yarnClientUsername = variables.get(YarnConfigKeys.ENV_HADOOP_USER_NAME);
 
-		final String remoteKeytabPath = variables.get(YarnConfigKeys.KEYTAB_PATH);
+		final String remoteKeytabPath = variables.get(YarnConfigKeys.REMOTE_KEYTAB_PATH);
 		LOG.info("TM: remote keytab path obtained {}", remoteKeytabPath);
 
-		final String remoteKeytabPrincipal = variables.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
-		LOG.info("TM: remote keytab principal obtained {}", remoteKeytabPrincipal);
+		final String localKeytabPath = variables.get(YarnConfigKeys.LOCAL_KEYTAB_PATH);
+		LOG.info("TM: local keytab path obtained {}", localKeytabPath);
+
+		final String keytabPrincipal = variables.get(YarnConfigKeys.KEYTAB_PRINCIPAL);
+		LOG.info("TM: keytab principal obtained {}", keytabPrincipal);
 
 		// tell akka to die in case of an error
 		configuration.setBoolean(AkkaOptions.JVM_EXIT_ON_FATAL_ERROR, true);
 
 		String keytabPath = null;
 		if (remoteKeytabPath != null) {
-			File f = new File(currDir, Utils.KEYTAB_FILE_NAME);
+			File f = new File(currDir, localKeytabPath);
+			keytabPath = f.getAbsolutePath();
+			LOG.info("keytab path: {}", keytabPath);
+		} else if (localKeytabPath != null) {
+			File f = new File(localKeytabPath);
 			keytabPath = f.getAbsolutePath();
 			LOG.info("keytab path: {}", keytabPath);
 		}
@@ -171,9 +156,9 @@ public class YarnTaskExecutorRunner {
 		LOG.info("YARN daemon is running as: {} Yarn client user obtainer: {}",
 				currentUser.getShortUserName(), yarnClientUsername);
 
-		if (keytabPath != null && remoteKeytabPrincipal != null) {
+		if (keytabPath != null && keytabPrincipal != null) {
 			configuration.setString(SecurityOptions.KERBEROS_LOGIN_KEYTAB, keytabPath);
-			configuration.setString(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL, remoteKeytabPrincipal);
+			configuration.setString(SecurityOptions.KERBEROS_LOGIN_PRINCIPAL, keytabPrincipal);
 		}
 
 		// use the hostname passed by job manager
