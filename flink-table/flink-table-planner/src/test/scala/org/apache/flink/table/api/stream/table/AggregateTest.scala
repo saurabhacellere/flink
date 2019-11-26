@@ -283,7 +283,7 @@ class AggregateTest extends TableTestBase {
       ),
       term("window", "SlidingGroupWindow('w, 'rowtime, 3600000.millis, 900000.millis)"),
       term("select", "COUNT(DISTINCT a) AS EXPR$0", "SUM(DISTINCT a) AS EXPR$1",
-           "MAX(a) AS EXPR$2")
+           "MAX(DISTINCT a) AS EXPR$2")
     )
 
     util.verifyTable(result, expected)
@@ -460,5 +460,32 @@ class AggregateTest extends TableTestBase {
       )
 
     util.verifyTable(result, expected)
+  }
+
+  @Test
+  def testAggregateReuse(): Unit = {
+    val util = streamTestUtil()
+    val table = util.addTable[(Long, Int, String)]('a, 'b, 'c)
+
+    val resultTable = table
+      .groupBy('b)
+      .select('b, 'a.sum, 'a.sum, 'a.sum, 'a.count)
+
+    val expected =
+      unaryNode(
+        "DataStreamCalc",
+        unaryNode(
+          "DataStreamGroupAggregate",
+          unaryNode(
+            "DataStreamCalc",
+            streamTableNode(table),
+            term("select", "a", "b")
+          ),
+          term("groupBy", "b"),
+          term("select", "b", "SUM(a) AS EXPR$0", "COUNT(a) AS EXPR$1")
+        ),
+        term("select", "b", "EXPR$0", "EXPR$0 AS EXPR$0_0", "EXPR$0 AS EXPR$0_1", "EXPR$1")
+      )
+    util.verifyTable(resultTable, expected)
   }
 }
