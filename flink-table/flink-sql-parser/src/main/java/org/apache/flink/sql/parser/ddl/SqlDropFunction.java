@@ -21,6 +21,7 @@ package org.apache.flink.sql.parser.ddl;
 import org.apache.flink.sql.parser.ExtendedSqlNode;
 import org.apache.flink.sql.parser.error.SqlValidateException;
 
+import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlDrop;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
@@ -40,47 +41,47 @@ import static java.util.Objects.requireNonNull;
  * DROP FUNCTION DDL sql call.
  */
 public class SqlDropFunction extends SqlDrop implements ExtendedSqlNode {
-
 	public static final SqlSpecialOperator OPERATOR = new SqlSpecialOperator("DROP FUNCTION", SqlKind.DROP_FUNCTION);
 
-	private final SqlIdentifier functionIdentifier;
-
-	private final boolean isTemporary;
-
-	private final boolean isSystemFunction;
+	private SqlIdentifier functionName;
+	private SqlCharStringLiteral functionLanguage;
+	private boolean isSystemFunction;
 
 	public SqlDropFunction(
-			SqlParserPos pos,
-			SqlIdentifier functionIdentifier,
-			boolean ifExists,
-			boolean isTemporary,
-			boolean isSystemFunction) {
+		SqlParserPos pos,
+		SqlIdentifier functionName,
+		SqlCharStringLiteral functionLanguage,
+		boolean ifExists,
+		boolean isSystemFunction) {
 		super(OPERATOR, pos, ifExists);
-		this.functionIdentifier = requireNonNull(functionIdentifier);
+		this.functionName = requireNonNull(functionName);
 		this.isSystemFunction = requireNonNull(isSystemFunction);
-		this.isTemporary = isTemporary;
+		this.functionLanguage = functionLanguage;
 	}
 
 	@Nonnull
 	@Override
 	public List<SqlNode> getOperandList() {
-		return ImmutableNullableList.of(functionIdentifier);
+		return ImmutableNullableList.of(functionName, functionLanguage);
 	}
 
 	@Override
 	public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
 		writer.keyword("DROP");
-		if (isTemporary) {
-			writer.keyword("TEMPORARY");
-		}
 		if (isSystemFunction) {
-			writer.keyword("SYSTEM");
+			writer.keyword("TEMPORARY SYSTEM");
+		} else {
+			writer.keyword("TEMPORARY");
 		}
 		writer.keyword("FUNCTION");
 		if (ifExists) {
 			writer.keyword("IF EXISTS");
 		}
-		functionIdentifier.unparse(writer, leftPrec, rightPrec);
+		functionName.unparse(writer, leftPrec, rightPrec);
+		if (functionLanguage != null) {
+			writer.keyword("LANGUAGE");
+			functionLanguage.unparse(writer, leftPrec, rightPrec);
+		}
 	}
 
 	@Override
@@ -88,8 +89,12 @@ public class SqlDropFunction extends SqlDrop implements ExtendedSqlNode {
 		// no-op
 	}
 
-	public String[] getFunctionIdentifier() {
-		return functionIdentifier.names.toArray(new String[0]);
+	public SqlCharStringLiteral getFunctionLanguage() {
+		return this.functionLanguage;
+	}
+
+	public String[] fullFunctionName() {
+		return functionName.names.toArray(new String[0]);
 	}
 
 	public boolean getIfExists() {
