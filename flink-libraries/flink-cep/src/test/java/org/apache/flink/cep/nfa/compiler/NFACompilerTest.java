@@ -18,14 +18,17 @@
 
 package org.apache.flink.cep.nfa.compiler;
 
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.cep.Event;
 import org.apache.flink.cep.SubEvent;
+import org.apache.flink.cep.nfa.AfterMatchSkipStrategy;
 import org.apache.flink.cep.nfa.NFA;
 import org.apache.flink.cep.nfa.State;
 import org.apache.flink.cep.nfa.StateTransition;
 import org.apache.flink.cep.nfa.StateTransitionAction;
-import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
 import org.apache.flink.cep.pattern.MalformedPatternException;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
@@ -37,16 +40,12 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.flink.cep.utils.NFAUtils.compile;
-import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -72,6 +71,9 @@ public class NFACompilerTest extends TestLogger {
 		}
 	};
 
+	private static final TypeSerializer<Event> serializer = TypeExtractor.createTypeInfo(Event.class)
+		.createSerializer(new ExecutionConfig());
+
 	@Rule
 	public ExpectedException expectedException = ExpectedException.none();
 
@@ -87,7 +89,7 @@ public class NFACompilerTest extends TestLogger {
 			.followedBy("start").where(new TestFilter());
 
 		// here we must have an exception because of the two "start" patterns with the same name.
-		compile(invalidPattern, false);
+		NFACompiler.compile(invalidPattern, Event.createTypeSerializer(), false);
 	}
 
 	@Test
@@ -102,7 +104,7 @@ public class NFACompilerTest extends TestLogger {
 			.notFollowedBy("end").where(new TestFilter());
 
 		// here we must have an exception because of the two "start" patterns with the same name.
-		compile(invalidPattern, false);
+		NFACompiler.compile(invalidPattern, Event.createTypeSerializer(), false);
 	}
 
 	/**
@@ -128,9 +130,9 @@ public class NFACompilerTest extends TestLogger {
 			.followedBy("middle").subtype(SubEvent.class)
 			.next("end").where(endFilter);
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, serializer, false);
 
-		Collection<State<Event>> states = nfa.getStates();
+		Set<State<Event>> states = nfa.getStates();
 		assertEquals(4, states.size());
 
 		Map<String, State<Event>> stateMap = new HashMap<>();
@@ -215,7 +217,7 @@ public class NFACompilerTest extends TestLogger {
 			}
 		});
 
-		compile(invalidPattern, false);
+		NFACompiler.compile(invalidPattern, Event.createTypeSerializer(), false);
 	}
 
 	private <T> Set<Tuple2<String, StateTransitionAction>> unfoldTransitions(final State<T> state) {
@@ -228,14 +230,4 @@ public class NFACompilerTest extends TestLogger {
 		return transitions;
 	}
 
-	@Test
-	public void testCheckingEmptyMatches() {
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a").optional()), is(true));
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a").oneOrMore().optional()), is(true));
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a").oneOrMore().optional().next("b").optional()), is(true));
-
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a")), is(false));
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a").oneOrMore()), is(false));
-		assertThat(NFACompiler.canProduceEmptyMatches(Pattern.begin("a").oneOrMore().next("b").optional()), is(false));
-	}
 }

@@ -19,9 +19,6 @@
 package org.apache.flink.streaming.api.scala.async
 
 import org.apache.flink.annotation.PublicEvolving
-import org.apache.flink.api.common.functions.Function
-
-import java.util.concurrent.TimeoutException
 
 /**
   * A function to trigger async I/O operations.
@@ -39,7 +36,7 @@ import java.util.concurrent.TimeoutException
   * @tparam OUT The type of the output elements
   */
 @PublicEvolving
-trait AsyncFunction[IN, OUT] extends Function {
+trait AsyncFunction[IN, OUT] {
 
   /**
     * Trigger the async operation for each stream input
@@ -48,16 +45,4 @@ trait AsyncFunction[IN, OUT] extends Function {
     * @param resultFuture to be completed with the result data
     */
   def asyncInvoke(input: IN, resultFuture: ResultFuture[OUT]): Unit
-
-  /**
-    * [[AsyncFunction.asyncInvoke]] timeout occurred.
-    * By default, the result future is exceptionally completed with a timeout exception.
-    *
-    * @param input element coming from an upstream task
-    * @param resultFuture to be completed with the result data
-    */
-  def timeout(input: IN, resultFuture: ResultFuture[OUT]): Unit = {
-    resultFuture.completeExceptionally(new TimeoutException("Async function call has timed out."))
-  }
-
 }

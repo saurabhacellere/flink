@@ -18,7 +18,9 @@
 
 package org.apache.flink.cep.nfa;
 
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
+import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -34,7 +36,14 @@ public class StateTransition<T> implements Serializable {
 	private final StateTransitionAction action;
 	private final State<T> sourceState;
 	private final State<T> targetState;
-	private IterativeCondition<T> condition;
+	private IterativeCondition<T> newCondition;
+
+	/**
+	 * @deprecated 	This field remains for backwards compatibility.
+	 * Now the conditions extend the {@link IterativeCondition}.
+	 */
+	@Deprecated
+	private FilterFunction<T> condition;
 
 	public StateTransition(
 			final State<T> sourceState,
@@ -44,7 +53,7 @@ public class StateTransition<T> implements Serializable {
 		this.action = action;
 		this.targetState = targetState;
 		this.sourceState = sourceState;
-		this.condition = condition;
+		this.newCondition = condition;
 	}
 
 	public StateTransitionAction getAction() {
@@ -60,11 +69,15 @@ public class StateTransition<T> implements Serializable {
 	}
 
 	public IterativeCondition<T> getCondition() {
-		return condition;
+		if (condition != null) {
+			this.newCondition = new FilterWrapper<>(condition);
+			this.condition = null;
+		}
+		return newCondition;
 	}
 
 	public void setCondition(IterativeCondition<T> condition) {
-		this.condition = condition;
+		this.newCondition = condition;
 	}
 
 	@Override
@@ -93,9 +106,28 @@ public class StateTransition<T> implements Serializable {
 				.append("StateTransition(")
 				.append(action).append(", ")
 				.append("from ").append(sourceState.getName())
-				.append(" to ").append(targetState.getName())
-				.append(condition != null ? ", with condition)" : ")")
+				.append("to ").append(targetState.getName())
+				.append(newCondition != null ? ", with condition)" : ")")
 				.toString();
 	}
 
+	/**
+	 * A wrapper to transform a {@link FilterFunction} into a {@link SimpleCondition}.
+	 * This is used only when migrating from an older Flink version.
+	 */
+	private static class FilterWrapper<T> extends SimpleCondition<T> {
+
+		private static final long serialVersionUID = -4973016745698940430L;
+
+		private final FilterFunction<T> filterFunction;
+
+		FilterWrapper(FilterFunction<T> filterFunction) {
+			this.filterFunction = filterFunction;
+		}
+
+		@Override
+		public boolean filter(T value) throws Exception {
+			return filterFunction.filter(value);
+		}
+	}
 }

@@ -18,11 +18,19 @@
 
 package org.apache.flink.runtime.dispatcher;
 
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.blob.BlobServer;
+import org.apache.flink.runtime.clusterframework.types.ResourceID;
+import org.apache.flink.runtime.heartbeat.HeartbeatServices;
+import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobmanager.OnCompletionActions;
+import org.apache.flink.runtime.jobmaster.JobManagerRunner;
+import org.apache.flink.runtime.jobmaster.JobManagerServices;
 import org.apache.flink.runtime.jobmaster.JobMaster;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcService;
-
-import java.util.Collection;
 
 /**
  * Dispatcher implementation which spawns a {@link JobMaster} for each
@@ -33,14 +41,46 @@ public class StandaloneDispatcher extends Dispatcher {
 	public StandaloneDispatcher(
 			RpcService rpcService,
 			String endpointId,
-			DispatcherId fencingToken,
-			Collection<JobGraph> recoveredJobs,
-			DispatcherServices dispatcherServices) throws Exception {
+			Configuration configuration,
+			HighAvailabilityServices highAvailabilityServices,
+			BlobServer blobServer,
+			HeartbeatServices heartbeatServices,
+			MetricRegistry metricRegistry,
+			FatalErrorHandler fatalErrorHandler) throws Exception {
 		super(
 			rpcService,
 			endpointId,
-			fencingToken,
-			recoveredJobs,
-			dispatcherServices);
+			configuration,
+			highAvailabilityServices,
+			blobServer,
+			heartbeatServices,
+			metricRegistry,
+			fatalErrorHandler);
+	}
+
+	@Override
+	protected JobManagerRunner createJobManagerRunner(
+			ResourceID resourceId,
+			JobGraph jobGraph,
+			Configuration configuration,
+			RpcService rpcService,
+			HighAvailabilityServices highAvailabilityServices,
+			HeartbeatServices heartbeatServices,
+			JobManagerServices jobManagerServices,
+			MetricRegistry metricRegistry,
+			OnCompletionActions onCompleteActions,
+			FatalErrorHandler fatalErrorHandler) throws Exception {
+		// create the standard job manager runner
+		return new JobManagerRunner(
+			resourceId,
+			jobGraph,
+			configuration,
+			rpcService,
+			highAvailabilityServices,
+			heartbeatServices,
+			jobManagerServices,
+			metricRegistry,
+			onCompleteActions,
+			fatalErrorHandler);
 	}
 }

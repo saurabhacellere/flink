@@ -18,11 +18,9 @@
 
 package org.apache.flink.runtime.execution.librarycache;
 
+import org.apache.flink.runtime.blob.BlobKey;
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.runtime.blob.PermanentBlobKey;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
-
-import javax.annotation.Nonnull;
 
 import java.io.IOException;
 import java.net.URL;
@@ -50,7 +48,7 @@ public interface LibraryCacheManager {
 	 *
 	 * @see #unregisterJob(JobID) counterpart of this method
 	 */
-	void registerJob(JobID id, Collection<PermanentBlobKey> requiredJarFiles, Collection<URL> requiredClasspaths)
+	void registerJob(JobID id, Collection<BlobKey> requiredJarFiles, Collection<URL> requiredClasspaths)
 		throws IOException;
 
 	/**
@@ -65,7 +63,7 @@ public interface LibraryCacheManager {
 	 *
 	 * @see #unregisterTask(JobID, ExecutionAttemptID) counterpart of this method
 	 */
-	void registerTask(JobID id, ExecutionAttemptID execution, Collection<PermanentBlobKey> requiredJarFiles,
+	void registerTask(JobID id, ExecutionAttemptID execution, Collection<BlobKey> requiredJarFiles,
 		Collection<URL> requiredClasspaths) throws IOException;
 
 	/**
@@ -98,13 +96,4 @@ public interface LibraryCacheManager {
 	 * Shutdown method which may release created class loaders.
 	 */
 	void shutdown();
-
-	/**
-	 * True if the LibraryCacheManager has a user code class loader registered
-	 * for the given job id.
-	 *
-	 * @param jobId identifying the job for which to check the class loader
-	 * @return true if the user code class loader for the given job has been registered. Otherwise false.
-	 */
-	boolean hasClassLoader(@Nonnull JobID jobId);
 }

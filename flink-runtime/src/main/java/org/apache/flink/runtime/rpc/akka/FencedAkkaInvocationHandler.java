@@ -84,11 +84,11 @@ public class FencedAkkaInvocationHandler<F extends Serializable> extends AkkaInv
 		checkNotNull(runnable, "runnable");
 
 		if (isLocal) {
-			getActorRef().tell(
+			getRpcEndpoint().tell(
 				new UnfencedMessage<>(new RunAsync(runnable, 0L)), ActorRef.noSender());
 		} else {
 			throw new RuntimeException("Trying to send a Runnable to a remote actor at " +
-				getActorRef().path() + ". This is not supported.");
+				getRpcEndpoint().path() + ". This is not supported.");
 		}
 	}
 
@@ -101,14 +101,14 @@ public class FencedAkkaInvocationHandler<F extends Serializable> extends AkkaInv
 			@SuppressWarnings("unchecked")
 			CompletableFuture<V> resultFuture = (CompletableFuture<V>) FutureUtils.toJava(
 				Patterns.ask(
-					getActorRef(),
+					getRpcEndpoint(),
 					new UnfencedMessage<>(new CallAsync(callable)),
 					timeout.toMilliseconds()));
 
 			return resultFuture;
 		} else {
 			throw new RuntimeException("Trying to send a Runnable to a remote actor at " +
-				getActorRef().path() + ". This is not supported.");
+				getRpcEndpoint().path() + ". This is not supported.");
 		}
 	}
 

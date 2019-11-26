@@ -20,8 +20,6 @@ package org.apache.flink.runtime.rpc.messages;
 
 import org.apache.flink.util.Preconditions;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
 
 /**
@@ -37,8 +35,8 @@ public class RemoteFencedMessage<F extends Serializable, P extends Serializable>
 	private final F fencingToken;
 	private final P payload;
 
-	public RemoteFencedMessage(@Nullable F fencingToken, P payload) {
-		this.fencingToken = fencingToken;
+	public RemoteFencedMessage(F fencingToken, P payload) {
+		this.fencingToken = Preconditions.checkNotNull(fencingToken);
 		this.payload = Preconditions.checkNotNull(payload);
 	}
 

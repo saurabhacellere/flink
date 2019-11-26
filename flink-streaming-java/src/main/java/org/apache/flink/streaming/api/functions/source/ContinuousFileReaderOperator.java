@@ -196,14 +196,8 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 	public void close() throws Exception {
 		super.close();
 
-		waitSplitReaderFinished();
-
-		output.close();
-	}
-
-	private void waitSplitReaderFinished() throws InterruptedException {
 		// make sure that we hold the checkpointing lock
-		assert Thread.holdsLock(checkpointLock);
+		Thread.holdsLock(checkpointLock);
 
 		// close the reader to signal that no more splits will come. By doing this,
 		// the reader will exit as soon as it finishes processing the already pending splits.
@@ -221,8 +215,8 @@ public class ContinuousFileReaderOperator<OUT> extends AbstractStreamOperator<OU
 		if (readerContext != null) {
 			readerContext.emitWatermark(Watermark.MAX_WATERMARK);
 			readerContext.close();
-			readerContext = null;
 		}
+		output.close();
 	}
 
 	private class SplitReader<OT> extends Thread {

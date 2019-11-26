@@ -19,6 +19,7 @@
 package org.apache.flink.cep.nfa;
 
 import org.apache.flink.cep.Event;
+import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -31,9 +32,8 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.cep.utils.NFATestUtilities.compareMaps;
-import static org.apache.flink.cep.utils.NFATestUtilities.feedNFA;
-import static org.apache.flink.cep.utils.NFAUtils.compile;
+import static org.apache.flink.cep.nfa.NFATestUtilities.compareMaps;
+import static org.apache.flink.cep.nfa.NFATestUtilities.feedNFA;
 
 /**
  * IT tests covering {@link Pattern#greedy()}.
@@ -41,7 +41,7 @@ import static org.apache.flink.cep.utils.NFAUtils.compile;
 public class GreedyITCase extends TestLogger {
 
 	@Test
-	public void testGreedyZeroOrMore() throws Exception {
+	public void testGreedyZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -80,7 +80,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -90,7 +90,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyZeroOrMoreInBetween() throws Exception {
+	public void testGreedyZeroOrMoreInBetween() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -132,7 +132,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -142,7 +142,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyZeroOrMoreWithDummyEventsAfterQuantifier() throws Exception {
+	public void testGreedyZeroOrMoreWithDummyEventsAfterQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -180,7 +180,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -190,7 +190,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyZeroOrMoreWithDummyEventsBeforeQuantifier() throws Exception {
+	public void testGreedyZeroOrMoreWithDummyEventsBeforeQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -224,7 +224,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -234,7 +234,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyUntilZeroOrMoreWithDummyEventsAfterQuantifier() throws Exception {
+	public void testGreedyUntilZeroOrMoreWithDummyEventsAfterQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -281,7 +281,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -291,7 +291,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyUntilWithDummyEventsBeforeQuantifier() throws Exception {
+	public void testGreedyUntilWithDummyEventsBeforeQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -338,7 +338,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -348,7 +348,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyOneOrMore() throws Exception {
+	public void testGreedyOneOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -387,7 +387,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -397,7 +397,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyOneOrMoreInBetween() throws Exception {
+	public void testGreedyOneOrMoreInBetween() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -439,7 +439,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -449,7 +449,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyOneOrMoreWithDummyEventsAfterQuantifier() throws Exception {
+	public void testGreedyOneOrMoreWithDummyEventsAfterQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -487,7 +487,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -497,7 +497,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyOneOrMoreWithDummyEventsBeforeQuantifier() throws Exception {
+	public void testGreedyOneOrMoreWithDummyEventsBeforeQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -531,7 +531,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -539,7 +539,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyUntilOneOrMoreWithDummyEventsAfterQuantifier() throws Exception {
+	public void testGreedyUntilOneOrMoreWithDummyEventsAfterQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -586,7 +586,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -596,7 +596,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyUntilOneOrMoreWithDummyEventsBeforeQuantifier() throws Exception {
+	public void testGreedyUntilOneOrMoreWithDummyEventsBeforeQuantifier() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -643,7 +643,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -651,7 +651,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyZeroOrMoreBeforeGroupPattern() throws Exception {
+	public void testGreedyZeroOrMoreBeforeGroupPattern() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -713,7 +713,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -723,7 +723,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithZeroOrMoreGreedy() throws Exception {
+	public void testEndWithZeroOrMoreGreedy() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -754,7 +754,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		}).oneOrMore().optional().greedy();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -767,7 +767,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithZeroOrMoreConsecutiveGreedy() throws Exception {
+	public void testEndWithZeroOrMoreConsecutiveGreedy() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -798,7 +798,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		}).oneOrMore().optional().consecutive().greedy();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -810,7 +810,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithGreedyTimesRange() throws Exception {
+	public void testEndWithGreedyTimesRange() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -843,7 +843,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		}).times(2, 5).greedy();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -855,7 +855,7 @@ public class GreedyITCase extends TestLogger {
 	}
 
 	@Test
-	public void testGreedyTimesRange() throws Exception {
+	public void testGreedyTimesRange() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event c = new Event(40, "c", 1.0);
@@ -896,7 +896,7 @@ public class GreedyITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 

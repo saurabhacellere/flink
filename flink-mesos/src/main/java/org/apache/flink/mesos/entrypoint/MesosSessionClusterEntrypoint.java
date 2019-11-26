@@ -19,27 +19,34 @@
 package org.apache.flink.mesos.entrypoint;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.configuration.JobManagerOptions;
-import org.apache.flink.mesos.runtime.clusterframework.MesosResourceManagerFactory;
+import org.apache.flink.mesos.runtime.clusterframework.MesosResourceManager;
+import org.apache.flink.mesos.runtime.clusterframework.MesosTaskManagerParameters;
 import org.apache.flink.mesos.runtime.clusterframework.services.MesosServices;
 import org.apache.flink.mesos.runtime.clusterframework.services.MesosServicesUtils;
 import org.apache.flink.mesos.util.MesosConfiguration;
-import org.apache.flink.mesos.util.MesosUtils;
+import org.apache.flink.runtime.blob.BlobServer;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
-import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.entrypoint.ClusterEntrypoint;
+import org.apache.flink.runtime.clusterframework.ContainerSpecification;
+import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.entrypoint.SessionClusterEntrypoint;
-import org.apache.flink.runtime.entrypoint.component.DefaultDispatcherResourceManagerComponentFactory;
-import org.apache.flink.runtime.util.EnvironmentInformation;
-import org.apache.flink.runtime.util.JvmShutdownSafeguard;
-import org.apache.flink.runtime.util.SignalHandler;
+import org.apache.flink.runtime.heartbeat.HeartbeatServices;
+import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.resourcemanager.ResourceManager;
+import org.apache.flink.runtime.resourcemanager.ResourceManagerConfiguration;
+import org.apache.flink.runtime.resourcemanager.ResourceManagerRuntimeServices;
+import org.apache.flink.runtime.resourcemanager.ResourceManagerRuntimeServicesConfiguration;
+import org.apache.flink.runtime.rpc.FatalErrorHandler;
+import org.apache.flink.runtime.rpc.RpcService;
+import org.apache.flink.util.FlinkException;
+import org.apache.flink.util.Preconditions;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.PosixParser;
-
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Entry point for Mesos session clusters.
@@ -58,12 +65,20 @@ public class MesosSessionClusterEntrypoint extends SessionClusterEntrypoint {
 				.addOption(BootstrapTools.newDynamicPropertiesOption());
 	}
 
+	private final Configuration dynamicProperties;
+
 	private MesosConfiguration mesosConfig;
 
 	private MesosServices mesosServices;
 
-	public MesosSessionClusterEntrypoint(Configuration config) {
+	private MesosTaskManagerParameters taskManagerParameters;
+
+	private ContainerSpecification taskManagerContainerSpec;
+
+	public MesosSessionClusterEntrypoint(Configuration config, Configuration dynamicProperties) {
 		super(config);
+
+		this.dynamicProperties = Preconditions.checkNotNull(dynamicProperties);
 	}
 
 	@Override
@@ -73,39 +88,80 @@ public class MesosSessionClusterEntrypoint extends SessionClusterEntrypoint {
 		final String hostname = config.getString(JobManagerOptions.ADDRESS);
 
 		// Mesos configuration
-		mesosConfig = MesosUtils.createMesosSchedulerConfiguration(config, hostname);
+		mesosConfig = MesosEntrypointUtils.createMesosSchedulerConfiguration(config, hostname);
 
 		// services
 		mesosServices = MesosServicesUtils.createMesosServices(config, hostname);
+
+		// TM configuration
+		taskManagerParameters = MesosEntrypointUtils.createTmParameters(config, LOG);
+		taskManagerContainerSpec = MesosEntrypointUtils.createContainerSpec(config, dynamicProperties);
 	}
 
 	@Override
-	protected CompletableFuture<Void> stopClusterServices(boolean cleanupHaData) {
-		final CompletableFuture<Void> serviceShutDownFuture = super.stopClusterServices(cleanupHaData);
-
-		return FutureUtils.runAfterwards(
-			serviceShutDownFuture,
-			() -> {
-				if (mesosServices != null) {
-					mesosServices.close(cleanupHaData);
-				}
-			});
+	protected void startClusterComponents(Configuration configuration, RpcService rpcService, HighAvailabilityServices highAvailabilityServices, BlobServer blobServer, HeartbeatServices heartbeatServices, MetricRegistry metricRegistry) throws Exception {
+		super.startClusterComponents(configuration, rpcService, highAvailabilityServices, blobServer, heartbeatServices, metricRegistry);
 	}
 
 	@Override
-	protected DefaultDispatcherResourceManagerComponentFactory createDispatcherResourceManagerComponentFactory(Configuration configuration) {
-		return DefaultDispatcherResourceManagerComponentFactory.createSessionComponentFactory(
-			new MesosResourceManagerFactory(
-				mesosServices,
-				mesosConfig));
+	protected ResourceManager<?> createResourceManager(
+		Configuration configuration,
+		ResourceID resourceId,
+		RpcService rpcService,
+		HighAvailabilityServices highAvailabilityServices,
+		HeartbeatServices heartbeatServices,
+		MetricRegistry metricRegistry,
+		FatalErrorHandler fatalErrorHandler) throws Exception {
+		final ResourceManagerConfiguration rmConfiguration = ResourceManagerConfiguration.fromConfiguration(configuration);
+		final ResourceManagerRuntimeServicesConfiguration rmServicesConfiguration = ResourceManagerRuntimeServicesConfiguration.fromConfiguration(configuration);
+		final ResourceManagerRuntimeServices rmRuntimeServices = ResourceManagerRuntimeServices.fromConfiguration(
+			rmServicesConfiguration,
+			highAvailabilityServices,
+			rpcService.getScheduledExecutor());
+
+		return new MesosResourceManager(
+			rpcService,
+			ResourceManager.RESOURCE_MANAGER_NAME,
+			resourceId,
+			rmConfiguration,
+			highAvailabilityServices,
+			heartbeatServices,
+			rmRuntimeServices.getSlotManager(),
+			metricRegistry,
+			rmRuntimeServices.getJobLeaderIdService(),
+			fatalErrorHandler,
+			configuration,
+			mesosServices,
+			mesosConfig,
+			taskManagerParameters,
+			taskManagerContainerSpec
+			);
+	}
+
+	@Override
+	protected void stopClusterComponents(boolean cleanupHaData) throws Exception {
+		Throwable exception = null;
+
+		try {
+			super.stopClusterComponents(cleanupHaData);
+		} catch (Throwable t) {
+			exception = t;
+		}
+
+		if (mesosServices != null) {
+			try {
+				mesosServices.close(cleanupHaData);
+			} catch (Throwable t) {
+				exception = t;
+			}
+		}
+
+		if (exception != null) {
+			throw new FlinkException("Could not properly shut down the Mesos session cluster entry point.", exception);
+		}
 	}
 
 	public static void main(String[] args) {
-		// startup checks and logging
-		EnvironmentInformation.logEnvironmentInfo(LOG, MesosSessionClusterEntrypoint.class.getSimpleName(), args);
-		SignalHandler.register(LOG);
-		JvmShutdownSafeguard.installAsShutdownHook(LOG);
-
 		// load configuration incl. dynamic properties
 		CommandLineParser parser = new PosixParser();
 		CommandLine cmd;
@@ -119,11 +175,10 @@ public class MesosSessionClusterEntrypoint extends SessionClusterEntrypoint {
 		}
 
 		Configuration dynamicProperties = BootstrapTools.parseDynamicProperties(cmd);
-		Configuration configuration = MesosUtils.loadConfiguration(dynamicProperties, LOG);
+		Configuration configuration = GlobalConfiguration.loadConfigurationWithDynamicProperties(dynamicProperties);
 
-		MesosSessionClusterEntrypoint clusterEntrypoint = new MesosSessionClusterEntrypoint(configuration);
+		MesosSessionClusterEntrypoint clusterEntrypoint = new MesosSessionClusterEntrypoint(configuration, dynamicProperties);
 
-		ClusterEntrypoint.runClusterEntrypoint(clusterEntrypoint);
+		clusterEntrypoint.startCluster();
 	}
-
 }

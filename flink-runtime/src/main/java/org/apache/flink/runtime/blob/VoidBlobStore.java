@@ -29,23 +29,19 @@ import java.io.IOException;
 public class VoidBlobStore implements BlobStoreService {
 
 	@Override
-	public boolean put(File localFile, JobID jobId, BlobKey blobKey) throws IOException {
-		return false;
+	public void put(File localFile, JobID jobId, BlobKey blobKey) throws IOException {
 	}
 
 	@Override
-	public boolean get(JobID jobId, BlobKey blobKey, File localFile) throws IOException {
-		return false;
+	public void get(JobID jobId, BlobKey blobKey, File localFile) throws IOException {
 	}
 
 	@Override
-	public boolean delete(JobID jobId, BlobKey blobKey) {
-		return true;
+	public void delete(JobID jobId, BlobKey blobKey) {
 	}
 
 	@Override
-	public boolean deleteAll(JobID jobId) {
-		return true;
+	public void deleteAll(JobID jobId) {
 	}
 
 	@Override

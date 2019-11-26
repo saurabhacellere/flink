@@ -20,86 +20,59 @@ package org.apache.flink.runtime.rest;
 
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.ConfigConstants;
-import org.apache.flink.configuration.RestOptions;
-import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.io.network.netty.SSLHandlerFactory;
-import org.apache.flink.runtime.rest.messages.EmptyMessageParameters;
-import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
+import org.apache.flink.runtime.rest.handler.PipelineErrorHandler;
 import org.apache.flink.runtime.rest.messages.ErrorResponseBody;
 import org.apache.flink.runtime.rest.messages.MessageHeaders;
 import org.apache.flink.runtime.rest.messages.MessageParameters;
 import org.apache.flink.runtime.rest.messages.RequestBody;
 import org.apache.flink.runtime.rest.messages.ResponseBody;
 import org.apache.flink.runtime.rest.util.RestClientException;
-import org.apache.flink.runtime.rest.util.RestConstants;
 import org.apache.flink.runtime.rest.util.RestMapperUtils;
-import org.apache.flink.runtime.rest.versioning.RestAPIVersion;
-import org.apache.flink.runtime.util.ExecutorThreadFactory;
-import org.apache.flink.util.AutoCloseableAsync;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.NetUtils;
+import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JavaType;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.Bootstrap;
 import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
 import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufInputStream;
 import org.apache.flink.shaded.netty4.io.netty.buffer.Unpooled;
-import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandlerContext;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
 import org.apache.flink.shaded.netty4.io.netty.channel.SimpleChannelInboundHandler;
 import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioSocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.TooLongFrameException;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.DefaultFullHttpRequest;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.FullHttpRequest;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.FullHttpResponse;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpClientCodec;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpHeaders;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpMethod;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpObjectAggregator;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpRequest;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponse;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpVersion;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.multipart.Attribute;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.multipart.DefaultHttpDataFactory;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.multipart.HttpPostRequestEncoder;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.multipart.MemoryAttribute;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
-import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateEvent;
-import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateHandler;
+import org.apache.flink.shaded.netty4.io.netty.handler.ssl.SslHandler;
 
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
+import javax.net.ssl.SSLEngine;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
-
-import static org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus.REQUEST_ENTITY_TOO_LARGE;
 
 /**
  * This client is the counter-part to the {@link RestServerEndpoint}.
  */
-public class RestClient implements AutoCloseableAsync {
+public class RestClient {
 	private static final Logger LOG = LoggerFactory.getLogger(RestClient.class);
 
 	private static final ObjectMapper objectMapper = RestMapperUtils.getStrictObjectMapper();
@@ -107,44 +80,32 @@ public class RestClient implements AutoCloseableAsync {
 	// used to open connections to a rest server endpoint
 	private final Executor executor;
 
-	private final Bootstrap bootstrap;
-
-	private final CompletableFuture<Void> terminationFuture;
-
-	private final AtomicBoolean isRunning = new AtomicBoolean(true);
+	private Bootstrap bootstrap;
 
 	public RestClient(RestClientConfiguration configuration, Executor executor) {
 		Preconditions.checkNotNull(configuration);
 		this.executor = Preconditions.checkNotNull(executor);
-		this.terminationFuture = new CompletableFuture<>();
 
-		final SSLHandlerFactory sslHandlerFactory = configuration.getSslHandlerFactory();
+		SSLEngine sslEngine = configuration.getSslEngine();
 		ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<SocketChannel>() {
 			@Override
-			protected void initChannel(SocketChannel socketChannel) {
-				try {
-					// SSL should be the first handler in the pipeline
-					if (sslHandlerFactory != null) {
-						socketChannel.pipeline().addLast("ssl", sslHandlerFactory.createNettySSLHandler(socketChannel.alloc()));
-					}
-
-					socketChannel.pipeline()
-						.addLast(new HttpClientCodec())
-						.addLast(new HttpObjectAggregator(configuration.getMaxContentLength()))
-						.addLast(new ChunkedWriteHandler()) // required for multipart-requests
-						.addLast(new IdleStateHandler(configuration.getIdlenessTimeout(), configuration.getIdlenessTimeout(), configuration.getIdlenessTimeout(), TimeUnit.MILLISECONDS))
-						.addLast(new ClientHandler());
-				} catch (Throwable t) {
-					t.printStackTrace();
-					ExceptionUtils.rethrow(t);
+			protected void initChannel(SocketChannel socketChannel) throws Exception {
+				// SSL should be the first handler in the pipeline
+				if (sslEngine != null) {
+					socketChannel.pipeline().addLast("ssl", new SslHandler(sslEngine));
 				}
+
+				socketChannel.pipeline()
+					.addLast(new HttpClientCodec())
+					.addLast(new HttpObjectAggregator(1024 * 1024))
+					.addLast(new ClientHandler())
+					.addLast(new PipelineErrorHandler(LOG));
 			}
 		};
-		NioEventLoopGroup group = new NioEventLoopGroup(1, new ExecutorThreadFactory("flink-rest-client-netty"));
+		NioEventLoopGroup group = new NioEventLoopGroup(1);
 
 		bootstrap = new Bootstrap();
 		bootstrap
-			.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(configuration.getConnectionTimeout()))
 			.group(group)
 			.channel(NioSocketChannel.class)
 			.handler(initializer);
@@ -152,236 +113,78 @@ public class RestClient implements AutoCloseableAsync {
 		LOG.info("Rest client endpoint started.");
 	}
 
-	@Override
-	public CompletableFuture<Void> closeAsync() {
-		return shutdownInternally(Time.seconds(10L));
-	}
-
 	public void shutdown(Time timeout) {
-		final CompletableFuture<Void> shutDownFuture = shutdownInternally(timeout);
+		LOG.info("Shutting down rest endpoint.");
+		CompletableFuture<?> groupFuture = new CompletableFuture<>();
+		if (bootstrap != null) {
+			if (bootstrap.group() != null) {
+				bootstrap.group().shutdownGracefully(0, timeout.toMilliseconds(), TimeUnit.MILLISECONDS)
+					.addListener(ignored -> groupFuture.complete(null));
+			}
+		}
 
 		try {
-			shutDownFuture.get(timeout.toMilliseconds(), TimeUnit.MILLISECONDS);
+			groupFuture.get(timeout.toMilliseconds(), TimeUnit.MILLISECONDS);
 			LOG.info("Rest endpoint shutdown complete.");
 		} catch (Exception e) {
 			LOG.warn("Rest endpoint shutdown failed.", e);
 		}
 	}
 
-	private CompletableFuture<Void> shutdownInternally(Time timeout) {
-		if (isRunning.compareAndSet(true, false)) {
-			LOG.info("Shutting down rest endpoint.");
-
-			if (bootstrap != null) {
-				if (bootstrap.group() != null) {
-					bootstrap.group().shutdownGracefully(0L, timeout.toMilliseconds(), TimeUnit.MILLISECONDS)
-						.addListener(finished -> {
-							if (finished.isSuccess()) {
-								terminationFuture.complete(null);
-							} else {
-								terminationFuture.completeExceptionally(finished.cause());
-							}
-						});
-				}
-			}
-		}
-		return terminationFuture;
-	}
-
-	public <M extends MessageHeaders<EmptyRequestBody, P, EmptyMessageParameters>, P extends ResponseBody> CompletableFuture<P> sendRequest(
-			String targetAddress,
-			int targetPort,
-			M messageHeaders) throws IOException {
-		return sendRequest(targetAddress, targetPort, messageHeaders, EmptyMessageParameters.getInstance(), EmptyRequestBody.getInstance());
-	}
-
-	public <M extends MessageHeaders<R, P, U>, U extends MessageParameters, R extends RequestBody, P extends ResponseBody> CompletableFuture<P> sendRequest(
-			String targetAddress,
-			int targetPort,
-			M messageHeaders,
-			U messageParameters,
-			R request) throws IOException {
-		return sendRequest(targetAddress, targetPort, messageHeaders, messageParameters, request, Collections.emptyList());
-	}
-
-	public <M extends MessageHeaders<R, P, U>, U extends MessageParameters, R extends RequestBody, P extends ResponseBody> CompletableFuture<P> sendRequest(
-			String targetAddress,
-			int targetPort,
-			M messageHeaders,
-			U messageParameters,
-			R request,
-			Collection<FileUpload> fileUploads) throws IOException {
-		return sendRequest(
-			targetAddress,
-			targetPort,
-			messageHeaders,
-			messageParameters,
-			request,
-			fileUploads,
-			RestAPIVersion.getLatestVersion(messageHeaders.getSupportedAPIVersions()));
-	}
-
-	public <M extends MessageHeaders<R, P, U>, U extends MessageParameters, R extends RequestBody, P extends ResponseBody> CompletableFuture<P> sendRequest(
-			String targetAddress,
-			int targetPort,
-			M messageHeaders,
-			U messageParameters,
-			R request,
-			Collection<FileUpload> fileUploads,
-			RestAPIVersion apiVersion) throws IOException {
+	public <M extends MessageHeaders<R, P, U>, U extends MessageParameters, R extends RequestBody, P extends ResponseBody> CompletableFuture<P> sendRequest(String targetAddress, int targetPort, M messageHeaders, U messageParameters, R request) throws IOException {
 		Preconditions.checkNotNull(targetAddress);
-		Preconditions.checkArgument(NetUtils.isValidHostPort(targetPort), "The target port " + targetPort + " is not in the range [0, 65535].");
+		Preconditions.checkArgument(0 <= targetPort && targetPort < 65536, "The target port " + targetPort + " is not in the range (0, 65536].");
 		Preconditions.checkNotNull(messageHeaders);
 		Preconditions.checkNotNull(request);
 		Preconditions.checkNotNull(messageParameters);
-		Preconditions.checkNotNull(fileUploads);
 		Preconditions.checkState(messageParameters.isResolved(), "Message parameters were not resolved.");
 
-		if (!messageHeaders.getSupportedAPIVersions().contains(apiVersion)) {
-			throw new IllegalArgumentException(String.format(
-				"The requested version %s is not supported by the request (method=%s URL=%s). Supported versions are: %s.",
-				apiVersion,
-				messageHeaders.getHttpMethod(),
-				messageHeaders.getTargetRestEndpointURL(),
-				messageHeaders.getSupportedAPIVersions().stream().map(RestAPIVersion::getURLVersionPrefix).collect(Collectors.joining(","))));
-		}
+		String targetUrl = MessageParameters.resolveUrl(messageHeaders.getTargetRestEndpointURL(), messageParameters);
 
-		String versionedHandlerURL = "/" + apiVersion.getURLVersionPrefix() + messageHeaders.getTargetRestEndpointURL();
-		String targetUrl = MessageParameters.resolveUrl(versionedHandlerURL, messageParameters);
-
-		LOG.debug("Sending request of class {} to {}:{}{}", request.getClass(), targetAddress, targetPort, targetUrl);
+		LOG.debug("Sending request of class {} to {}", request.getClass(), targetUrl);
 		// serialize payload
 		StringWriter sw = new StringWriter();
 		objectMapper.writeValue(sw, request);
 		ByteBuf payload = Unpooled.wrappedBuffer(sw.toString().getBytes(ConfigConstants.DEFAULT_CHARSET));
 
-		Request httpRequest = createRequest(targetAddress + ':' + targetPort, targetUrl, messageHeaders.getHttpMethod().getNettyHttpMethod(), payload, fileUploads);
+		// create request and set headers
+		FullHttpRequest httpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, messageHeaders.getHttpMethod().getNettyHttpMethod(), targetUrl, payload);
+		httpRequest.headers()
+			.add(HttpHeaders.Names.CONTENT_LENGTH, payload.capacity())
+			.add(HttpHeaders.Names.CONTENT_TYPE, "application/json; charset=" + ConfigConstants.DEFAULT_CHARSET.name())
+			.set(HttpHeaders.Names.HOST, targetAddress + ':' + targetPort)
+			.set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
 
-		final JavaType responseType;
-
-		final Collection<Class<?>> typeParameters = messageHeaders.getResponseTypeParameters();
-
-		if (typeParameters.isEmpty()) {
-			responseType = objectMapper.constructType(messageHeaders.getResponseClass());
-		} else {
-			responseType = objectMapper.getTypeFactory().constructParametricType(
-				messageHeaders.getResponseClass(),
-				typeParameters.toArray(new Class<?>[typeParameters.size()]));
-		}
-
-		return submitRequest(targetAddress, targetPort, httpRequest, responseType);
+		return submitRequest(targetAddress, targetPort, httpRequest, messageHeaders.getResponseClass());
 	}
 
-	private static Request createRequest(String targetAddress, String targetUrl, HttpMethod httpMethod, ByteBuf jsonPayload, Collection<FileUpload> fileUploads) throws IOException {
-		if (fileUploads.isEmpty()) {
-
-			HttpRequest httpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, httpMethod, targetUrl, jsonPayload);
-
-			httpRequest.headers()
-				.set(HttpHeaders.Names.HOST, targetAddress)
-				.set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE)
-				.add(HttpHeaders.Names.CONTENT_LENGTH, jsonPayload.capacity())
-				.add(HttpHeaders.Names.CONTENT_TYPE, RestConstants.REST_CONTENT_TYPE);
-
-			return new SimpleRequest(httpRequest);
-		} else {
-			HttpRequest httpRequest = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, httpMethod, targetUrl);
-
-			httpRequest.headers()
-				.set(HttpHeaders.Names.HOST, targetAddress)
-				.set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
-
-			// takes care of splitting the request into multiple parts
-			HttpPostRequestEncoder bodyRequestEncoder;
-			try {
-				// we could use mixed attributes here but we have to ensure that the minimum size is greater than
-				// any file as the upload otherwise fails
-				DefaultHttpDataFactory httpDataFactory = new DefaultHttpDataFactory(true);
-				// the FileUploadHandler explicitly checks for multipart headers
-				bodyRequestEncoder = new HttpPostRequestEncoder(httpDataFactory, httpRequest, true);
-
-				Attribute requestAttribute = new MemoryAttribute(FileUploadHandler.HTTP_ATTRIBUTE_REQUEST);
-				requestAttribute.setContent(jsonPayload);
-				bodyRequestEncoder.addBodyHttpData(requestAttribute);
-
-				int fileIndex = 0;
-				for (FileUpload fileUpload : fileUploads) {
-					Path path = fileUpload.getFile();
-					if (Files.isDirectory(path)) {
-						throw new IllegalArgumentException("Upload of directories is not supported. Dir=" + path);
-					}
-					File file = path.toFile();
-					LOG.trace("Adding file {} to request.", file);
-					bodyRequestEncoder.addBodyFileUpload("file_" + fileIndex, file, fileUpload.getContentType(), false);
-					fileIndex++;
+	private <P extends ResponseBody> CompletableFuture<P> submitRequest(String targetAddress, int targetPort, FullHttpRequest httpRequest, Class<P> responseClass) {
+		return CompletableFuture.supplyAsync(() -> bootstrap.connect(targetAddress, targetPort), executor)
+			.thenApply((channel) -> {
+				try {
+					return channel.sync();
+				} catch (InterruptedException e) {
+					throw new FlinkRuntimeException(e);
 				}
-			} catch (HttpPostRequestEncoder.ErrorDataEncoderException e) {
-				throw new IOException("Could not encode request.", e);
-			}
-
-			try {
-				httpRequest = bodyRequestEncoder.finalizeRequest();
-			} catch (HttpPostRequestEncoder.ErrorDataEncoderException e) {
-				throw new IOException("Could not finalize request.", e);
-			}
-
-			return new MultipartRequest(httpRequest, bodyRequestEncoder);
-		}
+			})
+			.thenApply((ChannelFuture::channel))
+			.thenCompose(channel -> {
+				ClientHandler handler = channel.pipeline().get(ClientHandler.class);
+				CompletableFuture<JsonResponse> future = handler.getJsonFuture();
+				channel.writeAndFlush(httpRequest);
+				return future;
+			}).thenComposeAsync(
+				(JsonResponse rawResponse) -> parseResponse(rawResponse, responseClass),
+				executor
+			);
 	}
 
-	private <P extends ResponseBody> CompletableFuture<P> submitRequest(String targetAddress, int targetPort, Request httpRequest, JavaType responseType) {
-		final ChannelFuture connectFuture = bootstrap.connect(targetAddress, targetPort);
-
-		final CompletableFuture<Channel> channelFuture = new CompletableFuture<>();
-
-		connectFuture.addListener(
-			(ChannelFuture future) -> {
-				if (future.isSuccess()) {
-					channelFuture.complete(future.channel());
-				} else {
-					channelFuture.completeExceptionally(future.cause());
-				}
-			});
-
-		return channelFuture
-			.thenComposeAsync(
-				channel -> {
-					ClientHandler handler = channel.pipeline().get(ClientHandler.class);
-
-					CompletableFuture<JsonResponse> future;
-					boolean success = false;
-
-					try {
-						if (handler == null) {
-							throw new IOException("Netty pipeline was not properly initialized.");
-						} else {
-							httpRequest.writeTo(channel);
-							future = handler.getJsonFuture();
-							success = true;
-						}
-					} catch (IOException e) {
-						future = FutureUtils.completedExceptionally(new ConnectionException("Could not write request.", e));
-					} finally {
-						if (!success) {
-							channel.close();
-						}
-					}
-
-					return future;
-				},
-				executor)
-			.thenComposeAsync(
-				(JsonResponse rawResponse) -> parseResponse(rawResponse, responseType),
-				executor);
-	}
-
-	private static <P extends ResponseBody> CompletableFuture<P> parseResponse(JsonResponse rawResponse, JavaType responseType) {
+	private static <P extends ResponseBody> CompletableFuture<P> parseResponse(JsonResponse rawResponse, Class<P> responseClass) {
 		CompletableFuture<P> responseFuture = new CompletableFuture<>();
-		final JsonParser jsonParser = objectMapper.treeAsTokens(rawResponse.json);
 		try {
-			P response = objectMapper.readValue(jsonParser, responseType);
+			P response = objectMapper.treeToValue(rawResponse.getJson(), responseClass);
 			responseFuture.complete(response);
-		} catch (IOException originalException) {
+		} catch (JsonProcessingException jpe) {
 			// the received response did not matched the expected response type
 
 			// lets see if it is an ErrorResponse instead
@@ -391,54 +194,15 @@ public class RestClient implements AutoCloseableAsync {
 			} catch (JsonProcessingException jpe2) {
 				// if this fails it is either the expected type or response type was wrong, most likely caused
 				// by a client/search MessageHeaders mismatch
-				LOG.error("Received response was neither of the expected type ({}) nor an error. Response={}", responseType, rawResponse, jpe2);
+				LOG.error("Received response was neither of the expected type ({}) nor an error. Response={}", responseClass, rawResponse, jpe2);
 				responseFuture.completeExceptionally(
 					new RestClientException(
-						"Response was neither of the expected type(" + responseType + ") nor an error.",
-						originalException,
+						"Response was neither of the expected type(" + responseClass + ") nor an error.",
+						jpe2,
 						rawResponse.getHttpResponseStatus()));
 			}
 		}
 		return responseFuture;
-	}
-
-	private interface Request {
-		void writeTo(Channel channel) throws IOException;
-	}
-
-	private static final class SimpleRequest implements Request {
-		private final HttpRequest httpRequest;
-
-		SimpleRequest(HttpRequest httpRequest) {
-			this.httpRequest = httpRequest;
-		}
-
-		@Override
-		public void writeTo(Channel channel) {
-			channel.writeAndFlush(httpRequest);
-		}
-	}
-
-	private static final class MultipartRequest implements Request {
-		private final HttpRequest httpRequest;
-		private final HttpPostRequestEncoder bodyRequestEncoder;
-
-		MultipartRequest(HttpRequest httpRequest, HttpPostRequestEncoder bodyRequestEncoder) {
-			this.httpRequest = httpRequest;
-			this.bodyRequestEncoder = bodyRequestEncoder;
-		}
-
-		@Override
-		public void writeTo(Channel channel) {
-			ChannelFuture future = channel.writeAndFlush(httpRequest);
-			// this should never be false as we explicitly set the encoder to use multipart messages
-			if (bodyRequestEncoder.isChunked()) {
-				future = channel.writeAndFlush(bodyRequestEncoder);
-			}
-
-			// release data and remove temporary files if they were created, once the writing is complete
-			future.addListener((ignored) -> bodyRequestEncoder.cleanFiles());
-		}
 	}
 
 	private static class ClientHandler extends SimpleChannelInboundHandler<Object> {
@@ -451,14 +215,7 @@ public class RestClient implements AutoCloseableAsync {
 
 		@Override
 		protected void channelRead0(ChannelHandlerContext ctx, Object msg) {
-			if (msg instanceof HttpResponse && ((HttpResponse) msg).status().equals(REQUEST_ENTITY_TOO_LARGE)) {
-				jsonFuture.completeExceptionally(
-					new RestClientException(
-						String.format(
-							REQUEST_ENTITY_TOO_LARGE + ". Try to raise [%s]",
-							RestOptions.CLIENT_MAX_CONTENT_LENGTH.key()),
-						((HttpResponse) msg).status()));
-			} else if (msg instanceof FullHttpResponse) {
+			if (msg instanceof FullHttpResponse) {
 				readRawResponse((FullHttpResponse) msg);
 			} else {
 				LOG.error("Implementation error: Received a response that wasn't a FullHttpResponse.");
@@ -478,54 +235,17 @@ public class RestClient implements AutoCloseableAsync {
 			ctx.close();
 		}
 
-		@Override
-		public void channelInactive(ChannelHandlerContext ctx) {
-			jsonFuture.completeExceptionally(new ConnectionClosedException("Channel became inactive."));
-			ctx.close();
-		}
-
-		@Override
-		public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-			if (evt instanceof IdleStateEvent) {
-				jsonFuture.completeExceptionally(new ConnectionIdleException("Channel became idle."));
-				ctx.close();
-			} else {
-				super.userEventTriggered(ctx, evt);
-			}
-		}
-
-		@Override
-		public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
-			if (cause instanceof TooLongFrameException) {
-				jsonFuture.completeExceptionally(new TooLongFrameException(String.format(
-					cause.getMessage() + " Try to raise [%s]",
-					RestOptions.CLIENT_MAX_CONTENT_LENGTH.key())));
-			} else {
-				jsonFuture.completeExceptionally(cause);
-			}
-			ctx.close();
-		}
-
 		private void readRawResponse(FullHttpResponse msg) {
 			ByteBuf content = msg.content();
 
 			JsonNode rawResponse;
-			try (InputStream in = new ByteBufInputStream(content)) {
+			try {
+				InputStream in = new ByteBufInputStream(content);
 				rawResponse = objectMapper.readTree(in);
 				LOG.debug("Received response {}.", rawResponse);
-			} catch (JsonProcessingException je) {
+			} catch (JsonParseException je) {
 				LOG.error("Response was not valid JSON.", je);
-				// let's see if it was a plain-text message instead
-				content.readerIndex(0);
-				try (ByteBufInputStream in = new ByteBufInputStream(content)) {
-					byte[] data = new byte[in.available()];
-					in.readFully(data);
-					String message = new String(data);
-					LOG.error("Unexpected plain-text response: {}", message);
-					jsonFuture.completeExceptionally(new RestClientException("Response was not valid JSON, but plain-text: " + message, je, msg.getStatus()));
-				} catch (IOException e) {
-					jsonFuture.completeExceptionally(new RestClientException("Response was not valid JSON, nor plain-text.", je, msg.getStatus()));
-				}
+				jsonFuture.completeExceptionally(new RestClientException("Response was not valid JSON.", je, msg.getStatus()));
 				return;
 			} catch (IOException ioe) {
 				LOG.error("Response could not be read.", ioe);
@@ -551,14 +271,6 @@ public class RestClient implements AutoCloseableAsync {
 
 		public HttpResponseStatus getHttpResponseStatus() {
 			return httpResponseStatus;
-		}
-
-		@Override
-		public String toString() {
-			return "JsonResponse{" +
-				"json=" + json +
-				", httpResponseStatus=" + httpResponseStatus +
-				'}';
 		}
 	}
 }

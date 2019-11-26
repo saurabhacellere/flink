@@ -19,14 +19,16 @@
 package org.apache.flink.streaming.runtime.streamrecord;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.typeutils.CompatibilityResult;
+import org.apache.flink.api.common.typeutils.CompatibilityUtil;
 import org.apache.flink.api.common.typeutils.CompositeTypeSerializerConfigSnapshot;
-import org.apache.flink.api.common.typeutils.CompositeTypeSerializerSnapshot;
-import org.apache.flink.api.common.typeutils.CompositeTypeSerializerUtil;
+import org.apache.flink.api.common.typeutils.TypeDeserializerAdapter;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
+import org.apache.flink.api.common.typeutils.TypeSerializerConfigSnapshot;
+import org.apache.flink.api.common.typeutils.UnloadableDummyTypeSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamstatus.StreamStatus;
 
@@ -153,8 +155,7 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 		}
 		else if (tag == TAG_LATENCY_MARKER) {
 			target.writeLong(source.readLong());
-			target.writeLong(source.readLong());
-			target.writeLong(source.readLong());
+			target.writeInt(source.readInt());
 			target.writeInt(source.readInt());
 		} else {
 			throw new IOException("Corrupt stream, found tag: " + tag);
@@ -185,8 +186,7 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 		else if (value.isLatencyMarker()) {
 			target.write(TAG_LATENCY_MARKER);
 			target.writeLong(value.asLatencyMarker().getMarkedTime());
-			target.writeLong(value.asLatencyMarker().getOperatorId().getLowerPart());
-			target.writeLong(value.asLatencyMarker().getOperatorId().getUpperPart());
+			target.writeInt(value.asLatencyMarker().getVertexID());
 			target.writeInt(value.asLatencyMarker().getSubtaskIndex());
 		}
 		else {
@@ -211,7 +211,7 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 			return new StreamStatus(source.readInt());
 		}
 		else if (tag == TAG_LATENCY_MARKER) {
-			return new LatencyMarker(source.readLong(), new OperatorID(source.readLong(), source.readLong()), source.readInt());
+			return new LatencyMarker(source.readLong(), source.readInt(), source.readInt());
 		}
 		else {
 			throw new IOException("Corrupt stream, found tag: " + tag);
@@ -238,7 +238,7 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 			return new Watermark(source.readLong());
 		}
 		else if (tag == TAG_LATENCY_MARKER) {
-			return new LatencyMarker(source.readLong(), new OperatorID(source.readLong(), source.readLong()), source.readInt());
+			return new LatencyMarker(source.readLong(), source.readInt(), source.readInt());
 		}
 		else {
 			throw new IOException("Corrupt stream, found tag: " + tag);
@@ -254,10 +254,15 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 		if (obj instanceof StreamElementSerializer) {
 			StreamElementSerializer<?> other = (StreamElementSerializer<?>) obj;
 
-			return typeSerializer.equals(other.typeSerializer);
+			return other.canEqual(this) && typeSerializer.equals(other.typeSerializer);
 		} else {
 			return false;
 		}
+	}
+
+	@Override
+	public boolean canEqual(Object obj) {
+		return obj instanceof StreamElementSerializer;
 	}
 
 	@Override
@@ -274,69 +279,56 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 	// --------------------------------------------------------------------------------------------
 
 	@Override
-	public StreamElementSerializerSnapshot<T> snapshotConfiguration() {
-		return new StreamElementSerializerSnapshot<>(this);
+	public StreamElementSerializerConfigSnapshot snapshotConfiguration() {
+		return new StreamElementSerializerConfigSnapshot<>(typeSerializer);
+	}
+
+	@Override
+	public CompatibilityResult<StreamElement> ensureCompatibility(TypeSerializerConfigSnapshot configSnapshot) {
+		Tuple2<TypeSerializer<?>, TypeSerializerConfigSnapshot> previousTypeSerializerAndConfig;
+
+		// we are compatible for data written by ourselves or the legacy MultiplexingStreamRecordSerializer
+		if (configSnapshot instanceof StreamElementSerializerConfigSnapshot) {
+			previousTypeSerializerAndConfig =
+				((StreamElementSerializerConfigSnapshot) configSnapshot).getSingleNestedSerializerAndConfig();
+		} else {
+			return CompatibilityResult.requiresMigration();
+		}
+
+		CompatibilityResult<T> compatResult = CompatibilityUtil.resolveCompatibilityResult(
+				previousTypeSerializerAndConfig.f0,
+				UnloadableDummyTypeSerializer.class,
+				previousTypeSerializerAndConfig.f1,
+				typeSerializer);
+
+		if (!compatResult.isRequiresMigration()) {
+			return CompatibilityResult.compatible();
+		} else if (compatResult.getConvertDeserializer() != null) {
+			return CompatibilityResult.requiresMigration(
+				new StreamElementSerializer<>(
+					new TypeDeserializerAdapter<>(compatResult.getConvertDeserializer())));
+		} else {
+			return CompatibilityResult.requiresMigration();
+		}
 	}
 
 	/**
 	 * Configuration snapshot specific to the {@link StreamElementSerializer}.
-	 * @deprecated see {@link StreamElementSerializerSnapshot}.
 	 */
-	@Deprecated
-	public static final class StreamElementSerializerConfigSnapshot<T> extends CompositeTypeSerializerConfigSnapshot<StreamElement> {
+	public static final class StreamElementSerializerConfigSnapshot<T> extends CompositeTypeSerializerConfigSnapshot {
 
 		private static final int VERSION = 1;
 
 		/** This empty nullary constructor is required for deserializing the configuration. */
 		public StreamElementSerializerConfigSnapshot() {}
 
+		public StreamElementSerializerConfigSnapshot(TypeSerializer<T> typeSerializer) {
+			super(typeSerializer);
+		}
+
 		@Override
 		public int getVersion() {
 			return VERSION;
-		}
-
-		@Override
-		public TypeSerializerSchemaCompatibility<StreamElement> resolveSchemaCompatibility(TypeSerializer<StreamElement> newSerializer) {
-			return CompositeTypeSerializerUtil.delegateCompatibilityCheckToNewSnapshot(
-				newSerializer,
-				new StreamElementSerializerSnapshot<>(),
-				getSingleNestedSerializerAndConfig().f1);
-		}
-	}
-
-	/**
-	 * Configuration snapshot specific to the {@link StreamElementSerializer}.
-	 */
-	public static final class StreamElementSerializerSnapshot<T>
-		extends CompositeTypeSerializerSnapshot<StreamElement, StreamElementSerializer<T>> {
-
-		private static final int VERSION = 2;
-
-		@SuppressWarnings("WeakerAccess")
-		public StreamElementSerializerSnapshot() {
-			super(StreamElementSerializer.class);
-		}
-
-		StreamElementSerializerSnapshot(StreamElementSerializer<T> serializerInstance) {
-			super(serializerInstance);
-		}
-
-		@Override
-		protected int getCurrentOuterSnapshotVersion() {
-			return VERSION;
-		}
-
-		@Override
-		protected TypeSerializer<?>[] getNestedSerializers(StreamElementSerializer<T> outerSerializer) {
-			return new TypeSerializer[]{outerSerializer.getContainedTypeSerializer()};
-		}
-
-		@Override
-		protected StreamElementSerializer<T> createOuterSerializerWithNestedSerializers(TypeSerializer<?>[] nestedSerializers) {
-			@SuppressWarnings("unchecked")
-			TypeSerializer<T> casted = (TypeSerializer<T>) nestedSerializers[0];
-
-			return new StreamElementSerializer<>(casted);
 		}
 	}
 }

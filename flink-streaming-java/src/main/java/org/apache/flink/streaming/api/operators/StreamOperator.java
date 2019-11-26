@@ -20,11 +20,11 @@ package org.apache.flink.streaming.api.operators;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
+import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.jobgraph.OperatorID;
-import org.apache.flink.runtime.state.CheckpointListener;
-import org.apache.flink.runtime.state.CheckpointStreamFactory;
+import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.util.Disposable;
+import org.apache.flink.streaming.runtime.tasks.StreamTask;
 
 import java.io.Serializable;
 
@@ -44,19 +44,20 @@ import java.io.Serializable;
  * @param <OUT> The output type of the operator
  */
 @PublicEvolving
-public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Disposable, Serializable {
+public interface StreamOperator<OUT> extends Serializable {
 
 	// ------------------------------------------------------------------------
 	//  life cycle
 	// ------------------------------------------------------------------------
 
 	/**
+	 * Initializes the operator. Sets access to the context and the output.
+	 */
+	void setup(StreamTask<?, ?> containingTask, StreamConfig config, Output<StreamRecord<OUT>> output);
+
+	/**
 	 * This method is called immediately before any elements are processed, it should contain the
 	 * operator's initialization logic.
-	 *
-	 * @implSpec In case of recovery, this method needs to ensure that all recovered data is processed before passing
-	 * back control, so that the order of elements is ensured during the recovery of an operator chain (operators
-	 * are opened from the tail operator to the head operator).
 	 *
 	 * @throws java.lang.Exception An exception in this method causes the operator to fail.
 	 */
@@ -83,32 +84,11 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 * <p>This method is expected to make a thorough effort to release all resources
 	 * that the operator has acquired.
 	 */
-	@Override
 	void dispose() throws Exception;
 
 	// ------------------------------------------------------------------------
 	//  state snapshots
 	// ------------------------------------------------------------------------
-
-	/**
-	 * This method is called when the operator should do a snapshot, before it emits its
-	 * own checkpoint barrier.
-	 *
-	 * <p>This method is intended not for any actual state persistence, but only for emitting some
-	 * data before emitting the checkpoint barrier. Operators that maintain some small transient state
-	 * that is inefficient to checkpoint (especially when it would need to be checkpointed in a
-	 * re-scalable way) but can simply be sent downstream before the checkpoint. An example are
-	 * opportunistic pre-aggregation operators, which have small the pre-aggregation state that is
-	 * frequently flushed downstream.
-	 *
-	 * <p><b>Important:</b> This method should not be used for any actual state snapshot logic, because
-	 * it will inherently be within the synchronous part of the operator's checkpoint. If heavy work is done
-	 * within this method, it will affect latency and downstream checkpoint alignments.
-	 *
-	 * @param checkpointId The ID of the checkpoint.
-	 * @throws Exception Throwing an exception here causes the operator to fail and go into recovery.
-	 */
-	void prepareSnapshotPreBarrier(long checkpointId) throws Exception;
 
 	/**
 	 * Called to draw a state snapshot from the operator.
@@ -118,16 +98,27 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 *
 	 * @throws Exception exception that happened during snapshotting.
 	 */
-	OperatorSnapshotFutures snapshotState(
+	OperatorSnapshotResult snapshotState(
 		long checkpointId,
 		long timestamp,
-		CheckpointOptions checkpointOptions,
-		CheckpointStreamFactory storageLocation) throws Exception;
+		CheckpointOptions checkpointOptions) throws Exception;
 
 	/**
-	 * Provides a context to initialize all state in the operator.
+	 * Provides state handles to restore the operator state.
+	 *
+	 * @param stateHandles state handles to the operator state.
 	 */
-	void initializeState() throws Exception;
+	void initializeState(OperatorSubtaskState stateHandles) throws Exception;
+
+	/**
+	 * Called when the checkpoint with the given ID is completed and acknowledged on the JobManager.
+	 *
+	 * @param checkpointId The ID of the checkpoint that has been completed.
+	 *
+	 * @throws Exception Exceptions during checkpoint acknowledgement may be forwarded and will cause
+	 *                   the program to fail and enter recovery.
+	 */
+	void notifyOfCompletedCheckpoint(long checkpointId) throws Exception;
 
 	// ------------------------------------------------------------------------
 	//  miscellaneous

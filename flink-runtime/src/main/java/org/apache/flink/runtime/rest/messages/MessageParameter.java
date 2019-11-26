@@ -42,7 +42,7 @@ public abstract class MessageParameter<X> {
 	private final String key;
 	private X value;
 
-	protected MessageParameter(String key, MessageParameterRequisiteness requisiteness) {
+	MessageParameter(String key, MessageParameterRequisiteness requisiteness) {
 		this.key = Preconditions.checkNotNull(key);
 		this.requisiteness = Preconditions.checkNotNull(requisiteness);
 	}
@@ -72,7 +72,7 @@ public abstract class MessageParameter<X> {
 	 *
 	 * @param value string representation of value to resolve this parameter with
 	 */
-	public final void resolveFromString(String value) throws ConversionException {
+	public final void resolveFromString(String value) {
 		resolve(convertFromString(value));
 	}
 
@@ -82,7 +82,7 @@ public abstract class MessageParameter<X> {
 	 * @param value string representation of parameter value
 	 * @return parameter value
 	 */
-	protected abstract X convertFromString(String value) throws ConversionException;
+	protected abstract X convertFromString(String value);
 
 	/**
 	 * Converts the given value to its string representation.
@@ -137,10 +137,4 @@ public abstract class MessageParameter<X> {
 		MANDATORY,
 		OPTIONAL
 	}
-
-	/**
-	 * Returns a description for REST API HTML documentation.
- 	 * @return escaped HTML string
-	 */
-	public abstract String getDescription();
 }

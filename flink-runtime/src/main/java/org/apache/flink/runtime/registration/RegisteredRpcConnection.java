@@ -24,10 +24,8 @@ import org.apache.flink.runtime.rpc.RpcGateway;
 import org.slf4j.Logger;
 
 import java.io.Serializable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -47,11 +45,6 @@ import static org.apache.flink.util.Preconditions.checkState;
  */
 public abstract class RegisteredRpcConnection<F extends Serializable, G extends RpcGateway, S extends RegistrationResponse.Success> {
 
-	private static final AtomicReferenceFieldUpdater<RegisteredRpcConnection, RetryingRegistration> REGISTRATION_UPDATER = AtomicReferenceFieldUpdater.newUpdater(
-		RegisteredRpcConnection.class,
-		RetryingRegistration.class,
-		"pendingRegistration");
-
 	/** The logger for all log messages of this class. */
 	protected final Logger log;
 
@@ -65,7 +58,7 @@ public abstract class RegisteredRpcConnection<F extends Serializable, G extends 
 	private final Executor executor;
 
 	/** The Registration of this RPC connection. */
-	private volatile RetryingRegistration<F, G, S> pendingRegistration;
+	private RetryingRegistration<F, G, S> pendingRegistration;
 
 	/** The gateway to register, it's null until the registration is completed. */
 	private volatile G targetGateway;
@@ -86,51 +79,26 @@ public abstract class RegisteredRpcConnection<F extends Serializable, G extends 
 	//  Life cycle
 	// ------------------------------------------------------------------------
 
+	@SuppressWarnings("unchecked")
 	public void start() {
 		checkState(!closed, "The RPC connection is already closed");
 		checkState(!isConnected() && pendingRegistration == null, "The RPC connection is already started");
 
-		final RetryingRegistration<F, G, S> newRegistration = createNewRegistration();
+		pendingRegistration = checkNotNull(generateRegistration());
+		pendingRegistration.startRegistration();
 
-		if (REGISTRATION_UPDATER.compareAndSet(this, null, newRegistration)) {
-			newRegistration.startRegistration();
-		} else {
-			// concurrent start operation
-			newRegistration.cancel();
-		}
-	}
+		CompletableFuture<Tuple2<G, S>> future = pendingRegistration.getFuture();
 
-	public boolean tryReconnect() {
-		checkState(isConnected(), "Cannot reconnect to an unknown destination.");
-
-		if (closed) {
-			return false;
-		} else {
-			final RetryingRegistration<F, G, S> currentPendingRegistration = pendingRegistration;
-
-			if (currentPendingRegistration != null) {
-				currentPendingRegistration.cancel();
-			}
-
-			final RetryingRegistration<F, G, S> newRegistration = createNewRegistration();
-
-			if (REGISTRATION_UPDATER.compareAndSet(this, currentPendingRegistration, newRegistration)) {
-				newRegistration.startRegistration();
-			} else {
-				// concurrent modification
-				newRegistration.cancel();
-				return false;
-			}
-
-			// double check for concurrent close operations
-			if (closed) {
-				newRegistration.cancel();
-
-				return false;
-			} else {
-				return true;
-			}
-		}
+		future.whenCompleteAsync(
+			(Tuple2<G, S> result, Throwable failure) -> {
+				// this future should only ever fail if there is a bug, not if the registration is declined
+				if (failure != null) {
+					onRegistrationFailure(failure);
+				} else {
+					targetGateway = result.f0;
+					onRegistrationSuccess(result.f1);
+				}
+			}, executor);
 	}
 
 	/**
@@ -200,42 +168,13 @@ public abstract class RegisteredRpcConnection<F extends Serializable, G extends 
 		}
 
 		if (isClosed()) {
-			connectionInfo += " is closed";
+			connectionInfo = connectionInfo + " is closed";
 		} else if (isConnected()){
-			connectionInfo += " is established";
+			connectionInfo = connectionInfo + " is established";
 		} else {
-			connectionInfo += " is connecting";
+			connectionInfo = connectionInfo + " is connecting";
 		}
 
 		return connectionInfo;
-	}
-
-	// ------------------------------------------------------------------------
-	//  Internal methods
-	// ------------------------------------------------------------------------
-
-	private RetryingRegistration<F, G, S> createNewRegistration() {
-		RetryingRegistration<F, G, S> newRegistration = checkNotNull(generateRegistration());
-
-		CompletableFuture<Tuple2<G, S>> future = newRegistration.getFuture();
-
-		future.whenCompleteAsync(
-			(Tuple2<G, S> result, Throwable failure) -> {
-				if (failure != null) {
-					if (failure instanceof CancellationException) {
-						// we ignore cancellation exceptions because they originate from cancelling
-						// the RetryingRegistration
-						log.debug("Retrying registration towards {} was cancelled.", targetAddress);
-					} else {
-						// this future should only ever fail if there is a bug, not if the registration is declined
-						onRegistrationFailure(failure);
-					}
-				} else {
-					targetGateway = result.f0;
-					onRegistrationSuccess(result.f1);
-				}
-			}, executor);
-
-		return newRegistration;
 	}
 }

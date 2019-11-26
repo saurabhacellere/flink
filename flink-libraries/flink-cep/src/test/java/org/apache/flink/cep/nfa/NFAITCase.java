@@ -21,26 +21,18 @@ package org.apache.flink.cep.nfa;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.cep.Event;
 import org.apache.flink.cep.SubEvent;
-import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
-import org.apache.flink.cep.nfa.sharedbuffer.SharedBuffer;
-import org.apache.flink.cep.nfa.sharedbuffer.SharedBufferAccessor;
+import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.pattern.Pattern;
 import org.apache.flink.cep.pattern.Quantifier;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
-import org.apache.flink.cep.utils.NFATestHarness;
-import org.apache.flink.cep.utils.TestSharedBuffer;
-import org.apache.flink.cep.utils.TestTimerService;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.TestLogger;
 
 import org.apache.flink.shaded.guava18.com.google.common.collect.Lists;
 
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
-import org.mockito.Mockito;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -51,11 +43,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.flink.cep.utils.NFATestUtilities.compareMaps;
-import static org.apache.flink.cep.utils.NFATestUtilities.feedNFA;
-import static org.apache.flink.cep.utils.NFAUtils.compile;
+import static org.apache.flink.cep.nfa.NFATestUtilities.compareMaps;
+import static org.apache.flink.cep.nfa.NFATestUtilities.feedNFA;
 import static org.junit.Assert.assertEquals;
-import static org.mockito.Matchers.anyLong;
 
 /**
  * General tests for {@link NFA} features. See also {@link IterativeConditionsITCase}, {@link NotPatternITCase},
@@ -64,22 +54,8 @@ import static org.mockito.Matchers.anyLong;
 @SuppressWarnings("unchecked")
 public class NFAITCase extends TestLogger {
 
-	private SharedBuffer<Event> sharedBuffer;
-	private SharedBufferAccessor<Event> sharedBufferAccessor;
-
-	@Before
-	public void init() {
-		sharedBuffer = TestSharedBuffer.createTestBuffer(Event.createTypeSerializer());
-		sharedBufferAccessor = sharedBuffer.getAccessor();
-	}
-
-	@After
-	public void clear() throws Exception{
-		sharedBufferAccessor.close();
-	}
-
 	@Test
-	public void testNoConditionNFA() throws Exception {
+	public void testNoConditionNFA() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event a = new Event(40, "a", 1.0);
@@ -96,7 +72,7 @@ public class NFAITCase extends TestLogger {
 
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").followedBy("end");
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -109,7 +85,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testNoConditionLoopingNFA() throws Exception {
+	public void testNoConditionLoopingNFA() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event a = new Event(40, "a", 1.0);
@@ -126,7 +102,7 @@ public class NFAITCase extends TestLogger {
 
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").followedBy("end").oneOrMore();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -145,7 +121,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testAnyWithNoConditionNFA() throws Exception {
+	public void testAnyWithNoConditionNFA() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event a = new Event(40, "a", 1.0);
@@ -162,7 +138,7 @@ public class NFAITCase extends TestLogger {
 
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").followedByAny("end");
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -181,7 +157,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testSimplePatternNFA() throws Exception {
+	public void testSimplePatternNFA() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(41, "start", 1.0);
@@ -218,7 +194,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -228,7 +204,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStrictContinuityWithResults() throws Exception {
+	public void testStrictContinuityWithResults() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event middleEvent1 = new Event(41, "a", 2.0);
@@ -253,7 +229,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -263,7 +239,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStrictContinuityNoResults() throws Exception {
+	public void testStrictContinuityNoResults() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event middleEvent1 = new Event(41, "a", 2.0);
@@ -290,7 +266,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -302,7 +278,7 @@ public class NFAITCase extends TestLogger {
 	 * length.
 	 */
 	@Test
-	public void testSimplePatternWithTimeWindowNFA() throws Exception {
+	public void testSimplePatternWithTimeWindowNFA() {
 		List<StreamRecord<Event>> events = new ArrayList<>();
 
 		final Event startEvent;
@@ -339,7 +315,7 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(10));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(events, nfa);
 
@@ -353,7 +329,7 @@ public class NFAITCase extends TestLogger {
 	 * out.
 	 */
 	@Test
-	public void testSimplePatternWithTimeoutHandling() throws Exception {
+	public void testSimplePatternWithTimeoutHandling() {
 		List<StreamRecord<Event>> events = new ArrayList<>();
 		List<Map<String, List<Event>>> resultingPatterns = new ArrayList<>();
 		Set<Tuple2<Map<String, List<Event>>, Long>> resultingTimeoutPatterns = new HashSet<>();
@@ -381,9 +357,9 @@ public class NFAITCase extends TestLogger {
 		timeoutPattern4.put("start", Collections.singletonList(new Event(2, "start", 1.0)));
 
 		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern1, 11L));
-		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern2, 12L));
+		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern2, 13L));
 		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern3, 11L));
-		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern4, 12L));
+		expectedTimeoutPatterns.add(Tuple2.of(timeoutPattern4, 13L));
 
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").where(new SimpleCondition<Event>() {
 			private static final long serialVersionUID = 7907391379273505897L;
@@ -408,21 +384,14 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(10));
 
-		NFA<Event> nfa = compile(pattern, true);
-
-		NFAState nfaState = nfa.createInitialNFAState();
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), true);
 
 		for (StreamRecord<Event> event: events) {
+			Tuple2<Collection<Map<String, List<Event>>>, Collection<Tuple2<Map<String, List<Event>>, Long>>> patterns =
+					nfa.process(event.getValue(), event.getTimestamp());
 
-			Collection<Tuple2<Map<String, List<Event>>, Long>> timeoutPatterns =
-				nfa.advanceTime(sharedBufferAccessor, nfaState, event.getTimestamp());
-			Collection<Map<String, List<Event>>> matchedPatterns =
-				nfa.process(sharedBufferAccessor,
-					nfaState,
-					event.getValue(),
-					event.getTimestamp(),
-					AfterMatchSkipStrategy.noSkip(),
-					new TestTimerService());
+			Collection<Map<String, List<Event>>> matchedPatterns = patterns.f0;
+			Collection<Tuple2<Map<String, List<Event>>, Long>> timeoutPatterns = patterns.f1;
 
 			resultingPatterns.addAll(matchedPatterns);
 			resultingTimeoutPatterns.addAll(timeoutPatterns);
@@ -435,7 +404,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testBranchingPattern() throws Exception {
+	public void testBranchingPattern() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "start", 1.0);
@@ -484,7 +453,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -499,7 +468,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testComplexBranchingAfterZeroOrMore() throws Exception {
+	public void testComplexBranchingAfterZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -557,7 +526,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -582,7 +551,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testZeroOrMore() throws Exception {
+	public void testZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -618,7 +587,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -631,7 +600,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEagerZeroOrMore() throws Exception {
+	public void testEagerZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -670,7 +639,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -683,7 +652,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testBeginWithZeroOrMore() throws Exception {
+	public void testBeginWithZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event middleEvent1 = new Event(40, "a", 2.0);
@@ -712,7 +681,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -728,7 +697,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testZeroOrMoreAfterZeroOrMore() throws Exception {
+	public void testZeroOrMoreAfterZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -775,7 +744,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -790,7 +759,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testZeroOrMoreAfterBranching() throws Exception {
+	public void testZeroOrMoreAfterBranching() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -846,7 +815,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -863,7 +832,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStrictContinuityNoResultsAfterZeroOrMore() throws Exception {
+	public void testStrictContinuityNoResultsAfterZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event start = new Event(40, "d", 2.0);
@@ -902,7 +871,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -910,7 +879,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStrictContinuityResultsAfterZeroOrMore() throws Exception {
+	public void testStrictContinuityResultsAfterZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event start = new Event(40, "d", 2.0);
@@ -946,7 +915,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -957,7 +926,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testAtLeastOne() throws Exception {
+	public void testAtLeastOne() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -993,7 +962,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1005,7 +974,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testBeginWithAtLeastOne() throws Exception {
+	public void testBeginWithAtLeastOne() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent1 = new Event(41, "a", 2.0);
@@ -1034,7 +1003,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1050,7 +1019,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testNextZeroOrMore() throws Exception {
+	public void testNextZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "start", 1.0);
@@ -1089,7 +1058,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1099,7 +1068,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testAtLeastOneEager() throws Exception {
+	public void testAtLeastOneEager() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1137,7 +1106,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1152,7 +1121,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testOptional() throws Exception {
+	public void testOptional() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1186,7 +1155,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1197,7 +1166,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimes() throws Exception {
+	public void testTimes() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1235,7 +1204,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1246,7 +1215,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStartWithTimes() throws Exception {
+	public void testStartWithTimes() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event middleEvent1 = new Event(41, "a", 2.0);
@@ -1275,7 +1244,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1287,7 +1256,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNonStrictWithNext() throws Exception {
+	public void testTimesNonStrictWithNext() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1321,7 +1290,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1332,7 +1301,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNotStrictWithFollowedByEager() throws Exception {
+	public void testTimesNotStrictWithFollowedByEager() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1364,7 +1333,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1374,7 +1343,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNotStrictWithFollowedByNotEager() throws Exception {
+	public void testTimesNotStrictWithFollowedByNotEager() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1406,7 +1375,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1418,7 +1387,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesStrictWithNextAndConsecutive() throws Exception {
+	public void testTimesStrictWithNextAndConsecutive() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1451,7 +1420,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1459,7 +1428,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStartWithOptional() throws Exception {
+	public void testStartWithOptional() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1484,7 +1453,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1495,7 +1464,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithZeroOrMore() throws Exception {
+	public void testEndWithZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1524,7 +1493,7 @@ public class NFAITCase extends TestLogger {
 			}
 		}).oneOrMore().optional();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1537,7 +1506,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStartAndEndWithZeroOrMore() throws Exception {
+	public void testStartAndEndWithZeroOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1565,7 +1534,7 @@ public class NFAITCase extends TestLogger {
 			}
 		}).oneOrMore().optional();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1580,7 +1549,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithOptional() throws Exception {
+	public void testEndWithOptional() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1605,7 +1574,7 @@ public class NFAITCase extends TestLogger {
 			}
 		}).optional();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1616,7 +1585,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testEndWithOneOrMore() throws Exception {
+	public void testEndWithOneOrMore() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -1645,7 +1614,7 @@ public class NFAITCase extends TestLogger {
 			}
 		}).oneOrMore();
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1659,7 +1628,7 @@ public class NFAITCase extends TestLogger {
 	///////////////////////////////         Optional           ////////////////////////////////////////
 
 	@Test
-	public void testTimesNonStrictOptional1() throws Exception {
+	public void testTimesNonStrictOptional1() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1689,7 +1658,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1699,7 +1668,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNonStrictOptional2() throws Exception {
+	public void testTimesNonStrictOptional2() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1733,7 +1702,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1746,7 +1715,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNonStrictOptional3() throws Exception {
+	public void testTimesNonStrictOptional3() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1780,7 +1749,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1792,7 +1761,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesStrictOptional() throws Exception {
+	public void testTimesStrictOptional() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1826,7 +1795,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1837,7 +1806,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testOneOrMoreStrictOptional() throws Exception {
+	public void testOneOrMoreStrictOptional() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1871,7 +1840,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1885,7 +1854,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesStrictOptional1() throws Exception {
+	public void testTimesStrictOptional1() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1917,7 +1886,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1928,7 +1897,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testOptionalTimesNonStrictWithNext() throws Exception {
+	public void testOptionalTimesNonStrictWithNext() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -1962,7 +1931,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -1987,7 +1956,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStrictOneOrMore() throws Exception {
+	public void testStrictOneOrMore() {
 		List<List<Event>> resultingPatterns = testOneOrMore(Quantifier.ConsumingStrategy.STRICT);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -1998,7 +1967,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testSkipTillNextOneOrMore() throws Exception {
+	public void testSkipTillNextOneOrMore() {
 		List<List<Event>> resultingPatterns = testOneOrMore(Quantifier.ConsumingStrategy.SKIP_TILL_NEXT);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -2010,7 +1979,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testSkipTillAnyOneOrMore() throws Exception {
+	public void testSkipTillAnyOneOrMore() {
 		List<List<Event>> resultingPatterns = testOneOrMore(Quantifier.ConsumingStrategy.SKIP_TILL_ANY);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -2025,7 +1994,7 @@ public class NFAITCase extends TestLogger {
 		));
 	}
 
-	private List<List<Event>> testOneOrMore(Quantifier.ConsumingStrategy strategy) throws Exception {
+	private List<List<Event>> testOneOrMore(Quantifier.ConsumingStrategy strategy) {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -2073,13 +2042,13 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		return feedNFA(inputEvents, nfa);
 	}
 
 	@Test
-	public void testStrictEagerZeroOrMore() throws Exception {
+	public void testStrictEagerZeroOrMore() {
 		List<List<Event>> resultingPatterns = testZeroOrMore(Quantifier.ConsumingStrategy.STRICT);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -2091,7 +2060,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testSkipTillAnyZeroOrMore() throws Exception {
+	public void testSkipTillAnyZeroOrMore() {
 		List<List<Event>> resultingPatterns = testZeroOrMore(Quantifier.ConsumingStrategy.SKIP_TILL_ANY);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -2108,7 +2077,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testSkipTillNextZeroOrMore() throws Exception {
+	public void testSkipTillNextZeroOrMore() {
 		List<List<Event>> resultingPatterns = testZeroOrMore(Quantifier.ConsumingStrategy.SKIP_TILL_NEXT);
 
 		compareMaps(resultingPatterns, Lists.<List<Event>>newArrayList(
@@ -2120,7 +2089,7 @@ public class NFAITCase extends TestLogger {
 		));
 	}
 
-	private List<List<Event>> testZeroOrMore(Quantifier.ConsumingStrategy strategy) throws Exception {
+	private List<List<Event>> testZeroOrMore(Quantifier.ConsumingStrategy strategy) {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -2168,13 +2137,13 @@ public class NFAITCase extends TestLogger {
 					}
 				});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		return feedNFA(inputEvents, nfa);
 	}
 
 	@Test
-	public void testTimesStrict() throws Exception {
+	public void testTimesStrict() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -2208,7 +2177,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -2218,7 +2187,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testTimesNonStrict() throws Exception {
+	public void testTimesNonStrict() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -2252,7 +2221,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -2264,7 +2233,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStartWithZeroOrMoreStrict() throws Exception {
+	public void testStartWithZeroOrMoreStrict() {
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").where(new SimpleCondition<Event>() {
 			private static final long serialVersionUID = 5726188262756267490L;
 
@@ -2278,7 +2247,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testStartWithOneOrMoreStrict() throws Exception {
+	public void testStartWithOneOrMoreStrict() {
 
 		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").where(new SimpleCondition<Event>() {
 			private static final long serialVersionUID = 5726188262756267490L;
@@ -2292,7 +2261,7 @@ public class NFAITCase extends TestLogger {
 		testStartWithOneOrZeroOrMoreStrict(pattern);
 	}
 
-	private void testStartWithOneOrZeroOrMoreStrict(Pattern<Event, ?> pattern) throws Exception {
+	private void testStartWithOneOrZeroOrMoreStrict(Pattern<Event, ?> pattern) {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.startEvent, 1));
@@ -2301,7 +2270,7 @@ public class NFAITCase extends TestLogger {
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.middleEvent2, 5));
 		inputEvents.add(new StreamRecord<>(ConsecutiveData.middleEvent3, 6));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -2316,7 +2285,7 @@ public class NFAITCase extends TestLogger {
 	///////////////////////////////     Clearing SharedBuffer     ////////////////////////////////////////
 
 	@Test
-	public void testTimesClearingBuffer() throws Exception {
+	public void testTimesClearingBuffer() {
 		Event startEvent = new Event(40, "c", 1.0);
 		Event middleEvent1 = new Event(41, "a", 2.0);
 		Event middleEvent2 = new Event(42, "a", 3.0);
@@ -2346,27 +2315,22 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(8));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
-		NFAState nfaState = nfa.createInitialNFAState();
-
-		NFATestHarness nfaTestHarness = NFATestHarness.forNFA(nfa).withNFAState(nfaState).build();
-
-		nfaTestHarness.feedRecord(new StreamRecord<>(startEvent, 1));
-		nfaTestHarness.feedRecord(new StreamRecord<>(middleEvent1, 2));
-		nfaTestHarness.feedRecord(new StreamRecord<>(middleEvent2, 3));
-		nfaTestHarness.feedRecord(new StreamRecord<>(middleEvent3, 4));
-		nfaTestHarness.feedRecord(new StreamRecord<>(end1, 6));
+		nfa.process(startEvent, 1);
+		nfa.process(middleEvent1, 2);
+		nfa.process(middleEvent2, 3);
+		nfa.process(middleEvent3, 4);
+		nfa.process(end1, 6);
 
 		//pruning element
-		nfa.advanceTime(sharedBufferAccessor, nfaState, 10);
+		nfa.process(null, 10);
 
-		assertEquals(1, nfaState.getPartialMatches().size());
-		assertEquals("start", nfaState.getPartialMatches().peek().getCurrentStateName());
+		assertEquals(true, nfa.isEmpty());
 	}
 
 	@Test
-	public void testOptionalClearingBuffer() throws Exception {
+	public void testOptionalClearingBuffer() {
 		Event startEvent = new Event(40, "c", 1.0);
 		Event middleEvent = new Event(43, "a", 4.0);
 		Event end1 = new Event(44, "b", 5.0);
@@ -2394,24 +2358,20 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(8));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
-		NFAState nfaState = nfa.createInitialNFAState();
-		NFATestHarness nfaTestHarness = NFATestHarness.forNFA(nfa).withNFAState(nfaState).build();
-
-		nfaTestHarness.feedRecord(new StreamRecord<>(startEvent, 1));
-		nfaTestHarness.feedRecord(new StreamRecord<>(middleEvent, 5));
-		nfaTestHarness.feedRecord(new StreamRecord<>(end1, 6));
+		nfa.process(startEvent, 1);
+		nfa.process(middleEvent, 5);
+		nfa.process(end1, 6);
 
 		//pruning element
-		nfa.advanceTime(sharedBufferAccessor, nfaState, 10);
+		nfa.process(null, 10);
 
-		assertEquals(1, nfaState.getPartialMatches().size());
-		assertEquals("start", nfaState.getPartialMatches().peek().getCurrentStateName());
+		assertEquals(true, nfa.isEmpty());
 	}
 
 	@Test
-	public void testAtLeastOneClearingBuffer() throws Exception {
+	public void testAtLeastOneClearingBuffer() {
 		Event startEvent = new Event(40, "c", 1.0);
 		Event middleEvent1 = new Event(41, "a", 2.0);
 		Event middleEvent2 = new Event(42, "a", 3.0);
@@ -2440,25 +2400,21 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(8));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
-		NFAState nfaState = nfa.createInitialNFAState();
-		NFATestHarness nfaTestHarness = NFATestHarness.forNFA(nfa).withNFAState(nfaState).build();
-
-		nfaTestHarness.consumeRecord(new StreamRecord<>(startEvent, 1));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(middleEvent1, 3));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(middleEvent2, 4));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(end1, 6));
+		nfa.process(startEvent, 1);
+		nfa.process(middleEvent1, 3);
+		nfa.process(middleEvent2, 4);
+		nfa.process(end1, 6);
 
 		//pruning element
-		nfa.advanceTime(sharedBufferAccessor, nfaState, 10);
+		nfa.process(null, 10);
 
-		assertEquals(1, nfaState.getPartialMatches().size());
-		assertEquals("start", nfaState.getPartialMatches().peek().getCurrentStateName());
+		assertEquals(true, nfa.isEmpty());
 	}
 
 	@Test
-	public void testZeroOrMoreClearingBuffer() throws Exception {
+	public void testZeroOrMoreClearingBuffer() {
 		Event startEvent = new Event(40, "c", 1.0);
 		Event middleEvent1 = new Event(41, "a", 2.0);
 		Event middleEvent2 = new Event(42, "a", 3.0);
@@ -2487,27 +2443,23 @@ public class NFAITCase extends TestLogger {
 			}
 		}).within(Time.milliseconds(8));
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
-		NFAState nfaState = nfa.createInitialNFAState();
-		NFATestHarness nfaTestHarness = NFATestHarness.forNFA(nfa).withNFAState(nfaState).build();
-
-		nfaTestHarness.consumeRecord(new StreamRecord<>(startEvent, 1));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(middleEvent1, 3));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(middleEvent2, 4));
-		nfaTestHarness.consumeRecord(new StreamRecord<>(end1, 6));
+		nfa.process(startEvent, 1);
+		nfa.process(middleEvent1, 3);
+		nfa.process(middleEvent2, 4);
+		nfa.process(end1, 6);
 
 		//pruning element
-		nfa.advanceTime(sharedBufferAccessor, nfaState, 10);
+		nfa.process(null, 10);
 
-		assertEquals(1, nfaState.getPartialMatches().size());
-		assertEquals("start", nfaState.getPartialMatches().peek().getCurrentStateName());
+		assertEquals(true, nfa.isEmpty());
 	}
 
 	///////////////////////////////////////   Skip till next     /////////////////////////////
 
 	@Test
-	public void testBranchingPatternSkipTillNext() throws Exception {
+	public void testBranchingPatternSkipTillNext() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "start", 1.0);
@@ -2556,7 +2508,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> patterns = feedNFA(inputEvents, nfa);
 
@@ -2566,7 +2518,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testBranchingPatternMixedFollowedBy() throws Exception {
+	public void testBranchingPatternMixedFollowedBy() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "start", 1.0);
@@ -2615,7 +2567,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> patterns = feedNFA(inputEvents, nfa);
 
@@ -2627,7 +2579,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testMultipleTakesVersionCollision() throws Exception {
+	public void testMultipleTakesVersionCollision() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent = new Event(40, "c", 1.0);
@@ -2676,7 +2628,7 @@ public class NFAITCase extends TestLogger {
 			}
 		});
 
-		NFA<Event> nfa = compile(pattern, false);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
 
 		final List<List<Event>> resultingPatterns = feedNFA(inputEvents, nfa);
 
@@ -2709,7 +2661,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testNFAResultOrdering() throws Exception {
+	public void testNFAResultOrdering() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event startEvent1 = new Event(41, "a-1", 2.0);
@@ -2747,12 +2699,21 @@ public class NFAITCase extends TestLogger {
 					}
 				}).times(3).consecutive();
 
-		NFATestHarness nfaTestHarness = NFATestHarness.forPattern(pattern).build();
-		Collection<Map<String, List<Event>>> resultingPatterns = nfaTestHarness.consumeRecords(inputEvents);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
+
+		List<Map<String, List<Event>>> resultingPatterns = new ArrayList<>();
+
+		for (StreamRecord<Event> inputEvent : inputEvents) {
+			Collection<Map<String, List<Event>>> patterns = nfa.process(
+					inputEvent.getValue(),
+					inputEvent.getTimestamp()).f0;
+
+			resultingPatterns.addAll(patterns);
+		}
 
 		Assert.assertEquals(1L, resultingPatterns.size());
 
-		Map<String, List<Event>> match = resultingPatterns.iterator().next();
+		Map<String, List<Event>> match = resultingPatterns.get(0);
 		Assert.assertArrayEquals(
 				match.get("start").toArray(),
 				Lists.newArrayList(startEvent1, startEvent2, startEvent3, startEvent4).toArray());
@@ -2763,7 +2724,7 @@ public class NFAITCase extends TestLogger {
 	}
 
 	@Test
-	public void testNFAResultKeyOrdering() throws Exception {
+	public void testNFAResultKeyOrdering() {
 		List<StreamRecord<Event>> inputEvents = new ArrayList<>();
 
 		Event a1 = new Event(41, "a", 2.0);
@@ -2809,12 +2770,21 @@ public class NFAITCase extends TestLogger {
 				}
 			});
 
-		NFATestHarness nfaTestHarness = NFATestHarness.forPattern(pattern).build();
-		Collection<Map<String, List<Event>>> resultingPatterns = nfaTestHarness.consumeRecords(inputEvents);
+		NFA<Event> nfa = NFACompiler.compile(pattern, Event.createTypeSerializer(), false);
+
+		List<Map<String, List<Event>>> resultingPatterns = new ArrayList<>();
+
+		for (StreamRecord<Event> inputEvent : inputEvents) {
+			Collection<Map<String, List<Event>>> patterns = nfa.process(
+				inputEvent.getValue(),
+				inputEvent.getTimestamp()).f0;
+
+			resultingPatterns.addAll(patterns);
+		}
 
 		Assert.assertEquals(1L, resultingPatterns.size());
 
-		Map<String, List<Event>> match = resultingPatterns.iterator().next();
+		Map<String, List<Event>> match = resultingPatterns.get(0);
 
 		List<String> expectedOrder = Lists.newArrayList("a", "b", "aa", "bb", "ab");
 		List<String> resultOrder = new ArrayList<>();
@@ -2823,25 +2793,5 @@ public class NFAITCase extends TestLogger {
 		}
 
 		Assert.assertEquals(expectedOrder, resultOrder);
-	}
-
-	@Test
-	public void testSharedBufferClearing() throws Exception {
-		Pattern<Event, ?> pattern = Pattern.<Event>begin("start").followedBy("end");
-
-		Event a = new Event(40, "a", 1.0);
-		Event b = new Event(41, "b", 2.0);
-
-		NFA<Event> nfa = compile(pattern, false);
-		TestTimerService timerService = new TestTimerService();
-		try (SharedBufferAccessor<Event> accessor = Mockito.spy(sharedBuffer.getAccessor())) {
-			nfa.process(accessor, nfa.createInitialNFAState(), a, 1, AfterMatchSkipStrategy.noSkip(),
-				timerService);
-			nfa.process(accessor, nfa.createInitialNFAState(), b, 2, AfterMatchSkipStrategy.noSkip(),
-				timerService);
-			Mockito.verify(accessor, Mockito.never()).advanceTime(anyLong());
-			nfa.advanceTime(accessor, nfa.createInitialNFAState(), 2);
-			Mockito.verify(accessor, Mockito.times(1)).advanceTime(2);
-		}
 	}
 }
