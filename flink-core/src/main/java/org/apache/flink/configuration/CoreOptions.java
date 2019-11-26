@@ -23,7 +23,6 @@ import org.apache.flink.annotation.docs.ConfigGroup;
 import org.apache.flink.annotation.docs.ConfigGroups;
 import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.description.Description;
-import org.apache.flink.util.ArrayUtils;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
 
@@ -92,7 +91,7 @@ public class CoreOptions {
 	 */
 	public static final ConfigOption<String> ALWAYS_PARENT_FIRST_LOADER_PATTERNS = ConfigOptions
 		.key("classloader.parent-first-patterns.default")
-		.defaultValue("java.;scala.;org.apache.flink.;com.esotericsoftware.kryo;org.apache.hadoop.;javax.annotation.;org.slf4j;org.apache.log4j;org.apache.logging;org.apache.commons.logging;ch.qos.logback;org.xml;javax.xml;org.apache.xerces;org.w3c")
+		.defaultValue("java.;scala.;org.apache.flink.;com.esotericsoftware.kryo;org.apache.hadoop.;javax.annotation.;org.slf4j;org.apache.log4j;org.apache.logging;org.apache.commons.logging;ch.qos.logback")
 		.withDeprecatedKeys("classloader.parent-first-patterns")
 		.withDescription("A (semicolon-separated) list of patterns that specifies which classes should always be" +
 			" resolved through the parent ClassLoader first. A pattern is a simple prefix that is checked against" +
@@ -117,7 +116,12 @@ public class CoreOptions {
 		if (append.isEmpty()) {
 			return basePatterns;
 		} else {
-			return ArrayUtils.concat(basePatterns, append.split(";"));
+			String[] appendPatterns = append.split(";");
+
+			String[] joinedPatterns = new String[basePatterns.length + appendPatterns.length];
+			System.arraycopy(basePatterns, 0, joinedPatterns, 0, basePatterns.length);
+			System.arraycopy(appendPatterns, 0, joinedPatterns, basePatterns.length, appendPatterns.length);
+			return joinedPatterns;
 		}
 	}
 
@@ -206,14 +210,14 @@ public class CoreOptions {
 
 	/**
 	 * The config parameter defining the directories for temporary files, separated by
-	 * ",", "|", or the system's {@link java.io.File#pathSeparator}.
+	 * "," or the system's {@link java.io.File#pathSeparator}.
 	 */
 	@Documentation.OverrideDefault("'LOCAL_DIRS' on Yarn. '_FLINK_TMP_DIR' on Mesos. System.getProperty(\"java.io.tmpdir\") in standalone.")
 	public static final ConfigOption<String> TMP_DIRS =
 		key("io.tmp.dirs")
 			.defaultValue(System.getProperty("java.io.tmpdir"))
 			.withDeprecatedKeys("taskmanager.tmp.dirs")
-			.withDescription("Directories for temporary files, separated by\",\", \"|\", or the system's java.io.File.pathSeparator.");
+			.withDescription("Directories for temporary files, separated by\",\" or the system's java.io.File.pathSeparator.");
 
 	// ------------------------------------------------------------------------
 	//  program
@@ -236,7 +240,7 @@ public class CoreOptions {
 			.key("fs.default-scheme")
 			.noDefaultValue()
 			.withDescription("The default filesystem scheme, used for paths that do not declare a scheme explicitly." +
-				" May contain an authority, e.g. host:port in case of an HDFS NameNode.");
+				" May contain an authority, e.g. host:port in case of a HDFS NameNode.");
 
 	/**
 	 * Specifies whether file output writers should overwrite existing files by default.

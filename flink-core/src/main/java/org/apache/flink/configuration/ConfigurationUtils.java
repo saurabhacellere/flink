@@ -18,16 +18,19 @@
 
 package org.apache.flink.configuration;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nonnull;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.configuration.MetricOptions.SYSTEM_RESOURCE_METRICS;
 import static org.apache.flink.configuration.MetricOptions.SYSTEM_RESOURCE_METRICS_PROBING_INTERVAL;
@@ -38,6 +41,11 @@ import static org.apache.flink.configuration.MetricOptions.SYSTEM_RESOURCE_METRI
 public class ConfigurationUtils {
 
 	private static final String[] EMPTY = new String[0];
+
+	@VisibleForTesting
+	static final String[] PATH_SEPARATORS = {",", File.pathSeparator};
+
+	private static final Pattern PATH_SEPARATORS_PATTERN = compilePathSeparatorsAsPattern(PATH_SEPARATORS);
 
 	/**
 	 * Get job manager's heap memory. This method will check the new key
@@ -54,7 +62,7 @@ public class ConfigurationUtils {
 			return MemorySize.parse(configuration.getInteger(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY_MB) + "m");
 		} else {
 			//use default value
-			return MemorySize.parse(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY.defaultValue());
+			return MemorySize.parse(configuration.getString(JobManagerOptions.JOB_MANAGER_HEAP_MEMORY));
 		}
 	}
 
@@ -73,7 +81,7 @@ public class ConfigurationUtils {
 			return MemorySize.parse(configuration.getInteger(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY_MB) + "m");
 		} else {
 			//use default value
-			return MemorySize.parse(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY.defaultValue());
+			return MemorySize.parse(configuration.getString(TaskManagerOptions.TASK_MANAGER_HEAP_MEMORY));
 		}
 	}
 
@@ -115,17 +123,6 @@ public class ConfigurationUtils {
 		return splitPaths(configValue);
 	}
 
-	public static Time getStandaloneClusterStartupPeriodTime(Configuration configuration) {
-		final Time timeout;
-		long standaloneClusterStartupPeriodTime = configuration.getLong(ResourceManagerOptions.STANDALONE_CLUSTER_STARTUP_PERIOD_TIME);
-		if (standaloneClusterStartupPeriodTime >= 0) {
-			timeout = Time.milliseconds(standaloneClusterStartupPeriodTime);
-		} else {
-			timeout = Time.milliseconds(configuration.getLong(JobManagerOptions.SLOT_REQUEST_TIMEOUT));
-		}
-		return timeout;
-	}
-
 	/**
 	 * Creates a new {@link Configuration} from the given {@link Properties}.
 	 *
@@ -145,33 +142,27 @@ public class ConfigurationUtils {
 		return configuration;
 	}
 
-	/**
-	 * Replaces values whose keys are sensitive according to {@link GlobalConfiguration#isSensitive(String)}
-	 * with {@link GlobalConfiguration#HIDDEN_CONTENT}.
-	 *
-	 * <p>This can be useful when displaying configuration values.
-	 *
-	 * @param keyValuePairs for which to hide sensitive values
-	 * @return A map where all sensitive value are hidden
-	 */
-	@Nonnull
-	public static Map<String, String> hideSensitiveValues(Map<String, String> keyValuePairs) {
-		final HashMap<String, String> result = new HashMap<>();
+	private static Pattern compilePathSeparatorsAsPattern(String... separators) {
+		String regex = Arrays.stream(separators).map(Pattern::quote).collect(Collectors.joining("|"));
+		return Pattern.compile(regex);
+	}
 
-		for (Map.Entry<String, String> keyValuePair : keyValuePairs.entrySet()) {
-			if (GlobalConfiguration.isSensitive(keyValuePair.getKey())) {
-				result.put(keyValuePair.getKey(), GlobalConfiguration.HIDDEN_CONTENT);
-			} else {
-				result.put(keyValuePair.getKey(), keyValuePair.getValue());
-			}
-		}
-
-		return result;
+	private static String[] splitPaths(Pattern pattern, @Nonnull String separatedPaths) {
+		return separatedPaths.isEmpty() ? EMPTY : pattern.split(separatedPaths);
 	}
 
 	@Nonnull
-	public static String[] splitPaths(@Nonnull String separatedPaths) {
-		return separatedPaths.length() > 0 ? separatedPaths.split(",|" + File.pathSeparator) : EMPTY;
+	@VisibleForTesting
+	static String[] splitPaths(@Nonnull String separatedPaths, @Nonnull String... pathSeparators) {
+		Preconditions.checkArgument(pathSeparators.length != 0, "Empty path separators");
+		Pattern pattern = compilePathSeparatorsAsPattern(pathSeparators);
+		return splitPaths(pattern, separatedPaths);
+	}
+
+	@Nonnull
+	@VisibleForTesting
+	static String[] splitPaths(@Nonnull String separatedPaths) {
+		return splitPaths(PATH_SEPARATORS_PATTERN, separatedPaths);
 	}
 
 	// Make sure that we cannot instantiate this class
