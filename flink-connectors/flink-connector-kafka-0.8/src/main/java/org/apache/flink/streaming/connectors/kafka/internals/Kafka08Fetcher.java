@@ -25,8 +25,8 @@ import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
 import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceContext;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
+import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.SerializedValue;
 
@@ -47,6 +47,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -68,7 +69,7 @@ public class Kafka08Fetcher<T> extends AbstractFetcher<T, TopicAndPartition> {
 	// ------------------------------------------------------------------------
 
 	/** The schema to convert between Kafka's byte messages, and Flink's objects. */
-	private final KafkaDeserializationSchema<T> deserializer;
+	private final KeyedDeserializationSchema<T> deserializer;
 
 	/** The properties that configure the Kafka connection. */
 	private final Properties kafkaConfig;
@@ -94,7 +95,7 @@ public class Kafka08Fetcher<T> extends AbstractFetcher<T, TopicAndPartition> {
 			SerializedValue<AssignerWithPeriodicWatermarks<T>> watermarksPeriodic,
 			SerializedValue<AssignerWithPunctuatedWatermarks<T>> watermarksPunctuated,
 			StreamingRuntimeContext runtimeContext,
-			KafkaDeserializationSchema<T> deserializer,
+			KeyedDeserializationSchema<T> deserializer,
 			Properties kafkaProperties,
 			long autoCommitInterval,
 			MetricGroup consumerMetricGroup,
@@ -342,6 +343,11 @@ public class Kafka08Fetcher<T> extends AbstractFetcher<T, TopicAndPartition> {
 		return new TopicAndPartition(partition.getTopic(), partition.getPartition());
 	}
 
+	@Override
+	protected void addPartitionsToBeRemoved(Set<KafkaTopicPartition> partitionsToRemove) {
+		throw new UnsupportedOperationException();
+	}
+
 	// ------------------------------------------------------------------------
 	//  Offset handling
 	// ------------------------------------------------------------------------
@@ -387,7 +393,7 @@ public class Kafka08Fetcher<T> extends AbstractFetcher<T, TopicAndPartition> {
 			ExceptionProxy errorHandler) throws IOException, ClassNotFoundException {
 		// each thread needs its own copy of the deserializer, because the deserializer is
 		// not necessarily thread safe
-		final KafkaDeserializationSchema<T> clonedDeserializer =
+		final KeyedDeserializationSchema<T> clonedDeserializer =
 				InstantiationUtil.clone(deserializer, runtimeContext.getUserCodeClassLoader());
 
 		// seed thread with list of fetch partitions (otherwise it would shut down immediately again

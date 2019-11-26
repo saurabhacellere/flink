@@ -19,17 +19,16 @@
 package org.apache.flink.streaming.connectors.kafka.internal;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.io.ratelimiting.FlinkConnectorRateLimiter;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
 import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.source.SourceFunction.SourceContext;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.streaming.connectors.kafka.internals.AbstractFetcher;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaCommitCallback;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartitionState;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
+import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema;
 import org.apache.flink.util.SerializedValue;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -45,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -61,7 +61,7 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 	// ------------------------------------------------------------------------
 
 	/** The schema to convert between Kafka's byte messages, and Flink's objects. */
-	private final KafkaDeserializationSchema<T> deserializer;
+	private final KeyedDeserializationSchema<T> deserializer;
 
 	/** The handover of data and exceptions between the consumer thread and the task thread. */
 	private final Handover handover;
@@ -83,13 +83,12 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 			long autoWatermarkInterval,
 			ClassLoader userCodeClassLoader,
 			String taskNameWithSubtasks,
-			KafkaDeserializationSchema<T> deserializer,
+			KeyedDeserializationSchema<T> deserializer,
 			Properties kafkaProperties,
 			long pollTimeout,
 			MetricGroup subtaskMetricGroup,
 			MetricGroup consumerMetricGroup,
-			boolean useMetrics,
-			FlinkConnectorRateLimiter rateLimiter) throws Exception {
+			boolean useMetrics) throws Exception {
 		super(
 				sourceContext,
 				assignedPartitionsWithInitialOffsets,
@@ -115,7 +114,7 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 				useMetrics,
 				consumerMetricGroup,
 				subtaskMetricGroup,
-				rateLimiter);
+				partitionsToBeRemoved);
 	}
 
 	// ------------------------------------------------------------------------
@@ -142,8 +141,9 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 							records.records(partition.getKafkaPartitionHandle());
 
 					for (ConsumerRecord<byte[], byte[]> record : partitionRecords) {
-
-						final T value = deserializer.deserialize(record);
+						final T value = deserializer.deserialize(
+								record.key(), record.value(),
+								record.topic(), record.partition(), record.offset());
 
 						if (deserializer.isEndOfStream(value)) {
 							// end of stream signaled
@@ -204,8 +204,8 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 		return "Kafka 0.9 Fetcher";
 	}
 
-	protected KafkaConsumerCallBridge09 createCallBridge() {
-		return new KafkaConsumerCallBridge09();
+	protected KafkaConsumerCallBridge createCallBridge() {
+		return new KafkaConsumerCallBridge();
 	}
 
 	// ------------------------------------------------------------------------
@@ -215,6 +215,16 @@ public class Kafka09Fetcher<T> extends AbstractFetcher<T, TopicPartition> {
 	@Override
 	public TopicPartition createKafkaPartitionHandle(KafkaTopicPartition partition) {
 		return new TopicPartition(partition.getTopic(), partition.getPartition());
+	}
+
+	@Override
+	protected void addPartitionsToBeRemoved(Set<KafkaTopicPartition> partitionsToRemove) {
+		for (KafkaTopicPartition ptr : partitionsToRemove) {
+			TopicPartition partition = new TopicPartition(ptr.getTopic(), ptr.getPartition());
+			if (!partitionsToBeRemoved.contains(partition)) {
+				partitionsToBeRemoved.add(partition);
+			}
+		}
 	}
 
 	@Override

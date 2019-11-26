@@ -18,8 +18,6 @@
 
 package org.apache.flink.streaming.connectors.kafka.internals;
 
-import org.apache.flink.core.testutils.CheckedThread;
-import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
 import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
@@ -39,10 +37,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Tests for the {@link AbstractFetcher}.
@@ -65,7 +65,7 @@ public class AbstractFetcherTest {
 			originalPartitions,
 			null,
 			null,
-			new TestProcessingTimeService(),
+			mock(TestProcessingTimeService.class),
 			0);
 
 		synchronized (sourceContext.getCheckpointLock()) {
@@ -103,7 +103,7 @@ public class AbstractFetcherTest {
 			originalPartitions,
 			null, /* periodic watermark assigner */
 			null, /* punctuated watermark assigner */
-			new TestProcessingTimeService(),
+			mock(TestProcessingTimeService.class),
 			0);
 
 		final KafkaTopicPartitionState<Object> partitionStateHolder = fetcher.subscribedPartitionStates().get(0);
@@ -391,88 +391,20 @@ public class AbstractFetcherTest {
 		assertEquals(100, sourceContext.getLatestWatermark().getTimestamp());
 	}
 
-	@Test
-	public void testConcurrentPartitionsDiscoveryAndLoopFetching() throws Exception {
-		// test data
-		final KafkaTopicPartition testPartition = new KafkaTopicPartition("test", 42);
-
-		// ----- create the test fetcher -----
-
-		@SuppressWarnings("unchecked")
-		SourceContext<String> sourceContext = new TestSourceContext<>();
-		Map<KafkaTopicPartition, Long> partitionsWithInitialOffsets =
-			Collections.singletonMap(testPartition, KafkaTopicPartitionStateSentinel.GROUP_OFFSET);
-
-		final OneShotLatch fetchLoopWaitLatch = new OneShotLatch();
-		final OneShotLatch stateIterationBlockLatch = new OneShotLatch();
-
-		final TestFetcher<String> fetcher = new TestFetcher<>(
-			sourceContext,
-			partitionsWithInitialOffsets,
-			null, /* periodic assigner */
-			null, /* punctuated assigner */
-			new TestProcessingTimeService(),
-			10,
-			fetchLoopWaitLatch,
-			stateIterationBlockLatch);
-
-		// ----- run the fetcher -----
-
-		final CheckedThread checkedThread = new CheckedThread() {
-			@Override
-			public void go() throws Exception {
-				fetcher.runFetchLoop();
-			}
-		};
-		checkedThread.start();
-
-		// wait until state iteration begins before adding discovered partitions
-		fetchLoopWaitLatch.await();
-		fetcher.addDiscoveredPartitions(Collections.singletonList(testPartition));
-
-		stateIterationBlockLatch.trigger();
-		checkedThread.sync();
-	}
-
 	// ------------------------------------------------------------------------
 	//  Test mocks
 	// ------------------------------------------------------------------------
 
 	private static final class TestFetcher<T> extends AbstractFetcher<T, Object> {
-		Optional<Map<KafkaTopicPartition, Long>> lastCommittedOffsets = Optional.empty();
+		protected Optional<Map<KafkaTopicPartition, Long>> lastCommittedOffsets = Optional.empty();
 
-		private final OneShotLatch fetchLoopWaitLatch;
-		private final OneShotLatch stateIterationBlockLatch;
-
-		TestFetcher(
+		protected TestFetcher(
 				SourceContext<T> sourceContext,
 				Map<KafkaTopicPartition, Long> assignedPartitionsWithStartOffsets,
 				SerializedValue<AssignerWithPeriodicWatermarks<T>> watermarksPeriodic,
 				SerializedValue<AssignerWithPunctuatedWatermarks<T>> watermarksPunctuated,
 				ProcessingTimeService processingTimeProvider,
 				long autoWatermarkInterval) throws Exception {
-
-			this(
-				sourceContext,
-				assignedPartitionsWithStartOffsets,
-				watermarksPeriodic,
-				watermarksPunctuated,
-				processingTimeProvider,
-				autoWatermarkInterval,
-				null,
-				null);
-		}
-
-		TestFetcher(
-				SourceContext<T> sourceContext,
-				Map<KafkaTopicPartition, Long> assignedPartitionsWithStartOffsets,
-				SerializedValue<AssignerWithPeriodicWatermarks<T>> watermarksPeriodic,
-				SerializedValue<AssignerWithPunctuatedWatermarks<T>> watermarksPunctuated,
-				ProcessingTimeService processingTimeProvider,
-				long autoWatermarkInterval,
-				OneShotLatch fetchLoopWaitLatch,
-				OneShotLatch stateIterationBlockLatch) throws Exception {
-
 			super(
 				sourceContext,
 				assignedPartitionsWithStartOffsets,
@@ -483,25 +415,15 @@ public class AbstractFetcherTest {
 				TestFetcher.class.getClassLoader(),
 				new UnregisteredMetricsGroup(),
 				false);
-
-			this.fetchLoopWaitLatch = fetchLoopWaitLatch;
-			this.stateIterationBlockLatch = stateIterationBlockLatch;
 		}
 
-		/**
-		 * Emulation of partition's iteration which is required for
-		 * {@link AbstractFetcherTest#testConcurrentPartitionsDiscoveryAndLoopFetching}.
-		 */
+		@Override
+		protected void addPartitionsToBeRemoved(Set<KafkaTopicPartition> partitionsToRemove) {
+		}
+
 		@Override
 		public void runFetchLoop() throws Exception {
-			if (fetchLoopWaitLatch != null) {
-				for (KafkaTopicPartitionState ignored : subscribedPartitionStates()) {
-					fetchLoopWaitLatch.trigger();
-					stateIterationBlockLatch.await();
-				}
-			} else {
-				throw new UnsupportedOperationException();
-			}
+			throw new UnsupportedOperationException();
 		}
 
 		@Override
