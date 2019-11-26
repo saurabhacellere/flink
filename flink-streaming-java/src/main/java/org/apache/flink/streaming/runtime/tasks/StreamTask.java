@@ -35,13 +35,9 @@ import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.io.network.api.CancelCheckpointMarker;
-import org.apache.flink.runtime.io.network.api.writer.MultipleRecordWriters;
-import org.apache.flink.runtime.io.network.api.writer.NonRecordWriter;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
 import org.apache.flink.runtime.io.network.api.writer.RecordWriterBuilder;
-import org.apache.flink.runtime.io.network.api.writer.RecordWriterDelegate;
 import org.apache.flink.runtime.io.network.api.writer.ResultPartitionWriter;
-import org.apache.flink.runtime.io.network.api.writer.SingleRecordWriter;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.metrics.groups.OperatorMetricGroup;
@@ -204,11 +200,13 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	/** Thread pool for async snapshot workers. */
 	private ExecutorService asyncOperationsThreadPool;
 
-	private final RecordWriterDelegate<SerializationDelegate<StreamRecord<OUT>>> recordWriter;
+	private final List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> recordWriters;
 
 	protected final MailboxProcessor mailboxProcessor;
 
 	private Long syncSavepointId = null;
+
+	private final Map<StreamOperator<?>, ProcessingTimeServiceImpl> processingTimeServices;
 
 	// ------------------------------------------------------------------------
 
@@ -253,9 +251,10 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		this.uncaughtExceptionHandler = Preconditions.checkNotNull(uncaughtExceptionHandler);
 		this.configuration = new StreamConfig(getTaskConfiguration());
 		this.accumulatorMap = getEnvironment().getAccumulatorRegistry().getUserMap();
-		this.recordWriter = createRecordWriterDelegate(configuration, environment);
+		this.recordWriters = createRecordWriters(configuration, environment);
 		this.mailboxProcessor = new MailboxProcessor(this::processInput);
 		this.asyncExceptionHandler = new StreamTaskAsyncExceptionHandler(environment);
+		this.processingTimeServices = new HashMap<>();
 	}
 
 	// ------------------------------------------------------------------------
@@ -282,31 +281,16 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	 */
 	protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
 		InputStatus status = inputProcessor.processInput();
-		if (status == InputStatus.MORE_AVAILABLE && recordWriter.isAvailable()) {
-			return;
-		}
 		if (status == InputStatus.END_OF_INPUT) {
-			controller.allActionsCompleted();
-			return;
-		}
-		CompletableFuture<?> jointFuture = getInputOutputJointFuture(status);
-		MailboxDefaultAction.Suspension suspendedDefaultAction = controller.suspendDefaultAction();
-		jointFuture.thenRun(suspendedDefaultAction::resume);
-	}
+			new ClosingOperatorOperation()
+				.closeAllOperatorsAsync()
+				.thenRun(controller::allActionsCompleted);
 
-	/**
-	 * Considers three scenarios to combine input and output futures:
-	 * 1. Both input and output are unavailable.
-	 * 2. Only input is unavailable.
-	 * 3. Only output is unavailable.
-	 */
-	private CompletableFuture<?> getInputOutputJointFuture(InputStatus status) {
-		if (status == InputStatus.NOTHING_AVAILABLE && !recordWriter.isAvailable()) {
-			return CompletableFuture.allOf(inputProcessor.getAvailableFuture(), recordWriter.getAvailableFuture());
-		} else if (status == InputStatus.NOTHING_AVAILABLE) {
-			return inputProcessor.getAvailableFuture();
-		} else {
-			return recordWriter.getAvailableFuture();
+			controller.suspendDefaultAction();
+		}
+		else if (status == InputStatus.NOTHING_AVAILABLE) {
+			MailboxDefaultAction.Suspension suspendedDefaultAction = controller.suspendDefaultAction();
+			inputProcessor.isAvailable().thenRun(suspendedDefaultAction::resume);
 		}
 	}
 
@@ -407,7 +391,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 					timerThreadFactory);
 			}
 
-			operatorChain = new OperatorChain<>(this, recordWriter);
+			operatorChain = new OperatorChain<>(this, recordWriters);
 			headOperator = operatorChain.getHeadOperator();
 
 			// check environment for selective reading
@@ -432,7 +416,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 				// so that we avoid race conditions in the case that initializeState()
 				// registers a timer, that fires before the open() is called.
 
-				initializeStateAndOpen();
+				initializeState();
+				openAllOperators();
 			}
 
 			// final check to exit early before starting to run
@@ -454,13 +439,8 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 			// make sure no further checkpoint and notification actions happen.
 			// we make sure that no other thread is currently in the locked scope before
-			// we close the operators by trying to acquire the checkpoint scope lock
-			// we also need to make sure that no triggers fire concurrently with the close logic
 			// at the same time, this makes sure that during any "regular" exit where still
 			synchronized (lock) {
-				// this is part of the main logic, so if this fails, the task is considered failed
-				closeAllOperators();
-
 				// make sure no new timers can come
 				timerService.quiesce();
 
@@ -537,7 +517,9 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 				}
 			} else {
 				// failed to allocate operatorChain, clean up record writers
-				recordWriter.close();
+				for (RecordWriter<SerializationDelegate<StreamRecord<OUT>>> writer: recordWriters) {
+					writer.close();
+				}
 			}
 
 			mailboxProcessor.close();
@@ -573,26 +555,15 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	}
 
 	/**
-	 * Execute {@link StreamOperator#close()} of each operator in the chain of this
-	 * {@link StreamTask}. Closing happens from <b>head to tail</b> operator in the chain,
-	 * contrary to {@link StreamOperator#open()} which happens <b>tail to head</b>
-	 * (see {@link #initializeStateAndOpen()}).
+	 * Execute {@link StreamOperator#open()} of each operator in the chain of this
+	 * {@link StreamTask}. Opening happens from <b>tail to head</b> operator in the chain, contrary
+	 * to {@link StreamOperator#close()} which happens <b>head to tail</b>
+	 * (see {@link ClosingOperatorOperation}.
 	 */
-	private void closeAllOperators() throws Exception {
-		// We need to close them first to last, since upstream operators in the chain might emit
-		// elements in their close methods.
-		StreamOperator<?>[] allOperators = operatorChain.getAllOperators();
-		for (int i = allOperators.length - 1; i >= 0; i--) {
-			StreamOperator<?> operator = allOperators[i];
+	private void openAllOperators() throws Exception {
+		for (StreamOperator<?> operator : operatorChain.getAllOperators()) {
 			if (operator != null) {
-				operator.close();
-			}
-
-			// The operators on the chain, except for the head operator, must be one-input operators.
-			// So after the upstream operator on the chain is closed, the input of its downstream operator
-			// reaches the end.
-			if (i > 0) {
-				operatorChain.endNonHeadOperatorInput(allOperators[i - 1]);
+				operator.open();
 			}
 		}
 	}
@@ -609,7 +580,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		}
 	}
 
-	private void shutdownAsyncThreads() throws Exception {
+	private void shutdownAsyncThreads() {
 		if (!asyncOperationsThreadPool.isShutdown()) {
 			asyncOperationsThreadPool.shutdownNow();
 		}
@@ -859,7 +830,21 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 				// we cannot broadcast the cancellation markers on the 'operator chain', because it may not
 				// yet be created
 				final CancelCheckpointMarker message = new CancelCheckpointMarker(checkpointMetaData.getCheckpointId());
-				recordWriter.broadcastEvent(message);
+				Exception exception = null;
+
+				for (RecordWriter<SerializationDelegate<StreamRecord<OUT>>> recordWriter : recordWriters) {
+					try {
+						recordWriter.broadcastEvent(message);
+					} catch (Exception e) {
+						exception = ExceptionUtils.firstOrSuppressed(
+							new Exception("Could not send cancel checkpoint marker to downstream tasks.", e),
+							exception);
+					}
+				}
+
+				if (exception != null) {
+					throw exception;
+				}
 
 				return false;
 			}
@@ -953,20 +938,13 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		checkpointingOperation.executeCheckpointing();
 	}
 
-	/**
-	 * Execute {@link StreamOperator#initializeState()} followed by {@link StreamOperator#open()} of each operator in
-	 * the chain of this {@link StreamTask}. State initialization and opening happens from <b>tail to head</b> operator
-	 * in the chain, contrary to {@link StreamOperator#close()} which happens <b>head to tail</b>
-	 * (see {@link #closeAllOperators()}.
-	 */
-	private void initializeStateAndOpen() throws Exception {
+	private void initializeState() throws Exception {
 
 		StreamOperator<?>[] allOperators = operatorChain.getAllOperators();
 
 		for (StreamOperator<?> operator : allOperators) {
 			if (null != operator) {
 				operator.initializeState();
-				operator.open();
 			}
 		}
 	}
@@ -994,10 +972,18 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		return timerService;
 	}
 
-	public ProcessingTimeService getProcessingTimeService(int operatorIndex) {
+	@VisibleForTesting
+	StreamOperator<?> getHeadOperator() {
+		return operatorChain.getHeadOperator();
+	}
+
+	public ProcessingTimeService getProcessingTimeService(StreamOperator<?> operator, int chainIndex) {
 		Preconditions.checkState(timerService != null, "The timer service has not been initialized.");
-		MailboxExecutor mailboxExecutor = mailboxProcessor.getMailboxExecutor(operatorIndex);
-		return new ProcessingTimeServiceImpl(timerService, callback -> deferCallbackToMailbox(mailboxExecutor, callback));
+		Preconditions.checkState(operator != null, "Operator must not be null.");
+
+		MailboxExecutor mailboxExecutor = mailboxProcessor.getMailboxExecutor(chainIndex);
+		return processingTimeServices.computeIfAbsent(operator,
+			key -> new ProcessingTimeServiceImpl(timerService, callback -> deferCallbackToMailbox(mailboxExecutor, callback)));
 	}
 
 	/**
@@ -1375,7 +1361,6 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 			}
 		}
 
-		@SuppressWarnings("deprecation")
 		private void checkpointStreamOperator(StreamOperator<?> op) throws Exception {
 			if (null != op) {
 
@@ -1395,23 +1380,116 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		}
 	}
 
-	@VisibleForTesting
-	public static <OUT> RecordWriterDelegate<SerializationDelegate<StreamRecord<OUT>>> createRecordWriterDelegate(
-			StreamConfig configuration,
-			Environment environment) {
-		List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> recordWrites = createRecordWriters(
-			configuration,
-			environment);
-		if (recordWrites.size() == 1) {
-			return new SingleRecordWriter<>(recordWrites.get(0));
-		} else if (recordWrites.size() == 0) {
-			return new NonRecordWriter<>();
-		} else {
-			return new MultipleRecordWriters<>(recordWrites);
+	/**
+	 * This class executes {@link StreamOperator#close()} of all operators in the chain
+	 * of this {@link StreamTask} one by one through the mailbox thread. Closing happens
+	 * from <b>head to tail</b> operator in the chain, contrary to {@link StreamOperator#open()}
+	 * which happens <b>tail to head</b> (see {@link #openAllOperators()}.
+	 *
+	 * <p>Before closing an operator, it quiesces the processing time service of the operator
+	 * and wait for all pending timers to finish (execute or cancel). And after closing, the
+	 * {@link org.apache.flink.streaming.api.operators.BoundedOneInput#endInput} of its next
+	 * operator is called to notify that the input is finished.
+	 */
+	protected final class ClosingOperatorOperation {
+
+		private final MailboxExecutor mainMailboxExecutor;
+
+		private final CompletableFuture<?> closeFuture;
+
+		public ClosingOperatorOperation() {
+			this.mainMailboxExecutor = mailboxProcessor.getMainMailboxExecutor();
+			this.closeFuture = new CompletableFuture<>();
+		}
+
+		public CompletableFuture<?> closeAllOperatorsAsync() {
+			sendQuiescingTimeServiceLetter(getHeadOperatorIndex());
+			return closeFuture;
+		}
+
+		private void sendQuiescingTimeServiceLetter(int operatorIndex) {
+			mainMailboxExecutor.execute(
+				() -> quiesceTimerService(operatorIndex), "quiesceProcessingTimerService(index: " + operatorIndex + ")");
+		}
+
+		private void sendClosingOperatorLetter(int operatorIndex) {
+			mainMailboxExecutor.execute(
+				() -> closeOperator(operatorIndex), "closeOperator(index: " + operatorIndex + ")");
+		}
+
+		private void quiesceTimerService(int operatorIndex) {
+			CompletableFuture<?> timersDoneFuture = null;
+
+			StreamOperator<?> operator = getOperator(operatorIndex);
+			if (operator != null) {
+				ProcessingTimeServiceImpl processingTimeService = processingTimeServices.get(operator);
+				if (processingTimeService != null) {
+					processingTimeService.quiesce();
+					timersDoneFuture = processingTimeService.getTimersDoneFutureAfterQuiescing();
+				}
+			}
+			if (timersDoneFuture == null) {
+				timersDoneFuture = CompletableFuture.completedFuture(null);
+			}
+
+			timersDoneFuture.thenRun(() -> sendClosingOperatorLetter(operatorIndex));
+		}
+
+		private void closeOperator(int operatorIndex) {
+			StreamOperator<?> operator = getOperator(operatorIndex);
+
+			synchronized (getCheckpointLock()) {
+				try {
+					if (operator != null) {
+						operator.close();
+					}
+				} catch (Throwable t) {
+					handleAsyncException("Caught exception while closing operator.", t);
+				}
+
+				try {
+					if (!isTailOperator(operatorIndex)) {
+						// The operators on the chain, except for the head operator, must be one-input operators.
+						// So after the upstream operator on the chain is closed, the input of its downstream operator
+						// reaches the end.
+						operatorChain.endNonHeadOperatorInput(getNextOperator(operatorIndex));
+					}
+				} catch (Throwable t) {
+					handleAsyncException("Caught exception while processing the endInput of operator.", t);
+				}
+			}
+
+			if (!isTailOperator(operatorIndex)) {
+				sendQuiescingTimeServiceLetter(getNextOperatorIndex(operatorIndex));
+				return;
+			}
+
+			closeFuture.complete(null);
+		}
+
+		private int getHeadOperatorIndex() {
+			return operatorChain.getAllOperators().length - 1;
+		}
+
+		private int getNextOperatorIndex(int currentIndex) {
+			return currentIndex - 1;
+		}
+
+		private boolean isTailOperator(int operatorIndex) {
+			return operatorIndex <= 0;
+		}
+
+		private StreamOperator<?> getOperator(int operatorIndex) {
+			return operatorChain.getAllOperators()[operatorIndex];
+		}
+
+		private StreamOperator<?> getNextOperator(int currentIndex) {
+			return operatorChain.getAllOperators()[getNextOperatorIndex(currentIndex)];
 		}
 	}
 
-	private static <OUT> List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> createRecordWriters(
+	@VisibleForTesting
+	public static <OUT> List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> createRecordWriters(
 			StreamConfig configuration,
 			Environment environment) {
 		List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> recordWriters = new ArrayList<>();
