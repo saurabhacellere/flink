@@ -49,7 +49,7 @@ execution:
   parallelism: 1
 
 configuration:
-  table.optimizer.join-reorder-enabled: true
+  table.optimizer.join-reorder-strategy: COST_BASED
 
 deployment:
   response-timeout: 5000
