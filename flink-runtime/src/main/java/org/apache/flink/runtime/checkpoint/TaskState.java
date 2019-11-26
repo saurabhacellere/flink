@@ -19,8 +19,9 @@
 package org.apache.flink.runtime.checkpoint;
 
 import org.apache.flink.runtime.jobgraph.JobVertexID;
-import org.apache.flink.runtime.state.CompositeStateHandle;
-import org.apache.flink.runtime.state.SharedStateRegistry;
+import org.apache.flink.runtime.state.KeyGroupRange;
+import org.apache.flink.runtime.state.StateObject;
+import org.apache.flink.runtime.state.StateUtil;
 import org.apache.flink.util.Preconditions;
 
 import java.util.Collection;
@@ -34,12 +35,8 @@ import java.util.Objects;
  * tasks of a {@link org.apache.flink.runtime.jobgraph.JobVertex}.
  *
  * This class basically groups all non-partitioned state and key-group state belonging to the same job vertex together.
- *
- * @deprecated Internal class for savepoint backwards compatibility. Don't use for other purposes.
  */
-@Deprecated
-@SuppressWarnings("deprecation")
-public class TaskState implements CompositeStateHandle {
+public class TaskState implements StateObject {
 
 	private static final long serialVersionUID = -4845578005863201810L;
 
@@ -47,6 +44,7 @@ public class TaskState implements CompositeStateHandle {
 
 	/** handles to non-partitioned states, subtaskindex -> subtaskstate */
 	private final Map<Integer, SubtaskState> subtaskStates;
+
 
 	/** parallelism of the operator when it was checkpointed */
 	private final int parallelism;
@@ -78,6 +76,33 @@ public class TaskState implements CompositeStateHandle {
 
 	public void putState(int subtaskIndex, SubtaskState subtaskState) {
 		Preconditions.checkNotNull(subtaskState);
+		KeyGroupRange keyGroupRange = null;
+		if (subtaskState.getManagedKeyedState() != null){
+			keyGroupRange = subtaskState.getManagedKeyedState().getKeyGroupRange();
+		}else if (subtaskState.getRawKeyedState() != null){
+			keyGroupRange = subtaskState.getRawKeyedState().getKeyGroupRange();
+		}
+		if (keyGroupRange != null){
+			for(Map.Entry<Integer,SubtaskState> entry : subtaskStates.entrySet()){
+				SubtaskState s = entry.getValue();
+				KeyGroupRange keyGroupRange1 = null;
+				if (s.getManagedKeyedState() != null){
+					keyGroupRange1 = s.getManagedKeyedState().getKeyGroupRange();
+				}else if (s.getRawKeyedState() != null){
+					keyGroupRange1 = s.getRawKeyedState().getKeyGroupRange();
+				}
+
+				if (keyGroupRange1 != null){
+					if (KeyGroupRange.EMPTY_KEY_GROUP_RANGE != keyGroupRange.getIntersection(keyGroupRange1)){
+						throw new IllegalArgumentException("KeyRange("+keyGroupRange+") of Subtask("+subtaskIndex+")"+
+							" has overlap with KeyRange("+keyGroupRange1+") " +
+							" of Subtask("+entry.getKey()+")");
+					}
+				}
+
+			}
+		}
+
 
 		if (subtaskIndex < 0 || subtaskIndex >= parallelism) {
 			throw new IndexOutOfBoundsException("The given sub task index " + subtaskIndex +
@@ -116,19 +141,20 @@ public class TaskState implements CompositeStateHandle {
 		return chainLength;
 	}
 
-	@Override
-	public void discardState() throws Exception {
-		for (SubtaskState subtaskState : subtaskStates.values()) {
-			subtaskState.discardState();
+	public boolean hasNonPartitionedState() {
+		for(SubtaskState sts : subtaskStates.values()) {
+			if (sts != null && !sts.getLegacyOperatorState().isEmpty()) {
+				return true;
+			}
 		}
+		return false;
 	}
 
 	@Override
-	public void registerSharedStates(SharedStateRegistry sharedStateRegistry) {
-		for (SubtaskState subtaskState : subtaskStates.values()) {
-			subtaskState.registerSharedStates(sharedStateRegistry);
-		}
+	public void discardState() throws Exception {
+		StateUtil.bestEffortDiscardAllStateObjects(subtaskStates.values());
 	}
+
 
 	@Override
 	public long getStateSize() {
