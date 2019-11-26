@@ -41,6 +41,10 @@ export interface TaskmanagersItemInterface {
   hardware: Hardware;
 }
 
+export interface TaskmanagersItemCalInterface extends TaskmanagersItemInterface {
+  milliSecondsSinceLastHeartBeat?: number;
+}
+
 interface Hardware {
   cpuCores: number;
   physicalMemory: number;
