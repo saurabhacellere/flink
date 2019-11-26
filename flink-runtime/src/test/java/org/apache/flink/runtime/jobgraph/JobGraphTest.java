@@ -22,23 +22,17 @@ import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.core.testutils.CommonTestUtils;
 import org.apache.flink.runtime.blob.PermanentBlobKey;
-import org.apache.flink.runtime.checkpoint.CheckpointRetentionPolicy;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
-import org.apache.flink.runtime.jobgraph.tasks.CheckpointCoordinatorConfiguration;
-import org.apache.flink.runtime.jobgraph.tasks.JobCheckpointingSettings;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Test;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class JobGraphTest extends TestLogger {
@@ -105,7 +99,7 @@ public class JobGraphTest extends TestLogger {
 			intermediate2.connectNewDataSetAsInput(intermediate1, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 			intermediate1.connectNewDataSetAsInput(source2, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 
-			JobGraph graph = new JobGraph("TestGraph",
+			JobGraph graph = new JobGraph("TestGraph", "",
 				source1, source2, intermediate1, intermediate2, target1, target2);
 			List<JobVertex> sorted = graph.getVerticesSortedTopologicallyFromSources();
 			
@@ -150,7 +144,7 @@ public class JobGraphTest extends TestLogger {
 			
 			l13.connectNewDataSetAsInput(source2, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 
-			JobGraph graph = new JobGraph("TestGraph",
+			JobGraph graph = new JobGraph("TestGraph", "",
 				source1, source2, root, l11, l13, l12, l2);
 			List<JobVertex> sorted = graph.getVerticesSortedTopologicallyFromSources();
 			
@@ -197,7 +191,7 @@ public class JobGraphTest extends TestLogger {
 			op2.connectNewDataSetAsInput(source, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 			op3.connectNewDataSetAsInput(op2, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 
-			JobGraph graph = new JobGraph("TestGraph", source, op1, op2, op3);
+			JobGraph graph = new JobGraph("TestGraph", "", source, op1, op2, op3);
 			List<JobVertex> sorted = graph.getVerticesSortedTopologicallyFromSources();
 			
 			assertEquals(4,  sorted.size());
@@ -226,7 +220,7 @@ public class JobGraphTest extends TestLogger {
 			v3.connectNewDataSetAsInput(v2, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 			v4.connectNewDataSetAsInput(v3, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 
-			JobGraph jg = new JobGraph("Cyclic Graph", v1, v2, v3, v4);
+			JobGraph jg = new JobGraph("Cyclic Graph", "", v1, v2, v3, v4);
 			try {
 				jg.getVerticesSortedTopologicallyFromSources();
 				fail("Failed to raise error on topologically sorting cyclic graph.");
@@ -258,7 +252,7 @@ public class JobGraphTest extends TestLogger {
 			v4.connectNewDataSetAsInput(v3, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 			target.connectNewDataSetAsInput(v3, DistributionPattern.POINTWISE, ResultPartitionType.PIPELINED);
 
-			JobGraph jg = new JobGraph("Cyclic Graph", v1, v2, v3, v4, source, target);
+			JobGraph jg = new JobGraph("Cyclic Graph", "", v1, v2, v3, v4, source, target);
 			try {
 				jg.getVerticesSortedTopologicallyFromSources();
 				fail("Failed to raise error on topologically sorting cyclic graph.");
@@ -314,47 +308,5 @@ public class JobGraphTest extends TestLogger {
 			assertEquals(entry.isZipped, jobGraphEntry.isZipped);
 			assertEquals(entry.filePath, jobGraphEntry.filePath);
 		}
-	}
-
-	@Test
-	public void checkpointingIsDisabledByDefault() {
-		final JobGraph jobGraph = new JobGraph();
-
-		assertFalse(jobGraph.isCheckpointingEnabled());
-	}
-
-	@Test
-	public void checkpointingIsEnabledIfIntervalIsqAndLegal() {
-		final JobGraph jobGraph = new JobGraph();
-		jobGraph.setSnapshotSettings(createCheckpointSettingsWithInterval(10));
-
-		assertTrue(jobGraph.isCheckpointingEnabled());
-	}
-
-	@Test
-	public void checkpointingIsDisabledIfIntervalIsMaxValue() {
-		final JobGraph jobGraph = new JobGraph();
-		jobGraph.setSnapshotSettings(createCheckpointSettingsWithInterval(Long.MAX_VALUE));
-
-		assertFalse(jobGraph.isCheckpointingEnabled());
-	}
-
-	private static JobCheckpointingSettings createCheckpointSettingsWithInterval(final long checkpointInterval) {
-		final CheckpointCoordinatorConfiguration checkpointCoordinatorConfiguration = new CheckpointCoordinatorConfiguration(
-			checkpointInterval,
-			Long.MAX_VALUE,
-			Long.MAX_VALUE,
-			Integer.MAX_VALUE,
-			CheckpointRetentionPolicy.NEVER_RETAIN_AFTER_TERMINATION,
-			true,
-			false,
-			0);
-
-		return new JobCheckpointingSettings(
-			Collections.emptyList(),
-			Collections.emptyList(),
-			Collections.emptyList(),
-			checkpointCoordinatorConfiguration,
-			null);
 	}
 }

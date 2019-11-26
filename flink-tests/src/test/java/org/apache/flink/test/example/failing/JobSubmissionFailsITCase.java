@@ -19,7 +19,6 @@
 
 package org.apache.flink.test.example.failing;
 
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.TaskManagerOptions;
@@ -27,15 +26,13 @@ import org.apache.flink.runtime.blob.PermanentBlobKey;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.testtasks.NoOpInvokable;
-import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.test.util.MiniClusterWithClientResource;
-import org.apache.flink.testutils.junit.category.AlsoRunWithSchedulerNG;
+import org.apache.flink.test.util.MiniClusterResource;
+import org.apache.flink.test.util.MiniClusterResourceConfiguration;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
@@ -52,14 +49,13 @@ import static org.junit.Assert.fail;
  * Tests for failing job submissions.
  */
 @RunWith(Parameterized.class)
-@Category(AlsoRunWithSchedulerNG.class)
 public class JobSubmissionFailsITCase extends TestLogger {
 
 	private static final int NUM_TM = 2;
 	private static final int NUM_SLOTS = 20;
 
 	@ClassRule
-	public static final MiniClusterWithClientResource MINI_CLUSTER_RESOURCE = new MiniClusterWithClientResource(
+	public static final MiniClusterResource MINI_CLUSTER_RESOURCE = new MiniClusterResource(
 		new MiniClusterResourceConfiguration.Builder()
 			.setConfiguration(getConfiguration())
 			.setNumberTaskManagers(NUM_TM)
@@ -68,14 +64,14 @@ public class JobSubmissionFailsITCase extends TestLogger {
 
 	private static Configuration getConfiguration() {
 		Configuration config = new Configuration();
-		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "4m");
+		config.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "4m");
 		return config;
 	}
 
 	private static JobGraph getWorkingJobGraph() {
 		final JobVertex jobVertex = new JobVertex("Working job vertex.");
 		jobVertex.setInvokableClass(NoOpInvokable.class);
-		return new JobGraph("Working testing job", jobVertex);
+		return new JobGraph("Working testing job", "", jobVertex);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -99,7 +95,7 @@ public class JobSubmissionFailsITCase extends TestLogger {
 		final JobVertex failingJobVertex = new FailingJobVertex("Failing job vertex");
 		failingJobVertex.setInvokableClass(NoOpInvokable.class);
 
-		final JobGraph failingJobGraph = new JobGraph("Failing testing job", failingJobVertex);
+		final JobGraph failingJobGraph = new JobGraph("Failing testing job", "", failingJobVertex);
 		runJobSubmissionTest(failingJobGraph, e ->
 			ExceptionUtils.findThrowable(
 				e,
@@ -127,13 +123,10 @@ public class JobSubmissionFailsITCase extends TestLogger {
 
 	private void runJobSubmissionTest(JobGraph jobGraph, Predicate<Exception> failurePredicate) throws org.apache.flink.client.program.ProgramInvocationException {
 		ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
+		client.setDetached(detached);
 
 		try {
-			if (detached) {
-				ClientUtils.submitJob(client, jobGraph);
-			} else {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, JobSubmissionFailsITCase.class.getClassLoader());
-			}
+			client.submitJob(jobGraph, JobSubmissionFailsITCase.class.getClassLoader());
 			fail("Job submission should have thrown an exception.");
 		} catch (Exception e) {
 			if (!failurePredicate.test(e)) {
@@ -141,7 +134,8 @@ public class JobSubmissionFailsITCase extends TestLogger {
 			}
 		}
 
-		ClientUtils.submitJobAndWaitForResult(client, getWorkingJobGraph(), JobSubmissionFailsITCase.class.getClassLoader());
+		client.setDetached(false);
+		client.submitJob(getWorkingJobGraph(), JobSubmissionFailsITCase.class.getClassLoader());
 	}
 
 	@Nonnull

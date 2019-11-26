@@ -31,7 +31,6 @@ import org.apache.flink.util.SerializedValue;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -69,10 +68,20 @@ public class JobGraph implements Serializable {
 	private final Configuration jobConfiguration = new Configuration();
 
 	/** ID of this job. May be set if specific job id is desired (e.g. session management) */
-	private JobID jobID;
+	private final JobID jobID;
 
 	/** Name of this job. */
 	private final String jobName;
+
+	/** Description of this job */
+	private String jobDescription;
+
+	/** The number of seconds after which the corresponding ExecutionGraph is removed at the
+	 * job manager after it has been executed. */
+	private long sessionTimeout = 0;
+
+	/** flag to enable queued scheduling */
+	private boolean allowQueuedScheduling;
 
 	/** The mode in which the job is scheduled */
 	private ScheduleMode scheduleMode = ScheduleMode.LAZY_FROM_SOURCES;
@@ -111,7 +120,18 @@ public class JobGraph implements Serializable {
 	 * @param jobName The name of the job.
 	 */
 	public JobGraph(String jobName) {
-		this(null, jobName);
+		this(null, jobName, "");
+	}
+
+	/**
+	 * Constructs a new job graph with the given name, the given {@link ExecutionConfig},
+	 * and a random job ID. The ExecutionConfig will be serialized and can't be modified afterwards.
+	 *
+	 * @param jobName The name of the job.
+	 * @param jobDescription The name of the job.
+	 */
+	public JobGraph(String jobName, String jobDescription) {
+		this(null, jobName, jobDescription);
 	}
 
 	/**
@@ -121,10 +141,12 @@ public class JobGraph implements Serializable {
 	 *
 	 * @param jobId The id of the job. A random ID is generated, if {@code null} is passed.
 	 * @param jobName The name of the job.
+	 * @param jobDescription The description of the job.
 	 */
-	public JobGraph(JobID jobId, String jobName) {
+	public JobGraph(JobID jobId, String jobName, String jobDescription) {
 		this.jobID = jobId == null ? new JobID() : jobId;
 		this.jobName = jobName == null ? "(unnamed job)" : jobName;
+		this.jobDescription = jobDescription == null ? "" : jobDescription;
 
 		try {
 			setExecutionConfig(new ExecutionConfig());
@@ -141,7 +163,7 @@ public class JobGraph implements Serializable {
 	 * @param vertices The vertices to add to the graph.
 	 */
 	public JobGraph(JobVertex... vertices) {
-		this(null, vertices);
+		this(null, null, vertices);
 	}
 
 	/**
@@ -149,10 +171,11 @@ public class JobGraph implements Serializable {
 	 * and the given job vertices. The ExecutionConfig will be serialized and can't be modified afterwards.
 	 *
 	 * @param jobName The name of the job.
+	 * @param jobDescription The description of the job.
 	 * @param vertices The vertices to add to the graph.
 	 */
-	public JobGraph(String jobName, JobVertex... vertices) {
-		this(null, jobName, vertices);
+	public JobGraph(String jobName, String jobDescription, JobVertex... vertices) {
+		this(null, jobName, jobDescription, vertices);
 	}
 
 	/**
@@ -162,10 +185,11 @@ public class JobGraph implements Serializable {
 	 *
 	 * @param jobId The id of the job. A random ID is generated, if {@code null} is passed.
 	 * @param jobName The name of the job.
+	 * @param jobDescription the description of the job.
 	 * @param vertices The vertices to add to the graph.
 	 */
-	public JobGraph(JobID jobId, String jobName, JobVertex... vertices) {
-		this(jobId, jobName);
+	public JobGraph(JobID jobId, String jobName, String jobDescription, JobVertex... vertices) {
+		this(jobId, jobName, jobDescription);
 
 		for (JobVertex vertex : vertices) {
 			addVertex(vertex);
@@ -184,19 +208,21 @@ public class JobGraph implements Serializable {
 	}
 
 	/**
-	 * Sets the ID of the job.
-	 */
-	public void setJobID(JobID jobID) {
-		this.jobID = jobID;
-	}
-
-	/**
 	 * Returns the name assigned to the job graph.
 	 *
 	 * @return the name assigned to the job graph
 	 */
 	public String getName() {
 		return this.jobName;
+	}
+
+	/**
+	 * Returns the description assigned to the job graph.
+	 *
+	 * @return the description assigned to the job graph
+	 */
+	public String getDescription() {
+		return jobDescription;
 	}
 
 	/**
@@ -216,6 +242,32 @@ public class JobGraph implements Serializable {
 	 */
 	public SerializedValue<ExecutionConfig> getSerializedExecutionConfig() {
 		return serializedExecutionConfig;
+	}
+
+	/**
+	 * Gets the timeout after which the corresponding ExecutionGraph is removed at the
+	 * job manager after it has been executed.
+	 * @return a timeout as a long in seconds.
+	 */
+	public long getSessionTimeout() {
+		return sessionTimeout;
+	}
+
+	/**
+	 * Sets the timeout of the session in seconds. The timeout specifies how long a job will be kept
+	 * in the job manager after it finishes.
+	 * @param sessionTimeout The timeout in seconds
+	 */
+	public void setSessionTimeout(long sessionTimeout) {
+		this.sessionTimeout = sessionTimeout;
+	}
+
+	public void setAllowQueuedScheduling(boolean allowQueuedScheduling) {
+		this.allowQueuedScheduling = allowQueuedScheduling;
+	}
+
+	public boolean getAllowQueuedScheduling() {
+		return allowQueuedScheduling;
 	}
 
 	public void setScheduleMode(ScheduleMode scheduleMode) {
@@ -471,22 +523,6 @@ public class JobGraph implements Serializable {
 
 		if (!userJars.contains(jar)) {
 			userJars.add(jar);
-		}
-	}
-
-	/**
-	 * Adds the given jar files to the {@link JobGraph} via {@link JobGraph#addJar}.
-	 *
-	 * @param jarFilesToAttach a list of the {@link URL URLs} of the jar files to attach to the jobgraph.
-	 * @throws RuntimeException if a jar URL is not valid.
-	 */
-	public void addJars(final List<URL> jarFilesToAttach) {
-		for (URL jar : jarFilesToAttach) {
-			try {
-				addJar(new Path(jar.toURI()));
-			} catch (URISyntaxException e) {
-				throw new RuntimeException("URL is invalid. This should not happen.", e);
-			}
 		}
 	}
 
