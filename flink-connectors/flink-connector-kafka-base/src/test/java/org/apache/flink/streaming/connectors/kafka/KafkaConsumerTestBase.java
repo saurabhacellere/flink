@@ -34,7 +34,6 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.configuration.Configuration;
@@ -102,7 +101,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
@@ -186,15 +184,17 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 				kafkaServer.getVersion().equals("0.10") ||
 				kafkaServer.getVersion().equals("0.11") ||
 				kafkaServer.getVersion().equals("2.0")) {
-				final Optional<TimeoutException> optionalTimeoutException = ExceptionUtils.findThrowable(jee, TimeoutException.class);
-				assertTrue(optionalTimeoutException.isPresent());
+				assertTrue(jee.getCause() instanceof TimeoutException);
 
-				final TimeoutException timeoutException = optionalTimeoutException.get();
-				assertEquals("Timeout expired while fetching topic metadata", timeoutException.getMessage());
+				TimeoutException te = (TimeoutException) jee.getCause();
+
+				assertEquals("Timeout expired while fetching topic metadata", te.getMessage());
 			} else {
-				final Optional<Throwable> optionalThrowable = ExceptionUtils.findThrowableWithMessage(jee, "Unable to retrieve any partitions");
-				assertTrue(optionalThrowable.isPresent());
-				assertTrue(optionalThrowable.get() instanceof RuntimeException);
+				assertTrue(jee.getCause() instanceof RuntimeException);
+
+				RuntimeException re = (RuntimeException) jee.getCause();
+
+				assertTrue(re.getMessage().contains("Unable to retrieve any partitions"));
 			}
 		}
 	}
@@ -210,7 +210,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final String topicName = writeSequence("testCommitOffsetsToKafkaTopic", recordsInEachPartition, parallelism, 1);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
+		env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(200);
 
@@ -252,7 +253,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		while (System.nanoTime() < deadline);
 
 		// cancel the job & wait for the job to finish
-		client.cancel(Iterables.getOnlyElement(getRunningJobs(client))).get();
+		client.cancel(Iterables.getOnlyElement(getRunningJobs(client)));
 		runner.join();
 
 		final Throwable t = errorRef.get();
@@ -292,7 +293,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final String topicName = writeSequence("testAutoOffsetRetrievalAndCommitToKafkaTopic", recordsInEachPartition, parallelism, 1);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
+		env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(200);
 
@@ -337,7 +339,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		while (System.nanoTime() < deadline);
 
 		// cancel the job & wait for the job to finish
-		client.cancel(Iterables.getOnlyElement(getRunningJobs(client))).get();
+		client.cancel(Iterables.getOnlyElement(getRunningJobs(client)));
 		runner.join();
 
 		final Throwable t = errorRef.get();
@@ -369,7 +371,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final String topicName = writeSequence("testStartFromEarliestOffsetsTopic", recordsInEachPartition, parallelism, 1);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.setParallelism(parallelism);
+		env.getConfig().disableSysoutLogging();
+		env.setParallelism(parallelism);
 
 		Properties readProps = new Properties();
 		readProps.putAll(standardProps);
@@ -426,7 +429,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 		// setup and run the latest-consuming job
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.setParallelism(parallelism);
+		env.getConfig().disableSysoutLogging();
+		env.setParallelism(parallelism);
 
 		final Properties readProps = new Properties();
 		readProps.putAll(standardProps);
@@ -452,12 +456,16 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final JobID consumeJobId = jobGraph.getJobID();
 
 		final AtomicReference<Throwable> error = new AtomicReference<>();
-		Thread consumeThread = new Thread(() -> {
-			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, KafkaConsumerTestBase.class.getClassLoader());
-			} catch (Throwable t) {
-				if (!ExceptionUtils.findThrowable(t, JobCancellationException.class).isPresent()) {
-					error.set(t);
+		Thread consumeThread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					client.setDetached(false);
+					client.submitJob(jobGraph, KafkaConsumerTestBase.class.getClassLoader());
+				} catch (Throwable t) {
+					if (!ExceptionUtils.findThrowable(t, JobCancellationException.class).isPresent()) {
+						error.set(t);
+					}
 				}
 			}
 		});
@@ -503,7 +511,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		}
 
 		// cancel the consume job after all extra records are written
-		client.cancel(consumeJobId).get();
+		client.cancel(consumeJobId);
 		consumeThread.join();
 
 		kafkaOffsetHandler.close();
@@ -539,7 +547,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final String topicName = writeSequence("testStartFromGroupOffsetsTopic", recordsInEachPartition, parallelism, 1);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.setParallelism(parallelism);
+		env.getConfig().disableSysoutLogging();
+		env.setParallelism(parallelism);
 
 		Properties readProps = new Properties();
 		readProps.putAll(standardProps);
@@ -597,7 +606,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final String topicName = writeSequence("testStartFromSpecificOffsetsTopic", recordsInEachPartition, parallelism, 1);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.setParallelism(parallelism);
+		env.getConfig().disableSysoutLogging();
+		env.setParallelism(parallelism);
 
 		Properties readProps = new Properties();
 		readProps.putAll(standardProps);
@@ -655,7 +665,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		writeAppendSequence(topic, initialRecordsInEachPartition, appendRecordsInEachPartition, parallelism);
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-				env.setParallelism(parallelism);
+		env.getConfig().disableSysoutLogging();
+		env.setParallelism(parallelism);
 
 		Properties readProps = new Properties();
 		readProps.putAll(standardProps);
@@ -707,6 +718,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(500);
 		env.setRestartStrategy(RestartStrategies.noRestart()); // fail immediately
+		env.getConfig().disableSysoutLogging();
 
 		TypeInformation<Tuple2<Long, String>> longStringType =
 				TypeInformation.of(new TypeHint<Tuple2<Long, String>>(){});
@@ -845,6 +857,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env.enableCheckpointing(500);
 		env.setParallelism(parallelism);
 		env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -896,6 +909,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env.enableCheckpointing(500);
 		env.setParallelism(parallelism);
 		env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -947,7 +961,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env.setParallelism(parallelism);
 		// set the number of restarts to one. The failing mapper will fail once, then it's only success exceptions.
 		env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
-				env.setBufferTimeout(0);
+		env.getConfig().disableSysoutLogging();
+		env.setBufferTimeout(0);
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -987,6 +1002,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(100);
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -998,11 +1014,16 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		JobGraph jobGraph = StreamingJobGraphGenerator.createJobGraph(env.getStreamGraph());
 		final JobID jobId = jobGraph.getJobID();
 
-		final Runnable jobRunner = () -> {
-			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, KafkaConsumerTestBase.class.getClassLoader());
-			} catch (Throwable t) {
-				jobError.set(t);
+		final Runnable jobRunner = new Runnable() {
+			@Override
+			public void run() {
+				try {
+					client.setDetached(false);
+					client.submitJob(jobGraph, KafkaConsumerTestBase.class.getClassLoader());
+				}
+				catch (Throwable t) {
+					jobError.set(t);
+				}
 			}
 		};
 
@@ -1019,7 +1040,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		}
 
 		// cancel
-		client.cancel(jobId).get();
+		client.cancel(jobId);
 
 		// wait for the program to be done and validate that we failed with the right exception
 		runnerThread.join();
@@ -1057,6 +1078,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(100);
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -1068,12 +1090,17 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		JobGraph jobGraph = StreamingJobGraphGenerator.createJobGraph(env.getStreamGraph());
 		final JobID jobId = jobGraph.getJobID();
 
-		final Runnable jobRunner = () -> {
-			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, KafkaConsumerTestBase.class.getClassLoader());
-			} catch (Throwable t) {
-				LOG.error("Job Runner failed with exception", t);
-				error.set(t);
+		final Runnable jobRunner = new Runnable() {
+			@Override
+			public void run() {
+				try {
+					client.setDetached(false);
+					client.submitJob(jobGraph, KafkaConsumerTestBase.class.getClassLoader());
+				}
+				catch (Throwable t) {
+					LOG.error("Job Runner failed with exception", t);
+					error.set(t);
+				}
 			}
 		};
 
@@ -1089,7 +1116,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 			Assert.fail("Test failed prematurely with: " + failueCause.getMessage());
 		}
 		// cancel
-		client.cancel(jobId).get();
+		client.cancel(jobId);
 
 		// wait for the program to be done and validate that we failed with the right exception
 		runnerThread.join();
@@ -1108,6 +1135,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		final int numElements = 20;
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.getConfig().disableSysoutLogging();
 
 		// create topics with content
 		final List<String> topics = new ArrayList<>();
@@ -1156,6 +1184,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 		// run second job consuming from multiple topics
 		env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.getConfig().disableSysoutLogging();
 
 		if (useLegacySchema) {
 			Tuple2WithTopicSchema schema = new Tuple2WithTopicSchema(env.getConfig());
@@ -1222,7 +1251,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setRestartStrategy(RestartStrategies.noRestart());
-				env.enableCheckpointing(100);
+		env.getConfig().disableSysoutLogging();
+		env.enableCheckpointing(100);
 		env.setParallelism(parallelism);
 
 		// add consuming topology:
@@ -1335,6 +1365,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env.setParallelism(parallelism);
 		env.enableCheckpointing(500);
 		env.setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -1364,6 +1395,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(1);
 		env.setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
 
 		DataStream<Tuple2<Long, PojoValue>> kvStream = env.addSource(new SourceFunction<Tuple2<Long, PojoValue>>() {
 			@Override
@@ -1396,6 +1428,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(1);
 		env.setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
 
 		KafkaDeserializationSchema<Tuple2<Long, PojoValue>> readSchema = new TypeInformationKeyValueSerializationSchema<>(Long.class, PojoValue.class, env.getConfig());
 
@@ -1448,6 +1481,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(1);
 		env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
 
 		DataStream<Tuple2<byte[], PojoValue>> kvStream = env.addSource(new SourceFunction<Tuple2<byte[], PojoValue>>() {
 			@Override
@@ -1479,6 +1513,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(1);
 		env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		env.getConfig().disableSysoutLogging();
 
 		Properties props = new Properties();
 		props.putAll(standardProps);
@@ -1590,16 +1625,21 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		JobGraph jobGraph = StreamingJobGraphGenerator.createJobGraph(env1.getStreamGraph());
 		final JobID jobId = jobGraph.getJobID();
 
-		Thread jobThread = new Thread(() -> {
-			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, KafkaConsumerTestBase.class.getClassLoader());
-			} catch (Throwable t) {
-				if (!ExceptionUtils.findThrowable(t, JobCancellationException.class).isPresent()) {
-					LOG.warn("Got exception during execution", t);
-					error.f0 = t;
+		Runnable job = new Runnable() {
+			@Override
+			public void run() {
+				try {
+					client.setDetached(false);
+					client.submitJob(jobGraph, KafkaConsumerTestBase.class.getClassLoader());
+				} catch (Throwable t) {
+					if (!ExceptionUtils.findThrowable(t, JobCancellationException.class).isPresent()) {
+						LOG.warn("Got exception during execution", t);
+						error.f0 = t;
+					}
 				}
 			}
-		});
+		};
+		Thread jobThread = new Thread(job);
 		jobThread.start();
 
 		try {
@@ -1642,7 +1682,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 			LOG.info("Found all JMX metrics. Cancelling job.");
 		} finally {
 			// cancel
-			client.cancel(jobId).get();
+			client.cancel(jobId);
 			// wait for the job to finish (it should due to the cancel command above)
 			jobThread.join();
 		}
@@ -1856,6 +1896,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 			StreamExecutionEnvironment writeEnv = StreamExecutionEnvironment.getExecutionEnvironment();
 			writeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+			writeEnv.getConfig().disableSysoutLogging();
+
 			DataStream<Tuple2<Integer, Integer>> stream = writeEnv.addSource(new RichParallelSourceFunction<Tuple2<Integer, Integer>>() {
 
 				private boolean running = true;
@@ -1942,6 +1984,8 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 		StreamExecutionEnvironment writeEnv = StreamExecutionEnvironment.getExecutionEnvironment();
 		writeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		writeEnv.getConfig().disableSysoutLogging();
+
 		DataStream<Tuple2<Integer, Integer>> stream = writeEnv.addSource(new RichParallelSourceFunction<Tuple2<Integer, Integer>>() {
 
 			private boolean running = true;
@@ -1999,6 +2043,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 
 		final StreamExecutionEnvironment readEnv = StreamExecutionEnvironment.getExecutionEnvironment();
 		readEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+		readEnv.getConfig().disableSysoutLogging();
 		readEnv.setParallelism(parallelism);
 
 		Properties readProps = (Properties) standardProps.clone();
@@ -2030,16 +2075,20 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 		JobGraph jobGraph = StreamingJobGraphGenerator.createJobGraph(readEnv.getStreamGraph());
 		final JobID jobId = jobGraph.getJobID();
 
-		Thread runner = new Thread(() -> {
-			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, KafkaConsumerTestBase.class.getClassLoader());
-				tryExecute(readEnv, "sequence validation");
-			} catch (Throwable t) {
-				if (!ExceptionUtils.findThrowable(t, SuccessException.class).isPresent()) {
-					errorRef.set(t);
+		Thread runner = new Thread() {
+			@Override
+			public void run() {
+				try {
+					client.setDetached(false);
+					client.submitJob(jobGraph, KafkaConsumerTestBase.class.getClassLoader());
+					tryExecute(readEnv, "sequence validation");
+				} catch (Throwable t) {
+					if (!ExceptionUtils.findThrowable(t, SuccessException.class).isPresent()) {
+						errorRef.set(t);
+					}
 				}
 			}
-		});
+		};
 		runner.start();
 
 		final long deadline = System.nanoTime() + 10_000_000_000L;
@@ -2054,7 +2103,7 @@ public abstract class KafkaConsumerTestBase extends KafkaTestBaseWithFlink {
 			// did not finish in time, maybe the producer dropped one or more records and
 			// the validation did not reach the exit point
 			success = false;
-			client.cancel(jobId).get();
+			client.cancel(jobId);
 		}
 		else {
 			Throwable error = errorRef.get();

@@ -25,7 +25,6 @@ import org.apache.calcite.linq4j.Ord;
 import org.apache.calcite.plan.Contexts;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
-import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.Aggregate.Group;
@@ -45,7 +44,6 @@ import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
-import org.apache.calcite.util.Optionality;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
@@ -151,10 +149,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		}
 
 		// Find all of the agg expressions. We use a LinkedHashSet to ensure determinism.
-		// Find all aggregate calls without distinct
-		int nonDistinctAggCallCount = 0;
-		// Find all aggregate calls without distinct but ignore MAX, MIN, BIT_AND, BIT_OR
-		int nonDistinctAggCallExcludingIgnoredCount = 0;
+		int nonDistinctAggCallCount = 0;  // find all aggregate calls without distinct
 		int filterCount = 0;
 		int unsupportedNonDistinctAggCallCount = 0;
 		final Set<Pair<List<Integer>, Integer>> argLists = new LinkedHashSet<>();
@@ -176,11 +171,6 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 					default:
 						++unsupportedNonDistinctAggCallCount;
 				}
-				if (aggCall.getAggregation().getDistinctOptionality() == Optionality.IGNORED) {
-					argLists.add(Pair.of(aggCall.getArgList(), aggCall.filterArg));
-				} else {
-					++nonDistinctAggCallExcludingIgnoredCount;
-				}
 			} else {
 				argLists.add(Pair.of(aggCall.getArgList(), aggCall.filterArg));
 			}
@@ -192,11 +182,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 
 		// If all of the agg expressions are distinct and have the same
 		// arguments then we can use a more efficient form.
-
-		// MAX, MIN, BIT_AND, BIT_OR always ignore distinct attribute,
-		// when they are mixed in with other distinct agg calls,
-		// we can still use this promotion.
-		if (nonDistinctAggCallExcludingIgnoredCount == 0
+		if (nonDistinctAggCallCount == 0
 				&& argLists.size() == 1
 				&& aggregate.getGroupType() == Group.SIMPLE) {
 			final Pair<List<Integer>, Integer> pair =
@@ -231,8 +217,9 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final List<RexInputRef> refs = new ArrayList<>();
 		final List<String> fieldNames = aggregate.getRowType().getFieldNames();
 		final ImmutableBitSet groupSet = aggregate.getGroupSet();
-		final int groupCount = aggregate.getGroupCount();
-		for (int i : Util.range(groupCount)) {
+		final int groupAndIndicatorCount =
+				aggregate.getGroupCount() + aggregate.getIndicatorCount();
+		for (int i : Util.range(groupAndIndicatorCount)) {
 			refs.add(RexInputRef.of(i, aggFields));
 		}
 
@@ -247,8 +234,8 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 			}
 			refs.add(
 					new RexInputRef(
-							groupCount + newAggCallList.size(),
-							aggFields.get(groupCount + i).getType()));
+							groupAndIndicatorCount + newAggCallList.size(),
+							aggFields.get(groupAndIndicatorCount + i).getType()));
 			newAggCallList.add(aggCall);
 		}
 
@@ -332,8 +319,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 			if (!aggCall.isDistinct()) {
 				final AggregateCall newCall =
 						AggregateCall.create(aggCall.getAggregation(), false,
-								aggCall.isApproximate(), false, aggCall.getArgList(), -1,
-								RelCollations.EMPTY,
+								aggCall.isApproximate(), aggCall.getArgList(), -1,
 								ImmutableBitSet.of(bottomGroupSet).cardinality(),
 								relBuilder.peek(), null, aggCall.name);
 				bottomAggregateCalls.add(newCall);
@@ -343,7 +329,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		relBuilder.push(
 				aggregate.copy(
 						aggregate.getTraitSet(), relBuilder.build(),
-						ImmutableBitSet.of(bottomGroupSet), null, bottomAggregateCalls));
+						false, ImmutableBitSet.of(bottomGroupSet), null, bottomAggregateCalls));
 
 		// Add aggregate A (see the reference example above), the top aggregate
 		// to handle the rest of the aggregation that the bottom aggregate hasn't handled
@@ -361,10 +347,8 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 						AggregateCall.create(aggCall.getAggregation(),
 								false,
 								aggCall.isApproximate(),
-								false,
 								newArgList,
 								-1,
-								RelCollations.EMPTY,
 								originalGroupSet.cardinality(),
 								relBuilder.peek(),
 								aggCall.getType(),
@@ -378,14 +362,13 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 				if (aggCall.getAggregation().getKind() == SqlKind.COUNT) {
 					newCall =
 							AggregateCall.create(new SqlSumEmptyIsZeroAggFunction(), false,
-									aggCall.isApproximate(), false, newArgs, -1,
-									RelCollations.EMPTY, originalGroupSet.cardinality(),
-									relBuilder.peek(), aggCall.getType(), aggCall.getName());
+									aggCall.isApproximate(), newArgs, -1,
+									originalGroupSet.cardinality(), relBuilder.peek(),
+									aggCall.getType(), aggCall.getName());
 				} else {
 					newCall =
 							AggregateCall.create(aggCall.getAggregation(), false,
-									aggCall.isApproximate(), false, newArgs, -1,
-									RelCollations.EMPTY,
+									aggCall.isApproximate(), newArgs, -1,
 									originalGroupSet.cardinality(),
 									relBuilder.peek(), aggCall.getType(), aggCall.name);
 				}
@@ -408,8 +391,8 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		}
 		relBuilder.push(
 				aggregate.copy(aggregate.getTraitSet(),
-						relBuilder.build(), ImmutableBitSet.of(topGroupSet),
-						null, topAggregateCalls));
+						relBuilder.build(), aggregate.indicator,
+						ImmutableBitSet.of(topGroupSet), null, topAggregateCalls));
 		return relBuilder;
 	}
 
@@ -453,8 +436,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final int z = groupCount + distinctAggCalls.size();
 		distinctAggCalls.add(
 				AggregateCall.create(SqlStdOperatorTable.GROUPING, false, false,
-						false, ImmutableIntList.copyOf(fullGroupSet), -1,
-						RelCollations.EMPTY, groupSets.size(),
+						ImmutableIntList.copyOf(fullGroupSet), -1, groupSets.size(),
 						relBuilder.peek(), null, "$g"));
 		for (Ord<ImmutableBitSet> groupSet : Ord.zip(groupSets)) {
 			filters.put(groupSet.e, z + groupSet.i);
@@ -511,8 +493,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 			}
 			final AggregateCall newCall =
 					AggregateCall.create(aggregation, false, aggCall.isApproximate(),
-							false, newArgList, newFilterArg,
-							RelCollations.EMPTY, aggregate.getGroupCount(), distinct,
+							newArgList, newFilterArg, aggregate.getGroupCount(), distinct,
 							null, aggCall.name);
 			newCalls.add(newCall);
 			aggCallIdx++;
@@ -633,7 +614,8 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final int cardinality = aggregate.getGroupSet().cardinality();
 		relBuilder.push(
 				aggregate.copy(aggregate.getTraitSet(), relBuilder.build(),
-					ImmutableBitSet.range(cardinality), null, newAggCalls));
+						aggregate.indicator, ImmutableBitSet.range(cardinality), null,
+						newAggCalls));
 		return relBuilder;
 	}
 
@@ -722,8 +704,9 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final List<AggregateCall> aggCallList = new ArrayList<>();
 		final List<AggregateCall> aggCalls = aggregate.getAggCallList();
 
-		final int groupCount = aggregate.getGroupCount();
-		int i = groupCount - 1;
+		final int groupAndIndicatorCount =
+				aggregate.getGroupCount() + aggregate.getIndicatorCount();
+		int i = groupAndIndicatorCount - 1;
 		for (AggregateCall aggCall : aggCalls) {
 			++i;
 
@@ -749,17 +732,16 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 					aggCall.filterArg >= 0 ? sourceOf.get(aggCall.filterArg) : -1;
 			final AggregateCall newAggCall =
 					AggregateCall.create(aggCall.getAggregation(), false,
-							aggCall.isApproximate(), false, newArgs,
-							newFilterArg, RelCollations.EMPTY,
-							aggCall.getType(), aggCall.getName());
+							aggCall.isApproximate(), newArgs,
+							newFilterArg, aggCall.getType(), aggCall.getName());
 			assert refs.get(i) == null;
 			if (n == 0) {
 				refs.set(i,
-						new RexInputRef(groupCount + aggCallList.size(),
+						new RexInputRef(groupAndIndicatorCount + aggCallList.size(),
 								newAggCall.getType()));
 			} else {
 				refs.set(i,
-						new RexInputRef(leftFields.size() + groupCount
+						new RexInputRef(leftFields.size() + groupAndIndicatorCount
 								+ aggCallList.size(), newAggCall.getType()));
 			}
 			aggCallList.add(newAggCall);
@@ -772,9 +754,16 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final ImmutableBitSet newGroupSet = aggregate.getGroupSet().permute(map);
 		assert newGroupSet
 				.equals(ImmutableBitSet.range(aggregate.getGroupSet().cardinality()));
+		com.google.common.collect.ImmutableList<ImmutableBitSet> newGroupingSets = null;
+		if (aggregate.indicator) {
+			newGroupingSets =
+					ImmutableBitSet.ORDERING.immutableSortedCopy(
+							ImmutableBitSet.permute(aggregate.getGroupSets(), map));
+		}
+
 		relBuilder.push(
 				aggregate.copy(aggregate.getTraitSet(), relBuilder.build(),
-						newGroupSet, null, aggCallList));
+						aggregate.indicator, newGroupSet, newGroupingSets, aggCallList));
 
 		// If there's no left child yet, no need to create the join
 		if (n == 0) {
@@ -787,7 +776,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		final List<RelDataTypeField> distinctFields =
 				relBuilder.peek().getRowType().getFieldList();
 		final List<RexNode> conditions = com.google.common.collect.Lists.newArrayList();
-		for (i = 0; i < groupCount; ++i) {
+		for (i = 0; i < groupAndIndicatorCount; ++i) {
 			// null values form its own group
 			// use "is not distinct from" so that the join condition
 			// allows null values to match.
@@ -816,8 +805,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 			// arguments. If we're rewriting aggregates whose args are {sal}, we will
 			// rewrite COUNT(DISTINCT sal) and SUM(DISTINCT sal) but ignore
 			// COUNT(DISTINCT gender) or SUM(sal).
-			if (!aggCall.isDistinct()
-				&& aggCall.getAggregation().getDistinctOptionality() != Optionality.IGNORED) {
+			if (!aggCall.isDistinct()) {
 				continue;
 			}
 			if (!aggCall.getArgList().equals(argList)) {
@@ -833,8 +821,8 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 			}
 			final AggregateCall newAggCall =
 					AggregateCall.create(aggCall.getAggregation(), false,
-						aggCall.isApproximate(), false, newArgs, -1,
-						RelCollations.EMPTY, aggCall.getType(), aggCall.getName());
+							aggCall.isApproximate(), newArgs, -1,
+							aggCall.getType(), aggCall.getName());
 			newAggCalls.set(i, newAggCall);
 		}
 	}
@@ -908,7 +896,10 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 				RexNode condition =
 						rexBuilder.makeCall(SqlStdOperatorTable.CASE, filterRef,
 								argRef.left,
-								rexBuilder.makeNullLiteral(argRef.left.getType()));
+								rexBuilder.ensureType(argRef.left.getType(),
+										rexBuilder.makeCast(argRef.left.getType(),
+												rexBuilder.constantNull()),
+										true));
 				sourceOf.put(arg, projects.size());
 				projects.add(Pair.of(condition, "i$" + argRef.right));
 				continue;
@@ -924,7 +915,7 @@ public final class FlinkAggregateExpandDistinctAggregatesRule extends RelOptRule
 		// Get the distinct values of the GROUP BY fields and the arguments
 		// to the agg functions.
 		relBuilder.push(
-				aggregate.copy(aggregate.getTraitSet(), relBuilder.build(),
+				aggregate.copy(aggregate.getTraitSet(), relBuilder.build(), false,
 						ImmutableBitSet.range(projects.size()),
 						null, com.google.common.collect.ImmutableList.<AggregateCall>of()));
 		return relBuilder;

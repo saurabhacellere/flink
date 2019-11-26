@@ -23,7 +23,6 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.client.cli.util.DummyClusterClientServiceLoader;
 import org.apache.flink.client.cli.util.DummyCustomCommandLine;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.ConfigConstants;
@@ -50,12 +49,9 @@ import org.apache.flink.test.util.TestBaseUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.TestLogger;
 
-import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -120,7 +116,7 @@ public class LocalExecutorITCase extends TestLogger {
 
 	private static Configuration getConfig() {
 		Configuration config = new Configuration();
-		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "4m");
+		config.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "4m");
 		config.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, NUM_TMS);
 		config.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, NUM_SLOTS_PER_TM);
 		config.setBoolean(WebOptions.SUBMIT_ENABLE, false);
@@ -129,9 +125,6 @@ public class LocalExecutorITCase extends TestLogger {
 
 	@Parameter
 	public String planner;
-
-	@Rule
-	public ExpectedException exception = ExpectedException.none();
 
 	@Test
 	public void testValidateSession() throws Exception {
@@ -146,13 +139,13 @@ public class LocalExecutorITCase extends TestLogger {
 
 		List<String> actualTables = executor.listTables(session);
 		List<String> expectedTables = Arrays.asList(
-			"AdditionalView1",
-			"AdditionalView2",
 			"TableNumber1",
 			"TableNumber2",
 			"TableSourceSink",
 			"TestView1",
-			"TestView2");
+			"TestView2",
+			"AdditionalView1",
+			"AdditionalView2");
 		assertEquals(expectedTables, actualTables);
 
 		session.removeView("AdditionalView1");
@@ -184,8 +177,8 @@ public class LocalExecutorITCase extends TestLogger {
 		final List<String> actualCatalogs = executor.listCatalogs(session);
 
 		final List<String> expectedCatalogs = Arrays.asList(
-			"catalog1",
 			"default_catalog",
+			"catalog1",
 			"simple-catalog");
 		assertEquals(expectedCatalogs, actualCatalogs);
 	}
@@ -224,7 +217,7 @@ public class LocalExecutorITCase extends TestLogger {
 
 		final List<String> actualTables = executor.listUserDefinedFunctions(session);
 
-		final List<String> expectedTables = Arrays.asList("aggregateudf", "tableudf", "scalarudf");
+		final List<String> expectedTables = Arrays.asList("aggregateUDF", "tableUDF", "scalarUDF");
 		assertEquals(expectedTables, actualTables);
 	}
 
@@ -481,14 +474,11 @@ public class LocalExecutorITCase extends TestLogger {
 	@Test
 	public void testUseCatalogAndUseDatabase() throws Exception {
 		final String csvOutputPath = new File(tempFolder.newFolder().getAbsolutePath(), "test-out.csv").toURI().toString();
-		final URL url1 = getClass().getClassLoader().getResource("test-data.csv");
-		final URL url2 = getClass().getClassLoader().getResource("test-data-1.csv");
-		Objects.requireNonNull(url1);
-		Objects.requireNonNull(url2);
+		final URL url = getClass().getClassLoader().getResource("test-data.csv");
+		Objects.requireNonNull(url);
 		final Map<String, String> replaceVars = new HashMap<>();
 		replaceVars.put("$VAR_PLANNER", planner);
-		replaceVars.put("$VAR_SOURCE_PATH1", url1.getPath());
-		replaceVars.put("$VAR_SOURCE_PATH2", url2.getPath());
+		replaceVars.put("$VAR_SOURCE_PATH1", url.getPath());
 		replaceVars.put("$VAR_EXECUTION_TYPE", "streaming");
 		replaceVars.put("$VAR_SOURCE_SINK_PATH", csvOutputPath);
 		replaceVars.put("$VAR_UPDATE_MODE", "update-mode: append");
@@ -506,8 +496,7 @@ public class LocalExecutorITCase extends TestLogger {
 				Arrays.asList(DependencyTest.TestHiveCatalogFactory.ADDITIONAL_TEST_DATABASE, HiveCatalog.DEFAULT_DB),
 				executor.listDatabases(session));
 
-			assertEquals(Collections.singletonList(DependencyTest.TestHiveCatalogFactory.TABLE_WITH_PARAMETERIZED_TYPES),
-					executor.listTables(session));
+			assertEquals(Collections.emptyList(), executor.listTables(session));
 
 			executor.useDatabase(session, DependencyTest.TestHiveCatalogFactory.ADDITIONAL_TEST_DATABASE);
 
@@ -515,54 +504,6 @@ public class LocalExecutorITCase extends TestLogger {
 		} finally {
 			executor.stop(session);
 		}
-	}
-
-	@Test
-	public void testUseNonExistingDatabase() throws Exception {
-		final Executor executor = createDefaultExecutor(clusterClient);
-		final SessionContext session = new SessionContext("test-session", new Environment());
-
-		exception.expect(SqlExecutionException.class);
-		executor.useDatabase(session, "nonexistingdb");
-	}
-
-	@Test
-	public void testUseNonExistingCatalog() throws Exception {
-		final Executor executor = createDefaultExecutor(clusterClient);
-		final SessionContext session = new SessionContext("test-session", new Environment());
-
-		exception.expect(SqlExecutionException.class);
-		executor.useCatalog(session, "nonexistingcatalog");
-	}
-
-	@Test
-	public void testParameterizedTypes() throws Exception {
-		// only blink planner supports parameterized types
-		Assume.assumeTrue(planner.equals("blink"));
-		final URL url1 = getClass().getClassLoader().getResource("test-data.csv");
-		final URL url2 = getClass().getClassLoader().getResource("test-data-1.csv");
-		Objects.requireNonNull(url1);
-		Objects.requireNonNull(url2);
-		final Map<String, String> replaceVars = new HashMap<>();
-		replaceVars.put("$VAR_PLANNER", planner);
-		replaceVars.put("$VAR_SOURCE_PATH1", url1.getPath());
-		replaceVars.put("$VAR_SOURCE_PATH2", url2.getPath());
-		replaceVars.put("$VAR_EXECUTION_TYPE", "batch");
-		replaceVars.put("$VAR_UPDATE_MODE", "update-mode: append");
-		replaceVars.put("$VAR_MAX_ROWS", "100");
-		replaceVars.put("$VAR_RESULT_MODE", "table");
-
-		final Executor executor = createModifiedExecutor(CATALOGS_ENVIRONMENT_FILE, clusterClient, replaceVars);
-		final SessionContext session = new SessionContext("test-session", new Environment());
-		executor.useCatalog(session, "hivecatalog");
-		String resultID = executor.executeQuery(session,
-				"select * from " + DependencyTest.TestHiveCatalogFactory.TABLE_WITH_PARAMETERIZED_TYPES).getResultId();
-		retrieveTableResult(executor, session, resultID);
-
-		// make sure legacy types still work
-		executor.useCatalog(session, "default_catalog");
-		resultID = executor.executeQuery(session, "select * from TableNumber3").getResultId();
-		retrieveTableResult(executor, session, resultID);
 	}
 
 	private void executeStreamQueryTable(
@@ -610,8 +551,7 @@ public class LocalExecutorITCase extends TestLogger {
 			EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
 			Collections.emptyList(),
 			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+			new DummyCustomCommandLine<T>(clusterClient));
 	}
 
 	private <T> LocalExecutor createModifiedExecutor(ClusterClient<T> clusterClient, Map<String, String> replaceVars) throws Exception {
@@ -619,8 +559,7 @@ public class LocalExecutorITCase extends TestLogger {
 			EnvironmentFileUtil.parseModified(DEFAULTS_ENVIRONMENT_FILE, replaceVars),
 			Collections.emptyList(),
 			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+			new DummyCustomCommandLine<T>(clusterClient));
 	}
 
 	private <T> LocalExecutor createModifiedExecutor(
@@ -629,8 +568,7 @@ public class LocalExecutorITCase extends TestLogger {
 			EnvironmentFileUtil.parseModified(yamlFile, replaceVars),
 			Collections.emptyList(),
 			clusterClient.getFlinkConfiguration(),
-			new DummyCustomCommandLine(),
-			new DummyClusterClientServiceLoader(clusterClient));
+			new DummyCustomCommandLine<T>(clusterClient));
 	}
 
 	private List<String> retrieveTableResult(

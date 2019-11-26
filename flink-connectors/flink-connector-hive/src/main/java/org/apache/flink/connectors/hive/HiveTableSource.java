@@ -21,6 +21,7 @@ package org.apache.flink.connectors.hive;
 import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
+import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
@@ -29,7 +30,6 @@ import org.apache.flink.table.catalog.hive.client.HiveMetastoreClientWrapper;
 import org.apache.flink.table.catalog.hive.descriptors.HiveCatalogValidator;
 import org.apache.flink.table.sources.InputFormatTableSource;
 import org.apache.flink.table.sources.PartitionableTableSource;
-import org.apache.flink.table.sources.ProjectableTableSource;
 import org.apache.flink.table.sources.TableSource;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
@@ -46,7 +46,6 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Date;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +53,7 @@ import java.util.Map;
 /**
  * A TableSource implementation to read data from Hive tables.
  */
-public class HiveTableSource extends InputFormatTableSource<Row> implements PartitionableTableSource, ProjectableTableSource<Row> {
+public class HiveTableSource extends InputFormatTableSource<Row> implements PartitionableTableSource {
 
 	private static Logger logger = LoggerFactory.getLogger(HiveTableSource.class);
 
@@ -68,7 +67,6 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 	private Map<Map<String, String>, HiveTablePartition> partitionSpec2HiveTablePartition = new HashMap<>();
 	private boolean initAllPartitions;
 	private boolean partitionPruned;
-	private int[] projectedFields;
 
 	public HiveTableSource(JobConf jobConf, ObjectPath tablePath, CatalogTable catalogTable) {
 		this.jobConf = Preconditions.checkNotNull(jobConf);
@@ -80,23 +78,18 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 		partitionPruned = false;
 	}
 
-	// A constructor mainly used to create copies during optimizations like partition pruning and projection push down.
 	private HiveTableSource(JobConf jobConf, ObjectPath tablePath, CatalogTable catalogTable,
 							List<HiveTablePartition> allHivePartitions,
 							String hiveVersion,
-							List<Map<String, String>> partitionList,
-							boolean initAllPartitions,
-							boolean partitionPruned,
-							int[] projectedFields) {
+							List<Map<String, String>> partitionList) {
 		this.jobConf = Preconditions.checkNotNull(jobConf);
 		this.tablePath = Preconditions.checkNotNull(tablePath);
 		this.catalogTable = Preconditions.checkNotNull(catalogTable);
 		this.allHivePartitions = allHivePartitions;
 		this.hiveVersion = hiveVersion;
 		this.partitionList = partitionList;
-		this.initAllPartitions = initAllPartitions;
-		this.partitionPruned = partitionPruned;
-		this.projectedFields = projectedFields;
+		this.initAllPartitions = true;
+		partitionPruned = true;
 	}
 
 	@Override
@@ -104,7 +97,7 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 		if (!initAllPartitions) {
 			initAllPartitions();
 		}
-		return new HiveTableInputFormat(jobConf, catalogTable, allHivePartitions, projectedFields);
+		return new HiveTableInputFormat(jobConf, catalogTable, allHivePartitions);
 	}
 
 	@Override
@@ -114,17 +107,12 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 
 	@Override
 	public DataType getProducedDataType() {
-		TableSchema originSchema = getTableSchema();
-		if (projectedFields == null) {
-			return originSchema.toRowDataType();
+		TableSchema tableSchema = catalogTable.getSchema();
+		DataTypes.Field[] fields = new DataTypes.Field[tableSchema.getFieldCount()];
+		for (int i = 0; i < fields.length; i++) {
+			fields[i] = DataTypes.FIELD(tableSchema.getFieldName(i).get(), tableSchema.getFieldDataType(i).get());
 		}
-		String[] names = new String[projectedFields.length];
-		DataType[] types = new DataType[projectedFields.length];
-		for (int i = 0; i < projectedFields.length; i++) {
-			names[i] = originSchema.getFieldName(projectedFields[i]).get();
-			types[i] = originSchema.getFieldDataType(projectedFields[i]).get();
-		}
-		return TableSchema.builder().fields(names, types).build().toRowDataType();
+		return DataTypes.ROW(fields);
 	}
 
 	@Override
@@ -142,6 +130,11 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 	}
 
 	@Override
+	public List<String> getPartitionFieldNames() {
+		return catalogTable.getPartitionKeys();
+	}
+
+	@Override
 	public TableSource applyPartitionPruning(List<Map<String, String>> remainingPartitions) {
 		if (catalogTable.getPartitionKeys() == null || catalogTable.getPartitionKeys().size() == 0) {
 			return this;
@@ -153,8 +146,7 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 																			"partition spec %s", partitionSpec));
 				remainingHivePartitions.add(hiveTablePartition);
 			}
-			return new HiveTableSource(jobConf, tablePath, catalogTable, remainingHivePartitions,
-					hiveVersion, partitionList, true, true, projectedFields);
+			return new HiveTableSource(jobConf, tablePath, catalogTable, remainingHivePartitions, hiveVersion, partitionList);
 		}
 	}
 
@@ -237,17 +229,7 @@ public class HiveTableSource extends InputFormatTableSource<Row> implements Part
 
 	@Override
 	public String explainSource() {
-		String explain = String.format(" TablePath: %s, PartitionPruned: %s, PartitionNums: %d",
-				tablePath.getFullName(), partitionPruned, null == allHivePartitions ? 0 : allHivePartitions.size());
-		if (projectedFields != null) {
-			explain += ", ProjectedFields: " + Arrays.toString(projectedFields);
-		}
-		return super.explainSource() + explain;
-	}
-
-	@Override
-	public TableSource<Row> projectFields(int[] fields) {
-		return new HiveTableSource(jobConf, tablePath, catalogTable, allHivePartitions, hiveVersion,
-				partitionList, initAllPartitions, partitionPruned, fields);
+		return super.explainSource() + String.format(" TablePath: %s, PartitionPruned: %s, PartitionNums: %d",
+													tablePath.getFullName(), partitionPruned, null == allHivePartitions ? 0 : allHivePartitions.size());
 	}
 }

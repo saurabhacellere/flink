@@ -22,10 +22,8 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.java.typeutils.GenericTypeInfo;
 import org.apache.flink.table.catalog.FunctionCatalog;
 import org.apache.flink.table.catalog.FunctionLookup;
-import org.apache.flink.table.catalog.UnresolvedIdentifier;
 import org.apache.flink.table.functions.AggregateFunctionDefinition;
 import org.apache.flink.table.functions.FunctionDefinition;
-import org.apache.flink.table.functions.FunctionIdentifier;
 import org.apache.flink.table.functions.ScalarFunctionDefinition;
 import org.apache.flink.table.functions.TableFunctionDefinition;
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory;
@@ -75,7 +73,7 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 			SqlSyntax syntax,
 			List<SqlOperator> operatorList,
 			SqlNameMatcher nameMatcher) {
-		if (opName.isStar()) {
+		if (!opName.isSimple()) {
 			return;
 		}
 
@@ -85,12 +83,11 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 			return;
 		}
 
-		UnresolvedIdentifier identifier = UnresolvedIdentifier.of(opName.names.toArray(new String[0]));
-
-		Optional<FunctionLookup.Result> candidateFunction = functionCatalog.lookupFunction(identifier);
+		String name = opName.getSimple();
+		Optional<FunctionLookup.Result> candidateFunction = functionCatalog.lookupFunction(name);
 
 		candidateFunction.flatMap(lookupResult ->
-			convertToSqlFunction(category, lookupResult.getFunctionIdentifier(), lookupResult.getFunctionDefinition())
+			convertToSqlFunction(category, name, lookupResult.getFunctionDefinition())
 		).ifPresent(operatorList::add);
 	}
 
@@ -100,25 +97,29 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 
 	private Optional<SqlFunction> convertToSqlFunction(
 			SqlFunctionCategory category,
-			FunctionIdentifier identifier,
+			String name,
 			FunctionDefinition functionDefinition) {
 		if (functionDefinition instanceof AggregateFunctionDefinition) {
 			AggregateFunctionDefinition def = (AggregateFunctionDefinition) functionDefinition;
 			if (isHiveFunc(def.getAggregateFunction())) {
 				return Optional.of(new HiveAggSqlFunction(
-						identifier, def.getAggregateFunction(), typeFactory));
+						name,
+						name,
+						def.getAggregateFunction(),
+						typeFactory));
 			} else {
-				return convertAggregateFunction(identifier, (AggregateFunctionDefinition) functionDefinition);
+				return convertAggregateFunction(name, (AggregateFunctionDefinition) functionDefinition);
 			}
 		} else if (functionDefinition instanceof ScalarFunctionDefinition) {
 			ScalarFunctionDefinition def = (ScalarFunctionDefinition) functionDefinition;
 			if (isHiveFunc(def.getScalarFunction())) {
 				return Optional.of(new HiveScalarSqlFunction(
-						identifier,
+						name,
+						name,
 						def.getScalarFunction(),
 						typeFactory));
 			} else {
-				return convertScalarFunction(identifier, def);
+				return convertScalarFunction(name, def);
 			}
 		} else if (functionDefinition instanceof TableFunctionDefinition &&
 				category != null &&
@@ -127,14 +128,15 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 			if (isHiveFunc(def.getTableFunction())) {
 				DataType returnType = fromLegacyInfoToDataType(new GenericTypeInfo<>(Row.class));
 				return Optional.of(new HiveTableSqlFunction(
-						identifier,
+						name,
+						name,
 						def.getTableFunction(),
 						returnType,
 						typeFactory,
 						new DeferredTypeFlinkTableFunction(def.getTableFunction(), returnType),
-						HiveTableSqlFunction.operandTypeChecker(identifier.toString(), def.getTableFunction())));
+						HiveTableSqlFunction.operandTypeChecker(name, def.getTableFunction())));
 			} else {
-				return convertTableFunction(identifier, (TableFunctionDefinition) functionDefinition);
+				return convertTableFunction(name, (TableFunctionDefinition) functionDefinition);
 			}
 		}
 
@@ -142,11 +144,11 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 	}
 
 	private Optional<SqlFunction> convertAggregateFunction(
-			FunctionIdentifier identifier,
+			String name,
 			AggregateFunctionDefinition functionDefinition) {
 		SqlFunction aggregateFunction = UserDefinedFunctionUtils.createAggregateSqlFunction(
-			identifier,
-			identifier.toString(),
+			name,
+			name,
 			functionDefinition.getAggregateFunction(),
 			TypeConversions.fromLegacyInfoToDataType(functionDefinition.getResultTypeInfo()),
 			TypeConversions.fromLegacyInfoToDataType(functionDefinition.getAccumulatorTypeInfo()),
@@ -155,20 +157,20 @@ public class FunctionCatalogOperatorTable implements SqlOperatorTable {
 		return Optional.of(aggregateFunction);
 	}
 
-	private Optional<SqlFunction> convertScalarFunction(FunctionIdentifier identifier, ScalarFunctionDefinition functionDefinition) {
+	private Optional<SqlFunction> convertScalarFunction(String name, ScalarFunctionDefinition functionDefinition) {
 		SqlFunction scalarFunction = UserDefinedFunctionUtils.createScalarSqlFunction(
-			identifier,
-			identifier.toString(),
+			name,
+			name,
 			functionDefinition.getScalarFunction(),
 			typeFactory
 		);
 		return Optional.of(scalarFunction);
 	}
 
-	private Optional<SqlFunction> convertTableFunction(FunctionIdentifier identifier, TableFunctionDefinition functionDefinition) {
+	private Optional<SqlFunction> convertTableFunction(String name, TableFunctionDefinition functionDefinition) {
 		SqlFunction tableFunction = UserDefinedFunctionUtils.createTableSqlFunction(
-			identifier,
-			identifier.toString(),
+			name,
+			name,
 			functionDefinition.getTableFunction(),
 			TypeConversions.fromLegacyInfoToDataType(functionDefinition.getResultType()),
 			typeFactory

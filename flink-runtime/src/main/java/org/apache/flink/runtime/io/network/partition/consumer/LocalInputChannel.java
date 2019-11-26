@@ -237,6 +237,13 @@ public class LocalInputChannel extends InputChannel implements BufferAvailabilit
 		return isReleased;
 	}
 
+	@Override
+	void notifySubpartitionConsumed() throws IOException {
+		if (subpartitionView != null) {
+			subpartitionView.notifySubpartitionConsumed();
+		}
+	}
+
 	/**
 	 * Releases the partition reader.
 	 */

@@ -23,7 +23,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.delegation.PlannerTypeInferenceUtil;
 import org.apache.flink.table.functions.BuiltInFunctionDefinition;
 import org.apache.flink.table.functions.FunctionDefinition;
-import org.apache.flink.table.functions.FunctionIdentifier;
 
 import java.util.Optional;
 
@@ -34,15 +33,15 @@ import java.util.Optional;
 public interface FunctionLookup {
 
 	/**
-	 * Lookup a function by function identifier. The lookup is case insensitive.
+	 * Lookup a function by name. The lookup is case insensitive.
 	 */
-	Optional<Result> lookupFunction(UnresolvedIdentifier identifier);
+	Optional<Result> lookupFunction(String name);
 
 	/**
 	 * Helper method for looking up a built-in function.
 	 */
 	default Result lookupBuiltInFunction(BuiltInFunctionDefinition definition) {
-		return lookupFunction(UnresolvedIdentifier.of(definition.getName()))
+		return lookupFunction(definition.getName())
 			.orElseThrow(() -> new TableException(
 				String.format(
 					"Required built-in function [%s] could not be found in any catalog.",
@@ -61,17 +60,17 @@ public interface FunctionLookup {
 	 */
 	class Result {
 
-		private final FunctionIdentifier functionIdentifier;
+		private final ObjectIdentifier objectIdentifier;
 
 		private final FunctionDefinition functionDefinition;
 
-		public Result(FunctionIdentifier functionIdentifier, FunctionDefinition functionDefinition) {
-			this.functionIdentifier = functionIdentifier;
+		public Result(ObjectIdentifier objectIdentifier, FunctionDefinition functionDefinition) {
+			this.objectIdentifier = objectIdentifier;
 			this.functionDefinition = functionDefinition;
 		}
 
-		public FunctionIdentifier getFunctionIdentifier() {
-			return functionIdentifier;
+		public ObjectIdentifier getObjectIdentifier() {
+			return objectIdentifier;
 		}
 
 		public FunctionDefinition getFunctionDefinition() {

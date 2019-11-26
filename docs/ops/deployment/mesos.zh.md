@@ -193,6 +193,7 @@ The job graph file may be generated like this way:
 
 {% highlight java %}
 final JobGraph jobGraph = env.getStreamGraph().getJobGraph();
+jobGraph.setAllowQueuedScheduling(true);
 final String jobGraphFilename = "job.graph";
 File jobGraphFile = new File(jobGraphFilename);
 try (FileOutputStream output = new FileOutputStream(jobGraphFile);
@@ -202,7 +203,8 @@ try (FileOutputStream output = new FileOutputStream(jobGraphFile);
 {% endhighlight %}
 
 Note:
-1. Make sure that all Mesos processes have the user code jar on the classpath (e.g. putting them in the lib directory)
+1. Before serializing the job graph, please make sure to enable queued scheduling because slots need to be allocated lazily
+2. Make sure that all Mesos processes have the user code jar on the classpath (e.g. putting them in the lib directory)
 
 #### General configuration
 

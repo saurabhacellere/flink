@@ -30,13 +30,20 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
 
 /**
  * This class implements a {@link SlotSelectionStrategy} that is based on location preference hints.
  */
-public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSelectionStrategy {
+public enum LocationPreferenceSlotSelectionStrategy implements SlotSelectionStrategy {
 
-	LocationPreferenceSlotSelectionStrategy() {}
+	INSTANCE;
+
+	/**
+	 * Calculates the candidate's locality score.
+	 */
+	private static final BiFunction<Integer, Integer, Integer> LOCALITY_EVALUATION_FUNCTION =
+		(localWeigh, hostLocalWeigh) -> localWeigh * 10 + hostLocalWeigh;
 
 	@Override
 	public Optional<SlotInfoAndLocality> selectBestSlotForProfile(
@@ -49,12 +56,25 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
 			return Optional.empty();
 		}
 
-		final ResourceProfile resourceProfile = slotProfile.getPhysicalSlotResourceProfile();
+		final ResourceProfile resourceProfile = slotProfile.getResourceProfile();
 
 		// if we have no location preferences, we can only filter by the additional requirements.
 		return locationPreferences.isEmpty() ?
 			selectWithoutLocationPreference(availableSlots, resourceProfile) :
 			selectWitLocationPreference(availableSlots, locationPreferences, resourceProfile);
+	}
+
+	@Nonnull
+	private Optional<SlotInfoAndLocality> selectWithoutLocationPreference(
+		@Nonnull Collection<SlotInfoAndResources> availableSlots,
+		@Nonnull ResourceProfile resourceProfile) {
+
+		for (SlotInfoAndResources candidate : availableSlots) {
+			if (candidate.getRemainingResources().isMatching(resourceProfile)) {
+				return Optional.of(SlotInfoAndLocality.of(candidate.getSlotInfo(), Locality.UNCONSTRAINED));
+			}
+		}
+		return Optional.empty();
 	}
 
 	@Nonnull
@@ -74,21 +94,21 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
 
 		SlotInfoAndResources bestCandidate = null;
 		Locality bestCandidateLocality = Locality.UNKNOWN;
-		double bestCandidateScore = Double.MIN_VALUE;
+		int bestCandidateScore = Integer.MIN_VALUE;
 
 		for (SlotInfoAndResources candidate : availableSlots) {
 
 			if (candidate.getRemainingResources().isMatching(resourceProfile)) {
 
 				// this gets candidate is local-weigh
-				int localWeigh = preferredResourceIDs.getOrDefault(
+				Integer localWeigh = preferredResourceIDs.getOrDefault(
 					candidate.getSlotInfo().getTaskManagerLocation().getResourceID(), 0);
 
 				// this gets candidate is host-local-weigh
-				int hostLocalWeigh = preferredFQHostNames.getOrDefault(
+				Integer hostLocalWeigh = preferredFQHostNames.getOrDefault(
 					candidate.getSlotInfo().getTaskManagerLocation().getFQDNHostname(), 0);
 
-				double candidateScore = calculateCandidateScore(localWeigh, hostLocalWeigh, candidate.getTaskExecutorUtilization());
+				int candidateScore = LOCALITY_EVALUATION_FUNCTION.apply(localWeigh, hostLocalWeigh);
 				if (candidateScore > bestCandidateScore) {
 					bestCandidateScore = candidateScore;
 					bestCandidate = candidate;
@@ -103,24 +123,5 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
 		return bestCandidate != null ?
 			Optional.of(SlotInfoAndLocality.of(bestCandidate.getSlotInfo(), bestCandidateLocality)) :
 			Optional.empty();
-	}
-
-	@Nonnull
-	protected abstract Optional<SlotInfoAndLocality> selectWithoutLocationPreference(
-		@Nonnull Collection<SlotInfoAndResources> availableSlots,
-		@Nonnull ResourceProfile resourceProfile);
-
-	protected abstract double calculateCandidateScore(int localWeigh, int hostLocalWeigh, double taskExecutorUtilization);
-
-	// -------------------------------------------------------------------------------------------
-	// Factory methods
-	// -------------------------------------------------------------------------------------------
-
-	public static LocationPreferenceSlotSelectionStrategy createDefault() {
-		return new DefaultLocationPreferenceSlotSelectionStrategy();
-	}
-
-	public static LocationPreferenceSlotSelectionStrategy createEvenlySpreadOut() {
-		return new EvenlySpreadOutLocationPreferenceSlotSelectionStrategy();
 	}
 }

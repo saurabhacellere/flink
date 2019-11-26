@@ -21,6 +21,7 @@ package org.apache.flink.table.factories;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.ExternalCatalog;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.descriptors.Descriptor;
 import org.apache.flink.table.sinks.TableSink;
@@ -33,6 +34,17 @@ import java.util.Optional;
  * Utility for dealing with {@link TableFactory} using the {@link TableFactoryService}.
  */
 public class TableFactoryUtil {
+
+	/**
+	 * Returns an external catalog.
+	 */
+	@Deprecated
+	public static ExternalCatalog findAndCreateExternalCatalog(Descriptor descriptor) {
+		Map<String, String> properties = descriptor.toProperties();
+		return TableFactoryService
+			.find(ExternalCatalogFactory.class, properties)
+			.createExternalCatalog(properties);
+	}
 
 	/**
 	 * Returns a table source matching the descriptor.
@@ -59,12 +71,12 @@ public class TableFactoryUtil {
 	/**
 	 * Returns a table sink matching the descriptor.
 	 */
+	@SuppressWarnings("unchecked")
 	public static <T> TableSink<T> findAndCreateTableSink(Descriptor descriptor) {
 		Map<String, String> properties = descriptor.toProperties();
 		return findAndCreateTableSink(properties);
 	}
 
-	@SuppressWarnings("unchecked")
 	private static <T> TableSink<T> findAndCreateTableSink(Map<String, String> properties) {
 		TableSink tableSink;
 		try {
@@ -86,7 +98,7 @@ public class TableFactoryUtil {
 	}
 
 	/**
-	 * Returns a table source matching the {@link org.apache.flink.table.catalog.CatalogTable}.
+	 * Returns a table sink matching the {@link org.apache.flink.table.catalog.CatalogTable}.
 	 */
 	public static <T> TableSource<T> findAndCreateTableSource(CatalogTable table) {
 		return findAndCreateTableSource(table.toProperties());

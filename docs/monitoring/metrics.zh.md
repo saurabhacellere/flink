@@ -433,7 +433,7 @@ You can configure which delimiter to use for the identifier (default: `.`) by se
 
 ### User Scope
 
-You can define a user scope by calling `MetricGroup#addGroup(String name)`, `MetricGroup#addGroup(int name)` or `MetricGroup#addGroup(String key, String value)`.
+You can define a user scope by calling `MetricGroup#addGroup(String name)`, `MetricGroup#addGroup(int name)` or `Metric#addGroup(String key, String value)`.
 These methods affect what `MetricGroup#getMetricIdentifier` and `MetricGroup#getScopeComponents` return.
 
 <div class="codetabs" markdown="1">
@@ -659,9 +659,6 @@ Parameters:
 - `username` - (optional) InfluxDB username used for authentication
 - `password` - (optional) InfluxDB username's password used for authentication
 - `retentionPolicy` - (optional) InfluxDB retention policy, defaults to retention policy defined on the server for the db
-- `consistency` - (optional) InfluxDB consistency level for metrics. Possible values: [ALL, ANY, ONE, QUORUM], default is ONE
-- `connectTimeout` - (optional) the InfluxDB client connect timeout in milliseconds, default is 10000 ms
-- `writeTimeout` - (optional) the InfluxDB client write timeout in milliseconds, default is 10000 ms
 
 Example configuration:
 
@@ -674,9 +671,6 @@ metrics.reporter.influxdb.db: flink
 metrics.reporter.influxdb.username: flink-metrics
 metrics.reporter.influxdb.password: qwerty
 metrics.reporter.influxdb.retentionPolicy: one_hour
-metrics.reporter.influxdb.consistency: ANY
-metrics.reporter.influxdb.connectTimeout: 60000
-metrics.reporter.influxdb.writeTimeout: 60000
 
 {% endhighlight %}
 
@@ -731,7 +725,6 @@ metrics.reporter.promgateway.port: 9091
 metrics.reporter.promgateway.jobName: myJob
 metrics.reporter.promgateway.randomJobNameSuffix: true
 metrics.reporter.promgateway.deleteOnShutdown: false
-metrics.reporter.promgateway.groupingKey: k1=v1;k2=v2
 
 {% endhighlight %}
 
@@ -1009,8 +1002,7 @@ Thus, in order to infer the metric identifier:
   </tbody>
 </table>
 
-
-### Network (Deprecated: use [Default shuffle service metrics]({{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service))
+### Network (Deprecated: use [Default shuffle service metrics]({{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service))
 <table class="table table-bordered">
   <thead>
     <tr>
@@ -1035,8 +1027,8 @@ Thus, in order to infer the metric identifier:
       <td>Gauge</td>
     </tr>
     <tr>
-      <th rowspan="10">Task</th>
-      <td rowspan="6">buffers</td>
+      <th rowspan="8">Task</th>
+      <td rowspan="4">buffers</td>
       <td>inputQueueLength</td>
       <td>The number of queued input buffers. (ignores LocalInputChannels which are using blocking subpartitions)</td>
       <td>Gauge</td>
@@ -1048,17 +1040,17 @@ Thus, in order to infer the metric identifier:
     </tr>
     <tr>
       <td>inPoolUsage</td>
-      <td>An estimate of the input buffers usage. (ignores LocalInputChannels)</td>
+      <td>An estimate of the input buffers usage.</td>
       <td>Gauge</td>
     </tr>
     <tr>
       <td>inputFloatingBuffersUsage</td>
-      <td>An estimate of the floating input buffers usage, dedicated for credit-based mode. (ignores LocalInputChannels)</td>
+      <td>An estimate of the floating input buffers usage, dediciated for credit-based mode.</td>
       <td>Gauge</td>
     </tr>
     <tr>
       <td>inputExclusiveBuffersUsage</td>
-      <td>An estimate of the exclusive input buffers usage, dedicated for credit-based mode. (ignores LocalInputChannels)</td>
+      <td>An estimate of the exclusive input buffers usage, dediciated for credit-based mode.</td>
       <td>Gauge</td>
     </tr>
     <tr>
@@ -1255,7 +1247,7 @@ Metrics related to data exchange between task executors using netty network comm
   </thead>
   <tbody>
     <tr>
-      <th rowspan="5"><strong>Job (only available on JobManager)</strong></th>
+      <th rowspan="4"><strong>Job (only available on JobManager)</strong></th>
       <td>restartingTime</td>
       <td>The time it took to restart the job, or how long the current restart has been in progress (in milliseconds).</td>
       <td>Gauge</td>
@@ -1278,12 +1270,7 @@ Metrics related to data exchange between task executors using netty network comm
     </tr>
     <tr>
       <td>fullRestarts</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <b>numRestarts</b>.</td>
-      <td>Gauge</td>
-    </tr>
-    <tr>
-      <td>numRestarts</td>
-      <td>The total number of restarts since this job was submitted, including full restarts and fine-grained restarts.</td>
+      <td>The total number of full restarts since this job was submitted.</td>
       <td>Gauge</td>
     </tr>
   </tbody>
@@ -1371,49 +1358,49 @@ Certain RocksDB native metrics are available but disabled by default, you can fi
   <tbody>
     <tr>
       <th rowspan="1"><strong>Job (only available on TaskManager)</strong></th>
-      <td>[&lt;source_id&gt;.[&lt;source_subtask_index&gt;.]]&lt;operator_id&gt;.&lt;operator_subtask_index&gt;.latency</td>
-      <td>The latency distributions from a given source (subtask) to an operator subtask (in milliseconds), depending on the [latency granularity]({{ site.baseurl }}/ops/config.html#metrics-latency-granularity).</td>
+      <td>&lt;source_id&gt;.&lt;source_subtask_index&gt;.&lt;operator_id&gt;.&lt;operator_subtask_index&gt;.latency</td>
+      <td>The latency distributions from a given source subtask to an operator subtask (in milliseconds).</td>
       <td>Histogram</td>
     </tr>
     <tr>
       <th rowspan="12"><strong>Task</strong></th>
       <td>numBytesInLocal</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Counter</td>
     </tr>
     <tr>
       <td>numBytesInLocalPerSecond</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Meter</td>
     </tr>
     <tr>
       <td>numBytesInRemote</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Counter</td>
     </tr>
     <tr>
       <td>numBytesInRemotePerSecond</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Meter</td>
     </tr>
     <tr>
       <td>numBuffersInLocal</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Counter</td>
     </tr>
     <tr>
       <td>numBuffersInLocalPerSecond</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Meter</td>
     </tr>
     <tr>
       <td>numBuffersInRemote</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Counter</td>
     </tr>
     <tr>
       <td>numBuffersInRemotePerSecond</td>
-      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
+      <td><span class="label label-danger">Attention:</span> deprecated, use <a href="{{ site.baseurl }}/zh/monitoring/metrics.html#default-shuffle-service">Default shuffle service metrics</a>.</td>
       <td>Meter</td>
     </tr>
     <tr>
@@ -1791,7 +1778,7 @@ logged by `SystemResourcesMetricsInitializer` during the startup.
 
 ## Latency tracking
 
-Flink allows to track the latency of records travelling through the system. This feature is disabled by default.
+Flink allows to track the latency of records traveling through the system. This feature is disabled by default.
 To enable the latency tracking you must set the `latencyTrackingInterval` to a positive number in either the
 [Flink configuration]({{ site.baseurl }}/ops/config.html#metrics-latency-interval) or `ExecutionConfig`.
 

@@ -107,10 +107,14 @@ public class JobManagerOptions {
 	/**
 	 * This option specifies the failover strategy, i.e. how the job computation recovers from task failures.
 	 *
-	 * <p>The option "individual" is intentionally not included for its known limitations.
-	 * It only works when all tasks are not connected, in which case the "region"
+	 * <p>The options "individual" and "region-legacy" are intentionally not included
+	 * as they have some known limitations or issues:
+	 * <ul>
+	 *     <li>"individual" strategy only works when all tasks are not connected, in which case the "region"
 	 * failover strategy would also restart failed tasks individually.
-	 * The new "region" strategy supersedes "individual" strategy and should always work.
+	 *     <li>"region-legacy" strategy is not able to backtrack missing input result partitions.
+	 * </ul>
+	 * The new "region" strategy supersedes "individual" and "region-legacy" strategies and should always work.
 	 */
 	public static final ConfigOption<String> EXECUTION_FAILOVER_STRATEGY =
 		key("jobmanager.execution.failover-strategy")
@@ -151,14 +155,6 @@ public class JobManagerOptions {
 		key("jobstore.expiration-time")
 		.defaultValue(60L * 60L)
 		.withDescription("The time in seconds after which a completed job expires and is purged from the job store.");
-
-	/**
-	 * The max number of completed jobs that can be kept in the job store.
-	 */
-	public static final ConfigOption<Integer> JOB_STORE_MAX_CAPACITY =
-		key("jobstore.max-capacity")
-			.defaultValue(Integer.MAX_VALUE)
-			.withDescription("The max number of completed jobs that can be kept in the job store.");
 
 	/**
 	 * The timeout in milliseconds for requesting a slot from Slot Pool.

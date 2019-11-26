@@ -20,9 +20,13 @@ package org.apache.flink.connectors.hive;
 
 import org.apache.flink.api.common.io.LocatableInputSplitAssigner;
 import org.apache.flink.api.common.io.statistics.BaseStatistics;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.hadoop.common.HadoopInputFormatCommonBase;
 import org.apache.flink.api.java.hadoop.mapred.wrapper.HadoopDummyReporter;
+import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.core.io.InputSplitAssigner;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.hive.util.HiveTableUtil;
 import org.apache.flink.table.functions.hive.conversion.HiveInspectors;
@@ -52,7 +56,6 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import java.util.stream.IntStream;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.hadoop.mapreduce.lib.input.FileInputFormat.INPUT_DIR;
@@ -61,7 +64,8 @@ import static org.apache.hadoop.mapreduce.lib.input.FileInputFormat.INPUT_DIR;
  * The HiveTableInputFormat are inspired by the HCatInputFormat and HadoopInputFormatBase.
  * It's used to read from hive partition/non-partition table.
  */
-public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveTableInputSplit> {
+public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveTableInputSplit>
+		implements ResultTypeQueryable {
 	private static final long serialVersionUID = 6351448428766433164L;
 	private static Logger logger = LoggerFactory.getLogger(HiveTableInputFormat.class);
 
@@ -73,6 +77,8 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 	private transient RecordReader<Writable, Writable> recordReader;
 	protected transient boolean fetched = false;
 	protected transient boolean hasNext;
+
+	private RowTypeInfo rowTypeInfo;
 
 	//Necessary info to init deserializer
 	private List<String> partitionColNames;
@@ -86,25 +92,18 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 	private transient InputFormat mapredInputFormat;
 	private transient HiveTablePartition hiveTablePartition;
 
-	// indices of fields to be returned, with projection applied (if any)
-	// TODO: push projection into underlying input format that supports it
-	private int[] fields;
-	// Remember whether a row instance is reused. No need to set partition fields for reused rows
-	private transient boolean rowReused;
-
 	public HiveTableInputFormat(
 			JobConf jobConf,
 			CatalogTable catalogTable,
-			List<HiveTablePartition> partitions,
-			int[] projectedFields) {
+			List<HiveTablePartition> partitions) {
 		super(jobConf.getCredentials());
 		checkNotNull(catalogTable, "catalogTable can not be null.");
 		this.partitions = checkNotNull(partitions, "partitions can not be null.");
 
 		this.jobConf = new JobConf(jobConf);
 		this.partitionColNames = catalogTable.getPartitionKeys();
-		int rowArity = catalogTable.getSchema().getFieldCount();
-		fields = projectedFields != null ? projectedFields : IntStream.range(0, rowArity).toArray();
+		TableSchema tableSchema = catalogTable.getSchema();
+		this.rowTypeInfo = new RowTypeInfo(tableSchema.getFieldTypes(), tableSchema.getFieldNames());
 	}
 
 	@Override
@@ -143,7 +142,6 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 		} catch (Exception e) {
 			throw new FlinkHiveException("Error happens when deserialize from storage file.", e);
 		}
-		rowReused = false;
 	}
 
 	@Override
@@ -210,40 +208,35 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 	}
 
 	@Override
-	public Row nextRecord(Row reuse) throws IOException {
+	public Row nextRecord(Row ignore) throws IOException {
 		if (reachedEnd()) {
 			return null;
 		}
+		Row row = new Row(rowTypeInfo.getArity());
 		try {
 			//Use HiveDeserializer to deserialize an object out of a Writable blob
 			Object hiveRowStruct = deserializer.deserialize(value);
-			for (int i = 0; i < fields.length; i++) {
-				// set non-partition columns
-				if (fields[i] < structFields.size()) {
-					StructField structField = structFields.get(fields[i]);
-					Object object = HiveInspectors.toFlinkObject(structField.getFieldObjectInspector(),
-							structObjectInspector.getStructFieldData(hiveRowStruct, structField));
-					reuse.setField(i, object);
-				}
+			int index = 0;
+			for (; index < structFields.size(); index++) {
+				StructField structField = structFields.get(index);
+				Object object = HiveInspectors.toFlinkObject(structField.getFieldObjectInspector(),
+						structObjectInspector.getStructFieldData(hiveRowStruct, structField));
+				row.setField(index, object);
 			}
-		} catch (Exception e) {
+			for (String partition : partitionColNames){
+				row.setField(index++, hiveTablePartition.getPartitionSpec().get(partition));
+			}
+		} catch (Exception e){
 			logger.error("Error happens when converting hive data type to flink data type.");
 			throw new FlinkHiveException(e);
 		}
-		if (!rowReused) {
-			// set partition columns
-			if (!partitionColNames.isEmpty()) {
-				for (int i = 0; i < fields.length; i++) {
-					if (fields[i] >= structFields.size()) {
-						String partition = partitionColNames.get(fields[i] - structFields.size());
-						reuse.setField(i, hiveTablePartition.getPartitionSpec().get(partition));
-					}
-				}
-			}
-			rowReused = true;
-		}
 		this.fetched = false;
-		return reuse;
+		return row;
+	}
+
+	@Override
+	public TypeInformation getProducedType() {
+		return rowTypeInfo;
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -253,9 +246,9 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 	private void writeObject(ObjectOutputStream out) throws IOException {
 		super.write(out);
 		jobConf.write(out);
+		out.writeObject(rowTypeInfo);
 		out.writeObject(partitionColNames);
 		out.writeObject(partitions);
-		out.writeObject(fields);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -270,8 +263,8 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 		if (currentUserCreds != null) {
 			jobConf.getCredentials().addAll(currentUserCreds);
 		}
+		rowTypeInfo = (RowTypeInfo) in.readObject();
 		partitionColNames = (List<String>) in.readObject();
 		partitions = (List<HiveTablePartition>) in.readObject();
-		fields = (int[]) in.readObject();
 	}
 }

@@ -27,6 +27,7 @@ import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.TestingHeartbeatServices;
 import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
@@ -56,10 +57,11 @@ public class StandaloneResourceManagerFactoryTest extends TestLogger {
 				rpcService,
 				new TestingHighAvailabilityServices(),
 				new TestingHeartbeatServices(),
+				NoOpMetricRegistry.INSTANCE,
 				new TestingFatalErrorHandler(),
 				new ClusterInformation("foobar", 1234),
 				null,
-				UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup());
+				UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup());
 		} finally {
 			RpcUtils.terminateRpcService(rpcService, Time.seconds(10L));
 		}

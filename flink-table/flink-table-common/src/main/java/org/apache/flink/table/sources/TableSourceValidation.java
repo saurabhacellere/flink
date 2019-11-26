@@ -182,11 +182,12 @@ public class TableSourceValidation {
 		ResolvedField resolvedField = resolveField(fieldName, tableSource);
 		if (!resolvedField.getType().equals(logicalType)) {
 			throw new ValidationException(String.format(
-				"Type '%s' of table field '%s' does not match with type '%s' of field '%s' of the TableSource.",
+				"Type %s of table field '%s' does not " +
+					"match with type '%s; of the field '%s' of the TableSource return type.",
 				logicalType,
-				fieldName,
 				resolvedField.getType(),
-				resolvedField.getName()));
+				fieldName,
+				resolvedField.getType()));
 		}
 	}
 

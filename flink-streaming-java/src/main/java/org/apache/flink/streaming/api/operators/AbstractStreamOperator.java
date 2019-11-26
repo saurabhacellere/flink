@@ -155,7 +155,6 @@ public abstract class AbstractStreamOperator<OUT>
 
 	// ---------------- time handler ------------------
 
-	private transient ProcessingTimeService processingTimeService;
 	protected transient InternalTimeServiceManager<?> timeServiceManager;
 
 	// ---------------- two-input operator watermarks ------------------
@@ -174,7 +173,6 @@ public abstract class AbstractStreamOperator<OUT>
 	public void setup(StreamTask<?, ?> containingTask, StreamConfig config, Output<StreamRecord<OUT>> output) {
 		final Environment environment = containingTask.getEnvironment();
 		this.container = containingTask;
-		this.processingTimeService = containingTask.getProcessingTimeService(config.getChainIndex());
 		this.config = config;
 		try {
 			OperatorMetricGroup operatorMetricGroup = environment.getMetricGroup().getOrAddOperator(config.getOperatorID(), config.getOperatorName());
@@ -255,7 +253,6 @@ public abstract class AbstractStreamOperator<OUT>
 			streamTaskStateManager.streamOperatorStateContext(
 				getOperatorID(),
 				getClass().getSimpleName(),
-				getProcessingTimeService(),
 				this,
 				keySerializer,
 				streamTaskCloseableRegistry,
@@ -555,11 +552,11 @@ public abstract class AbstractStreamOperator<OUT>
 	}
 
 	/**
-	 * Returns the {@link ProcessingTimeService} responsible for getting the current
+	 * Returns the {@link ProcessingTimeService} responsible for getting  the current
 	 * processing time and registering timers.
 	 */
 	protected ProcessingTimeService getProcessingTimeService() {
-		return processingTimeService;
+		return container.getProcessingTimeService();
 	}
 
 	/**

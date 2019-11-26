@@ -33,6 +33,7 @@ import org.apache.flink.runtime.jobmaster.utils.TestingJobMasterGatewayBuilder;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
 import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
@@ -261,9 +262,10 @@ public class ResourceManagerTest extends TestLogger {
 			highAvailabilityServices,
 			heartbeatServices,
 			slotManager,
+			NoOpMetricRegistry.INSTANCE,
 			jobLeaderIdService,
 			testingFatalErrorHandler,
-			UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup());
+			UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup());
 
 		resourceManager.start();
 
@@ -280,7 +282,7 @@ public class ResourceManagerTest extends TestLogger {
 	@Test
 	public void testCreateWorkerSlotProfiles() {
 		final Configuration config = new Configuration();
-		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "100m");
+		config.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "100m");
 		config.setInteger(TaskManagerOptions.NUM_TASK_SLOTS, 5);
 
 		final ResourceProfile rmCalculatedResourceProfile =
@@ -289,7 +291,7 @@ public class ResourceManagerTest extends TestLogger {
 		final ResourceProfile tmCalculatedResourceProfile =
 			TaskManagerServices.computeSlotResourceProfile(
 				config.getInteger(TaskManagerOptions.NUM_TASK_SLOTS),
-				MemorySize.parse(config.getString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE)).getBytes());
+				MemorySize.parse(config.getString(TaskManagerOptions.MANAGED_MEMORY_SIZE)).getBytes());
 
 		assertEquals(rmCalculatedResourceProfile, tmCalculatedResourceProfile);
 	}

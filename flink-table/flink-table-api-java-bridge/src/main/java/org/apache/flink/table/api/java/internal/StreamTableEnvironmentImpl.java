@@ -40,7 +40,6 @@ import org.apache.flink.table.api.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.CatalogManager;
 import org.apache.flink.table.catalog.FunctionCatalog;
 import org.apache.flink.table.catalog.GenericInMemoryCatalog;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.delegation.Executor;
 import org.apache.flink.table.delegation.ExecutorFactory;
 import org.apache.flink.table.delegation.Planner;
@@ -54,10 +53,8 @@ import org.apache.flink.table.functions.AggregateFunction;
 import org.apache.flink.table.functions.TableAggregateFunction;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.functions.UserFunctionsTypeHelper;
-import org.apache.flink.table.module.ModuleManager;
 import org.apache.flink.table.operations.JavaDataStreamQueryOperation;
 import org.apache.flink.table.operations.OutputConversionModifyOperation;
-import org.apache.flink.table.operations.QueryOperation;
 import org.apache.flink.table.sources.TableSource;
 import org.apache.flink.table.sources.TableSourceValidation;
 import org.apache.flink.table.types.DataType;
@@ -83,14 +80,13 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 
 	public StreamTableEnvironmentImpl(
 			CatalogManager catalogManager,
-			ModuleManager moduleManager,
 			FunctionCatalog functionCatalog,
 			TableConfig tableConfig,
 			StreamExecutionEnvironment executionEnvironment,
 			Planner planner,
 			Executor executor,
 			boolean isStreamingMode) {
-		super(catalogManager, moduleManager, tableConfig, executor, functionCatalog, planner, isStreamingMode);
+		super(catalogManager, tableConfig, executor, functionCatalog, planner, isStreamingMode);
 		this.executionEnvironment = executionEnvironment;
 	}
 
@@ -108,9 +104,7 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 			settings.getBuiltInCatalogName(),
 			new GenericInMemoryCatalog(settings.getBuiltInCatalogName(), settings.getBuiltInDatabaseName()));
 
-		ModuleManager moduleManager = new ModuleManager();
-
-		FunctionCatalog functionCatalog = new FunctionCatalog(catalogManager, moduleManager);
+		FunctionCatalog functionCatalog = new FunctionCatalog(catalogManager);
 
 		Map<String, String> executorProperties = settings.toExecutorProperties();
 		Executor executor = lookupExecutor(executorProperties, executionEnvironment);
@@ -121,7 +115,6 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 
 		return new StreamTableEnvironmentImpl(
 			catalogManager,
-			moduleManager,
 			functionCatalog,
 			tableConfig,
 			executionEnvironment,
@@ -154,7 +147,7 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 	public <T> void registerFunction(String name, TableFunction<T> tableFunction) {
 		TypeInformation<T> typeInfo = UserFunctionsTypeHelper.getReturnTypeOfTableFunction(tableFunction);
 
-		functionCatalog.registerTempSystemTableFunction(
+		functionCatalog.registerTableFunction(
 			name,
 			tableFunction,
 			typeInfo
@@ -167,7 +160,7 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 		TypeInformation<ACC> accTypeInfo = UserFunctionsTypeHelper
 			.getAccumulatorTypeOfAggregateFunction(aggregateFunction);
 
-		functionCatalog.registerTempSystemAggregateFunction(
+		functionCatalog.registerAggregateFunction(
 			name,
 			aggregateFunction,
 			typeInfo,
@@ -182,7 +175,7 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 		TypeInformation<ACC> accTypeInfo = UserFunctionsTypeHelper
 			.getAccumulatorTypeOfAggregateFunction(tableAggregateFunction);
 
-		functionCatalog.registerTempSystemAggregateFunction(
+		functionCatalog.registerAggregateFunction(
 			name,
 			tableAggregateFunction,
 			typeInfo,
@@ -211,37 +204,12 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 
 	@Override
 	public <T> void registerDataStream(String name, DataStream<T> dataStream) {
-		createTemporaryView(name, dataStream);
-	}
-
-	@Override
-	public <T> void createTemporaryView(String path, DataStream<T> dataStream) {
-		createTemporaryView(path, fromDataStream(dataStream));
+		registerTable(name, fromDataStream(dataStream));
 	}
 
 	@Override
 	public <T> void registerDataStream(String name, DataStream<T> dataStream, String fields) {
-		createTemporaryView(name, dataStream, fields);
-	}
-
-	@Override
-	public <T> void createTemporaryView(String path, DataStream<T> dataStream, String fields) {
-		createTemporaryView(path, fromDataStream(dataStream, fields));
-	}
-
-	@Override
-	protected QueryOperation qualifyQueryOperation(ObjectIdentifier identifier, QueryOperation queryOperation) {
-		if (queryOperation instanceof JavaDataStreamQueryOperation) {
-			JavaDataStreamQueryOperation<?> operation = (JavaDataStreamQueryOperation) queryOperation;
-			return new JavaDataStreamQueryOperation<>(
-				identifier,
-				operation.getDataStream(),
-				operation.getFieldIndices(),
-				operation.getTableSchema()
-			);
-		} else {
-			return queryOperation;
-		}
+		registerTable(name, fromDataStream(dataStream, fields));
 	}
 
 	@Override
@@ -365,12 +333,6 @@ public final class StreamTableEnvironmentImpl extends TableEnvironmentImpl imple
 	@Override
 	protected boolean isEagerOperationTranslation() {
 		return true;
-	}
-
-	@Override
-	public String explain(boolean extended) {
-		// throw exception directly, because the operations to explain are always empty
-		throw new TableException("'explain' method without any tables is unsupported in StreamTableEnvironment.");
 	}
 
 	private <T> TypeInformation<T> extractTypeInformation(Table table, Class<T> clazz) {

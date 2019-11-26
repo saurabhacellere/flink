@@ -24,6 +24,8 @@ import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.TestingHeartbeatServices;
 import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.resourcemanager.JobLeaderIdService;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManagerBuilder;
@@ -44,6 +46,7 @@ public class MockResourceManagerRuntimeServices {
 	public final Time timeout;
 	public final TestingHighAvailabilityServices highAvailabilityServices;
 	public final HeartbeatServices heartbeatServices;
+	public final MetricRegistry metricRegistry;
 	public final TestingLeaderElectionService rmLeaderElectionService;
 	public final JobLeaderIdService jobLeaderIdService;
 	public final SlotManager slotManager;
@@ -65,6 +68,7 @@ public class MockResourceManagerRuntimeServices {
 		rmLeaderElectionService = new TestingLeaderElectionService();
 		highAvailabilityServices.setResourceManagerLeaderElectionService(rmLeaderElectionService);
 		heartbeatServices = new TestingHeartbeatServices();
+		metricRegistry = NoOpMetricRegistry.INSTANCE;
 		jobLeaderIdService = new JobLeaderIdService(
 			highAvailabilityServices,
 			rpcService.getScheduledExecutor(),

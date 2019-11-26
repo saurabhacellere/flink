@@ -25,7 +25,6 @@ import org.apache.flink.table.catalog.{CatalogManager, GenericInMemoryCatalog}
 import org.apache.flink.table.descriptors.{BatchTableDescriptor, ConnectorDescriptor}
 import org.apache.flink.table.expressions.Expression
 import org.apache.flink.table.functions.{AggregateFunction, TableFunction}
-import org.apache.flink.table.module.ModuleManager
 import org.apache.flink.table.sinks.TableSink
 
 /**
@@ -95,47 +94,22 @@ trait BatchTableEnvironment extends TableEnvironment {
   def fromDataSet[T](dataSet: DataSet[T], fields: Expression*): Table
 
   /**
-    * Creates a view from the given [[DataSet]].
-    * Registered views can be referenced in SQL queries.
+    * Registers the given [[DataSet]] as table in the
+    * [[TableEnvironment]]'s catalog.
+    * Registered tables can be referenced in SQL queries.
     *
     * The field names of the [[Table]] are automatically derived from the type of the [[DataSet]].
-    *
-    * The view is registered in the namespace of the current catalog and database. To register the
-    * view in a different catalog use [[createTemporaryView]].
-    *
-    * Temporary objects can shadow permanent ones. If a permanent object in a given path exists,
-    * it will be inaccessible in the current session. To make the permanent object available again
-    * you can drop the corresponding temporary object.
     *
     * @param name The name under which the [[DataSet]] is registered in the catalog.
     * @param dataSet The [[DataSet]] to register.
     * @tparam T The type of the [[DataSet]] to register.
-    * @deprecated use [[createTemporaryView]]
     */
-  @deprecated
   def registerDataSet[T](name: String, dataSet: DataSet[T]): Unit
 
   /**
-    * Creates a view from the given [[DataSet]] in a given path.
+    * Registers the given [[DataSet]] as table with specified field names in the
+    * [[TableEnvironment]]'s catalog.
     * Registered tables can be referenced in SQL queries.
-    *
-    * The field names of the [[Table]] are automatically derived
-    * from the type of the [[DataSet]].
-    *
-    * Temporary objects can shadow permanent ones. If a permanent object in a given path exists,
-    * it will be inaccessible in the current session. To make the permanent object available again
-    * you can drop the corresponding temporary object.
-    *
-    * @param path The path under which the [[DataSet]] is created.
-    *             See also the [[TableEnvironment]] class description for the format of the path.
-    * @param dataSet The [[DataSet]] out of which to create the view.
-    * @tparam T The type of the [[DataSet]].
-    */
-  def createTemporaryView[T](path: String, dataSet: DataSet[T]): Unit
-
-  /**
-    * Creates a view from the given [[DataSet]] in a given path with specified field names.
-    * Registered views can be referenced in SQL queries.
     *
     * Example:
     *
@@ -144,45 +118,12 @@ trait BatchTableEnvironment extends TableEnvironment {
     *   tableEnv.registerDataSet("myTable", set, 'a, 'b)
     * }}}
     *
-    * The view is registered in the namespace of the current catalog and database. To register the
-    * view in a different catalog use [[createTemporaryView]].
-    *
-    * Temporary objects can shadow permanent ones. If a permanent object in a given path exists,
-    * it will be inaccessible in the current session. To make the permanent object available again
-    * you can drop the corresponding temporary object.
-    *
     * @param name The name under which the [[DataSet]] is registered in the catalog.
     * @param dataSet The [[DataSet]] to register.
     * @param fields The field names of the registered table.
     * @tparam T The type of the [[DataSet]] to register.
-    * @deprecated use [[createTemporaryView]]
     */
-  @deprecated
   def registerDataSet[T](name: String, dataSet: DataSet[T], fields: Expression*): Unit
-
-  /**
-    * Creates a view from the given [[DataSet]] in a given path with specified field names.
-    * Registered views can be referenced in SQL queries.
-    *
-    * Example:
-    *
-    * {{{
-    *   val set: DataSet[(String, Long)] = ...
-    *   tableEnv.createTemporaryView("cat.db.myTable", set, 'a, 'b)
-    * }}}
-    *
-    * Temporary objects can shadow permanent ones. If a permanent object in a given path exists,
-    * it will be inaccessible in the current session. To make the permanent object available again
-    * you can drop the corresponding temporary object.
-    *
-    * @param path The path under which the [[DataSet]] is created.
-    *             See also the [[TableEnvironment]] class description for the format of the
-    *             path.
-    * @param dataSet The [[DataSet]] out of which to create the view.
-    * @param fields The field names of the created view.
-    * @tparam T The type of the [[DataSet]].
-    */
-  def createTemporaryView[T](path: String, dataSet: DataSet[T], fields: Expression*): Unit
 
   /**
     * Converts the given [[Table]] into a [[DataSet]] of a specified type.
@@ -251,9 +192,7 @@ trait BatchTableEnvironment extends TableEnvironment {
     *                          name of the [[TableSink]] is provided.
     * @param sinkPathContinued The remaining part of the path of the registered [[TableSink]] to
     *                          which the [[Table]] is written.
-    * @deprecated use `TableEnvironment#insertInto(String, Table)`
     */
-  @deprecated
   def insertInto(
     table: Table,
     queryConfig: BatchQueryConfig,
@@ -355,8 +294,7 @@ object BatchTableEnvironment {
         .getConstructor(
           classOf[ExecutionEnvironment],
           classOf[TableConfig],
-          classOf[CatalogManager],
-          classOf[ModuleManager])
+          classOf[CatalogManager])
       val builtInCatalog = "default_catalog"
       val catalogManager = new CatalogManager(
         "default_catalog",
@@ -364,8 +302,7 @@ object BatchTableEnvironment {
           builtInCatalog,
           "default_database")
       )
-      val moduleManager = new ModuleManager
-      const.newInstance(executionEnvironment, tableConfig, catalogManager, moduleManager)
+      const.newInstance(executionEnvironment, tableConfig, catalogManager)
         .asInstanceOf[BatchTableEnvironment]
     } catch {
       case t: Throwable => throw new TableException("Create BatchTableEnvironment failed.", t)

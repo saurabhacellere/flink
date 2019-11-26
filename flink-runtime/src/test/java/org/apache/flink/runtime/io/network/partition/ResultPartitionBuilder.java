@@ -103,12 +103,12 @@ public class ResultPartitionBuilder {
 		return this;
 	}
 
-	public ResultPartitionBuilder setNetworkBuffersPerChannel(int networkBuffersPerChannel) {
+	private ResultPartitionBuilder setNetworkBuffersPerChannel(int networkBuffersPerChannel) {
 		this.networkBuffersPerChannel = networkBuffersPerChannel;
 		return this;
 	}
 
-	public ResultPartitionBuilder setFloatingNetworkBuffersPerGate(int floatingNetworkBuffersPerGate) {
+	private ResultPartitionBuilder setFloatingNetworkBuffersPerGate(int floatingNetworkBuffersPerGate) {
 		this.floatingNetworkBuffersPerGate = floatingNetworkBuffersPerGate;
 		return this;
 	}

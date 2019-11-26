@@ -78,26 +78,29 @@ function print_mem_use {
     fi
 }
 
-BACKUP_FLINK_DIRS="conf lib plugins"
-
 function backup_flink_dir() {
     mkdir -p "${TEST_DATA_DIR}/tmp/backup"
     # Note: not copying all directory tree, as it may take some time on some file systems.
-    for dirname in ${BACKUP_FLINK_DIRS}; do
-        cp -r "${FLINK_DIR}/${dirname}" "${TEST_DATA_DIR}/tmp/backup/"
-    done
+    cp -r "${FLINK_DIR}/conf" "${TEST_DATA_DIR}/tmp/backup/"
+    cp -r "${FLINK_DIR}/lib" "${TEST_DATA_DIR}/tmp/backup/"
 }
 
 function revert_flink_dir() {
 
-    for dirname in ${BACKUP_FLINK_DIRS}; do
-        if [ -d "${TEST_DATA_DIR}/tmp/backup/${dirname}" ]; then
-            rm -rf "${FLINK_DIR}/${dirname}"
-            mv "${TEST_DATA_DIR}/tmp/backup/${dirname}" "${FLINK_DIR}/"
-        fi
-    done
+    if [ -d "${TEST_DATA_DIR}/tmp/backup/conf" ]; then
+        rm -rf "${FLINK_DIR}/conf"
+        mv "${TEST_DATA_DIR}/tmp/backup/conf" "${FLINK_DIR}/"
+    fi
+
+    if [ -d "${TEST_DATA_DIR}/tmp/backup/lib" ]; then
+        rm -rf "${FLINK_DIR}/lib"
+        mv "${TEST_DATA_DIR}/tmp/backup/lib" "${FLINK_DIR}/"
+    fi
 
     rm -r "${TEST_DATA_DIR}/tmp/backup"
+
+    # By default, the plugins dir doesn't exist. Some tests may have created it.
+    rm -r "${FLINK_DIR}/plugins"
 
     REST_PROTOCOL="http"
     CURL_SSL_ARGS=""
@@ -329,7 +332,6 @@ function check_logs_for_errors {
       | grep -v "org.apache.flink.fs.shaded.hadoop3.org.apache.commons.beanutils.FluentPropertyBeanIntrospector  - Error when creating PropertyDescriptor for public final void org.apache.flink.fs.shaded.hadoop3.org.apache.commons.configuration2.AbstractConfiguration.setProperty(java.lang.String,java.lang.Object)! Ignoring this property." \
       | grep -v "Error while loading kafka-version.properties :null" \
       | grep -v "Failed Elasticsearch item request" \
-      | grep -v "[Terror] modules" \
       | grep -ic "error" || true)
   if [[ ${error_count} -gt 0 ]]; then
     echo "Found error in log files:"
@@ -745,16 +747,3 @@ function retry_times() {
     echo "Command: ${command} failed ${retriesNumber} times."
     return 1
 }
-
-JOB_ID_REGEX_EXTRACTOR=".*JobID ([0-9,a-f]*)"
-
-function extract_job_id_from_job_submission_return() {
-    if [[ $1 =~ $JOB_ID_REGEX_EXTRACTOR ]];
-        then
-            JOB_ID="${BASH_REMATCH[1]}";
-        else
-            JOB_ID=""
-        fi
-    echo "$JOB_ID"
-}
-

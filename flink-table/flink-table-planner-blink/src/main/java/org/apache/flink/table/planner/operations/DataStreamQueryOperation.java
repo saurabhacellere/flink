@@ -21,7 +21,6 @@ package org.apache.flink.table.planner.operations;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.OperationUtils;
 import org.apache.flink.table.operations.QueryOperation;
@@ -46,7 +45,12 @@ import java.util.Map;
 @Internal
 public class DataStreamQueryOperation<E> implements QueryOperation {
 
-	private final ObjectIdentifier identifier;
+	// DataStreamQueryOperation represent a registered DataStream from `registerDataStream` method
+	// or a unregistered DataStream from `fromDataStream`. However the name under which the DataStream is registered
+	// is missing when converting a DataStreamQueryOperation to a RelNode.
+	// so using `qualifiedName` to keep the original name.
+	// TODO This is a temporary solution.
+	private List<String> qualifiedName;
 	private final DataStream<E> dataStream;
 	private final int[] fieldIndices;
 	private final TableSchema tableSchema;
@@ -57,7 +61,6 @@ public class DataStreamQueryOperation<E> implements QueryOperation {
 	private final FlinkStatistic statistic;
 
 	public DataStreamQueryOperation(
-			ObjectIdentifier identifier,
 			DataStream<E> dataStream,
 			int[] fieldIndices,
 			TableSchema tableSchema,
@@ -65,7 +68,6 @@ public class DataStreamQueryOperation<E> implements QueryOperation {
 			boolean producesUpdates,
 			boolean isAccRetract,
 			FlinkStatistic statistic) {
-		this.identifier = identifier;
 		this.dataStream = dataStream;
 		this.tableSchema = tableSchema;
 		this.fieldNullables = fieldNullables;
@@ -73,6 +75,15 @@ public class DataStreamQueryOperation<E> implements QueryOperation {
 		this.producesUpdates = producesUpdates;
 		this.isAccRetract = isAccRetract;
 		this.statistic = statistic;
+	}
+
+	public DataStreamQueryOperation(
+			DataStream<E> dataStream,
+			int[] fieldIndices,
+			TableSchema tableSchema,
+			boolean[] fieldNullables,
+			FlinkStatistic statistic) {
+		this(dataStream, fieldIndices, tableSchema, fieldNullables, false, false, statistic);
 	}
 
 	public DataStream<E> getDataStream() {
@@ -91,11 +102,7 @@ public class DataStreamQueryOperation<E> implements QueryOperation {
 	@Override
 	public String asSummaryString() {
 		Map<String, Object> args = new LinkedHashMap<>();
-		if (identifier != null) {
-			args.put("id", identifier.asSummaryString());
-		} else {
-			args.put("id", dataStream.getId());
-		}
+		args.put("id", dataStream.getId());
 		args.put("fields", tableSchema.getFieldNames());
 
 		return OperationUtils.formatWithChildren("DataStream", args, getChildren(), Operation::asSummaryString);
@@ -111,8 +118,12 @@ public class DataStreamQueryOperation<E> implements QueryOperation {
 		return visitor.visit(this);
 	}
 
-	public ObjectIdentifier getIdentifier() {
-		return identifier;
+	public List<String> getQualifiedName() {
+		return qualifiedName;
+	}
+
+	public void setQualifiedName(List<String> qualifiedName) {
+		this.qualifiedName = qualifiedName;
 	}
 
 	public boolean[] getFieldNullables() {

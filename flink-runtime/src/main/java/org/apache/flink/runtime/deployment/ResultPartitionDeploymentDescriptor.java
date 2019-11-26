@@ -72,10 +72,6 @@ public class ResultPartitionDeploymentDescriptor implements Serializable {
 		return partitionDescriptor.getPartitionType();
 	}
 
-	public int getTotalNumberOfPartitions() {
-		return partitionDescriptor.getTotalNumberOfPartitions();
-	}
-
 	public int getNumberOfSubpartitions() {
 		return partitionDescriptor.getNumberOfSubpartitions();
 	}

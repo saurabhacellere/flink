@@ -164,6 +164,8 @@ public abstract class InputChannel {
 
 	abstract boolean isReleased();
 
+	abstract void notifySubpartitionConsumed() throws IOException;
+
 	/**
 	 * Releases all resources of the channel.
 	 */
