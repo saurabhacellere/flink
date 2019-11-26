@@ -26,10 +26,14 @@ import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.client.program.DetachedJobExecutionResult;
+import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.client.program.rest.retry.ExponentialWaitStrategy;
 import org.apache.flink.client.program.rest.retry.WaitStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.runtime.akka.AkkaUtils;
+import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.client.JobSubmissionException;
 import org.apache.flink.runtime.concurrent.FutureUtils;
@@ -90,13 +94,11 @@ import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.ExecutorUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.OptionalFailure;
+import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.function.CheckedSupplier;
 
 import org.apache.flink.shaded.netty4.io.netty.channel.ConnectTimeoutException;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -107,6 +109,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -123,18 +126,15 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
-
 /**
  * A {@link ClusterClient} implementation that communicates via HTTP REST requests.
  */
-public class RestClusterClient<T> implements ClusterClient<T> {
-
-	private static final Logger LOG = LoggerFactory.getLogger(RestClusterClient.class);
+public class RestClusterClient<T> extends ClusterClient<T> {
 
 	private final RestClusterClientConfiguration restClusterClientConfiguration;
 
-	private final Configuration configuration;
+	/** Timeout for futures. */
+	private final Duration timeout;
 
 	private final RestClient restClient;
 
@@ -167,8 +167,9 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		@Nullable RestClient restClient,
 		T clusterId,
 		WaitStrategy waitStrategy) throws Exception {
+		super(configuration);
 
-		this.configuration = checkNotNull(configuration);
+		this.timeout = AkkaUtils.getClientTimeout(configuration);
 
 		this.restClusterClientConfiguration = RestClusterClientConfiguration.fromConfiguration(configuration);
 
@@ -178,8 +179,8 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 			this.restClient = new RestClient(restClusterClientConfiguration.getRestClientConfiguration(), executorService);
 		}
 
-		this.waitStrategy = checkNotNull(waitStrategy);
-		this.clusterId = checkNotNull(clusterId);
+		this.waitStrategy = Preconditions.checkNotNull(waitStrategy);
+		this.clusterId = Preconditions.checkNotNull(clusterId);
 
 		this.clientHAServices = HighAvailabilityServicesUtils.createClientHAService(configuration);
 
@@ -193,11 +194,6 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 	}
 
 	@Override
-	public Configuration getFlinkConfiguration() {
-		return new Configuration(configuration);
-	}
-
-	@Override
 	public void close() {
 		ExecutorUtils.gracefulShutdown(restClusterClientConfiguration.getRetryDelay(), TimeUnit.MILLISECONDS, retryExecutorService);
 
@@ -207,13 +203,60 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		try {
 			webMonitorRetrievalService.stop();
 		} catch (Exception e) {
-			LOG.error("An error occurred during stopping the WebMonitorRetrievalService", e);
+			log.error("An error occurred during stopping the WebMonitorRetrievalService", e);
 		}
 
 		try {
 			clientHAServices.close();
 		} catch (Exception e) {
-			LOG.error("An error occurred during stopping the ClientHighAvailabilityServices", e);
+			log.error("An error occurred during stopping the ClientHighAvailabilityServices", e);
+		}
+
+		try {
+			super.close();
+		} catch (Exception e) {
+			log.error("Error while closing the Cluster Client", e);
+		}
+	}
+
+	@Override
+	public JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader) throws ProgramInvocationException {
+		log.info("Submitting job {} (detached: {}).", jobGraph.getJobID(), isDetached());
+
+		final CompletableFuture<JobSubmissionResult> jobSubmissionFuture = submitJob(jobGraph);
+
+		if (isDetached()) {
+			try {
+				final JobSubmissionResult jobSubmissionResult = jobSubmissionFuture.get();
+
+				log.warn("Job was executed in detached mode, the results will be available on completion.");
+
+				this.lastJobExecutionResult = new DetachedJobExecutionResult(jobSubmissionResult.getJobID());
+				return lastJobExecutionResult;
+			} catch (Exception e) {
+				throw new ProgramInvocationException("Could not submit job",
+					jobGraph.getJobID(), ExceptionUtils.stripExecutionException(e));
+			}
+		} else {
+			final CompletableFuture<JobResult> jobResultFuture = jobSubmissionFuture.thenCompose(
+				ignored -> requestJobResult(jobGraph.getJobID()));
+
+			final JobResult jobResult;
+			try {
+				jobResult = jobResultFuture.get();
+			} catch (Exception e) {
+				throw new ProgramInvocationException("Could not retrieve the execution result.",
+					jobGraph.getJobID(), ExceptionUtils.stripExecutionException(e));
+			}
+
+			try {
+				this.lastJobExecutionResult = jobResult.toJobExecutionResult(classLoader);
+				return lastJobExecutionResult;
+			} catch (JobExecutionException e) {
+				throw new ProgramInvocationException("Job failed.", jobGraph.getJobID(), e);
+			} catch (IOException | ClassNotFoundException e) {
+				throw new ProgramInvocationException("Job failed.", jobGraph.getJobID(), e);
+			}
 		}
 	}
 
@@ -266,6 +309,9 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 	 */
 	@Override
 	public CompletableFuture<JobSubmissionResult> submitJob(@Nonnull JobGraph jobGraph) {
+		// we have to enable queued scheduling because slot will be allocated lazily
+		jobGraph.setAllowQueuedScheduling(true);
+
 		CompletableFuture<java.nio.file.Path> jobGraphFileFuture = CompletableFuture.supplyAsync(() -> {
 			try {
 				final java.nio.file.Path jobGraphFile = Files.createTempFile("flink-jobgraph", ".bin");
@@ -318,7 +364,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 			try {
 				Files.delete(jobGraphFile);
 			} catch (IOException e) {
-				LOG.warn("Could not delete temporary file {}.", jobGraphFile, e);
+				log.warn("Could not delete temporary file {}.", jobGraphFile, e);
 			}
 		});
 
@@ -332,21 +378,22 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 	}
 
 	@Override
-	public CompletableFuture<Acknowledge> cancel(JobID jobID) {
+	public void cancel(JobID jobID) throws Exception {
 		JobCancellationMessageParameters params = new JobCancellationMessageParameters();
 		params.jobPathParameter.resolve(jobID);
 		params.terminationModeQueryParameter.resolve(Collections.singletonList(TerminationModeQueryParameter.TerminationMode.CANCEL));
 		CompletableFuture<EmptyResponseBody> responseFuture = sendRequest(
 			JobCancellationHeaders.getInstance(),
 			params);
-		return responseFuture.thenApply(ignore -> Acknowledge.get());
+		responseFuture.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
 	}
 
 	@Override
-	public CompletableFuture<String> stopWithSavepoint(
+	public String stopWithSavepoint(
 			final JobID jobId,
 			final boolean advanceToEndOfTime,
-			@Nullable final String savepointDirectory) {
+			@Nullable final String savepointDirectory,
+			final long timeout) throws Exception {
 
 		final StopWithSavepointTriggerHeaders stopWithSavepointTriggerHeaders = StopWithSavepointTriggerHeaders.getInstance();
 
@@ -357,7 +404,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		final CompletableFuture<TriggerResponse> responseFuture = sendRequest(
 				stopWithSavepointTriggerHeaders,
 				stopWithSavepointTriggerMessageParameters,
-				new StopWithSavepointRequestBody(savepointDirectory, advanceToEndOfTime));
+				new StopWithSavepointRequestBody(savepointDirectory, advanceToEndOfTime, timeout));
 
 		return responseFuture.thenCompose(savepointTriggerResponseBody -> {
 			final TriggerId savepointTriggerId = savepointTriggerResponseBody.getTriggerId();
@@ -367,25 +414,27 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 				throw new CompletionException(savepointInfo.getFailureCause());
 			}
 			return savepointInfo.getLocation();
-		});
+		}).get();
 	}
 
 	@Override
-	public CompletableFuture<String> cancelWithSavepoint(JobID jobId, @Nullable String savepointDirectory) {
-		return triggerSavepoint(jobId, savepointDirectory, true);
+	public String cancelWithSavepoint(JobID jobId, @Nullable String savepointDirectory, long timeout) throws Exception {
+		return triggerSavepoint(jobId, savepointDirectory, true, timeout).get();
 	}
 
 	@Override
 	public CompletableFuture<String> triggerSavepoint(
 			final JobID jobId,
-			final @Nullable String savepointDirectory) {
-		return triggerSavepoint(jobId, savepointDirectory, false);
+			final @Nullable String savepointDirectory,
+			final long savepointTimeout) {
+		return triggerSavepoint(jobId, savepointDirectory, false, savepointTimeout);
 	}
 
 	private CompletableFuture<String> triggerSavepoint(
 			final JobID jobId,
 			final @Nullable String savepointDirectory,
-			final boolean cancelJob) {
+			final boolean cancelJob,
+			final long savepointTimeout) {
 		final SavepointTriggerHeaders savepointTriggerHeaders = SavepointTriggerHeaders.getInstance();
 		final SavepointTriggerMessageParameters savepointTriggerMessageParameters =
 			savepointTriggerHeaders.getUnresolvedMessageParameters();
@@ -394,7 +443,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		final CompletableFuture<TriggerResponse> responseFuture = sendRequest(
 			savepointTriggerHeaders,
 			savepointTriggerMessageParameters,
-			new SavepointTriggerRequestBody(savepointDirectory, cancelJob));
+			new SavepointTriggerRequestBody(savepointDirectory, cancelJob, savepointTimeout));
 
 		return responseFuture.thenCompose(savepointTriggerResponseBody -> {
 			final TriggerId savepointTriggerId = savepointTriggerResponseBody.getTriggerId();
@@ -408,7 +457,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 	}
 
 	@Override
-	public CompletableFuture<Map<String, OptionalFailure<Object>>> getAccumulators(JobID jobID, ClassLoader loader) {
+	public Map<String, OptionalFailure<Object>> getAccumulators(final JobID jobID, ClassLoader loader) throws Exception {
 		final JobAccumulatorsHeaders accumulatorsHeaders = JobAccumulatorsHeaders.getInstance();
 		final JobAccumulatorsMessageParameters accMsgParams = accumulatorsHeaders.getUnresolvedMessageParameters();
 		accMsgParams.jobPathParameter.resolve(jobID);
@@ -418,18 +467,26 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 			accumulatorsHeaders,
 			accMsgParams);
 
-		return responseFuture.thenApply((JobAccumulatorsInfo accumulatorsInfo) -> {
-			try {
-				return AccumulatorHelper.deserializeAccumulators(
-					accumulatorsInfo.getSerializedUserAccumulators(),
-					loader);
-			} catch (Exception e) {
-				throw new CompletionException(
-					new FlinkException(
-						String.format("Deserialization of accumulators for job %s failed.", jobID),
-						e));
-			}
-		});
+		Map<String, OptionalFailure<Object>> result = Collections.emptyMap();
+
+		try {
+			result = responseFuture.thenApply((JobAccumulatorsInfo accumulatorsInfo) -> {
+				try {
+					return AccumulatorHelper.deserializeAccumulators(
+						accumulatorsInfo.getSerializedUserAccumulators(),
+						loader);
+				} catch (Exception e) {
+					throw new CompletionException(
+						new FlinkException(
+							String.format("Deserialization of accumulators for job %s failed.", jobID),
+							e));
+				}
+			}).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+		} catch (ExecutionException ee) {
+			ExceptionUtils.rethrowException(ExceptionUtils.stripExecutionException(ee));
+		}
+
+		return result;
 	}
 
 	private CompletableFuture<SavepointInfo> pollSavepointAsync(
@@ -505,7 +562,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} catch (ExecutionException e) {
-			LOG.error("Error while shutting down cluster", e);
+			log.error("Error while shutting down cluster", e);
 		}
 	}
 
@@ -559,7 +616,7 @@ public class RestClusterClient<T> implements ClusterClient<T> {
 		} catch (InterruptedException | ExecutionException e) {
 			ExceptionUtils.checkInterrupted(e);
 
-			LOG.warn("Could not retrieve the web interface URL for the cluster.", e);
+			log.warn("Could not retrieve the web interface URL for the cluster.", e);
 			return "Unknown address.";
 		}
 	}

@@ -21,6 +21,7 @@ package org.apache.flink.client.program;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobSubmissionResult;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.executiongraph.AccessExecutionGraph;
 import org.apache.flink.runtime.jobgraph.JobGraph;
@@ -32,37 +33,63 @@ import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.OptionalFailure;
 import org.apache.flink.util.SerializedValue;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 
 /**
  * Client to interact with a {@link MiniCluster}.
  */
-public class MiniClusterClient implements ClusterClient<MiniClusterClient.MiniClusterId> {
-
-	private static final Logger LOG = LoggerFactory.getLogger(MiniClusterClient.class);
+public class MiniClusterClient extends ClusterClient<MiniClusterClient.MiniClusterId> {
 
 	private final MiniCluster miniCluster;
-	private final Configuration configuration;
 
 	public MiniClusterClient(@Nonnull Configuration configuration, @Nonnull MiniCluster miniCluster) {
-		this.configuration = configuration;
+		super(configuration);
 		this.miniCluster = miniCluster;
 	}
 
 	@Override
-	public Configuration getFlinkConfiguration() {
-		return new Configuration(configuration);
+	public JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader) throws ProgramInvocationException {
+		final CompletableFuture<JobSubmissionResult> jobSubmissionResultFuture = submitJob(jobGraph);
+
+		if (isDetached()) {
+			try {
+				final JobSubmissionResult jobSubmissionResult = jobSubmissionResultFuture.get();
+
+				lastJobExecutionResult = new DetachedJobExecutionResult(jobSubmissionResult.getJobID());
+				return lastJobExecutionResult;
+			} catch (InterruptedException | ExecutionException e) {
+				ExceptionUtils.checkInterrupted(e);
+
+				throw new ProgramInvocationException("Could not run job in detached mode.", jobGraph.getJobID(), e);
+			}
+		} else {
+			final CompletableFuture<JobResult> jobResultFuture = jobSubmissionResultFuture.thenCompose(
+				(JobSubmissionResult ignored) -> requestJobResult(jobGraph.getJobID()));
+
+			final JobResult jobResult;
+			try {
+				jobResult = jobResultFuture.get();
+			} catch (InterruptedException | ExecutionException e) {
+				ExceptionUtils.checkInterrupted(e);
+
+				throw new ProgramInvocationException("Could not run job", jobGraph.getJobID(), e);
+			}
+
+			try {
+				lastJobExecutionResult = jobResult.toJobExecutionResult(classLoader);
+				return lastJobExecutionResult;
+			} catch (JobExecutionException | IOException | ClassNotFoundException e) {
+				throw new ProgramInvocationException("Job failed", jobGraph.getJobID(), e);
+			}
+		}
 	}
 
 	@Override
@@ -76,23 +103,23 @@ public class MiniClusterClient implements ClusterClient<MiniClusterClient.MiniCl
 	}
 
 	@Override
-	public CompletableFuture<Acknowledge> cancel(JobID jobId) {
-		return miniCluster.cancelJob(jobId);
+	public void cancel(JobID jobId) throws Exception {
+		miniCluster.cancelJob(jobId).get();
 	}
 
 	@Override
-	public CompletableFuture<String> cancelWithSavepoint(JobID jobId, @Nullable String savepointDirectory) {
-		return miniCluster.triggerSavepoint(jobId, savepointDirectory, true);
+	public String cancelWithSavepoint(JobID jobId, @Nullable String savepointDirectory, long timeout) throws Exception {
+		return miniCluster.triggerSavepoint(jobId, savepointDirectory, true, -1L).get();
 	}
 
 	@Override
-	public CompletableFuture<String> stopWithSavepoint(JobID jobId, boolean advanceToEndOfEventTime, @Nullable String savepointDirector) {
-		return miniCluster.stopWithSavepoint(jobId, savepointDirector, advanceToEndOfEventTime);
+	public String stopWithSavepoint(JobID jobId, boolean advanceToEndOfEventTime, @Nullable String savepointDirector, long timeout) throws Exception {
+		return miniCluster.stopWithSavepoint(jobId, savepointDirector, advanceToEndOfEventTime, timeout).get();
 	}
 
 	@Override
-	public CompletableFuture<String> triggerSavepoint(JobID jobId, @Nullable String savepointDirectory) {
-		return miniCluster.triggerSavepoint(jobId, savepointDirectory, false);
+	public CompletableFuture<String> triggerSavepoint(JobID jobId, @Nullable String savepointDirectory, long savepointTimeout) {
+		return miniCluster.triggerSavepoint(jobId, savepointDirectory, false, savepointTimeout);
 	}
 
 	@Override
@@ -106,21 +133,14 @@ public class MiniClusterClient implements ClusterClient<MiniClusterClient.MiniCl
 	}
 
 	@Override
-	public CompletableFuture<Map<String, OptionalFailure<Object>>> getAccumulators(JobID jobID, ClassLoader loader) {
-		return miniCluster
-			.getExecutionGraph(jobID)
-			.thenApply(AccessExecutionGraph::getAccumulatorsSerialized)
-			.thenApply(accumulators -> {
-				Map<String, OptionalFailure<Object>> result = new HashMap<>(accumulators.size());
-				for (Map.Entry<String, SerializedValue<OptionalFailure<Object>>> acc : accumulators.entrySet()) {
-					try {
-						result.put(acc.getKey(), acc.getValue().deserializeValue(loader));
-					} catch (Exception e) {
-						throw new CompletionException("Cannot deserialize accumulators.", e);
-					}
-				}
-				return result;
-			});
+	public Map<String, OptionalFailure<Object>> getAccumulators(JobID jobID, ClassLoader loader) throws Exception {
+		AccessExecutionGraph executionGraph = miniCluster.getExecutionGraph(jobID).get();
+		Map<String, SerializedValue<OptionalFailure<Object>>> accumulatorsSerialized = executionGraph.getAccumulatorsSerialized();
+		Map<String, OptionalFailure<Object>> result = new HashMap<>(accumulatorsSerialized.size());
+		for (Map.Entry<String, SerializedValue<OptionalFailure<Object>>> acc : accumulatorsSerialized.entrySet()) {
+			result.put(acc.getKey(), acc.getValue().deserializeValue(loader));
+		}
+		return result;
 	}
 
 	@Override
@@ -135,14 +155,7 @@ public class MiniClusterClient implements ClusterClient<MiniClusterClient.MiniCl
 
 	@Override
 	public String getWebInterfaceURL() {
-		try {
-			return miniCluster.getRestAddress().get().toString();
-		} catch (InterruptedException | ExecutionException e) {
-			ExceptionUtils.checkInterrupted(e);
-
-			LOG.warn("Could not retrieve the web interface URL for the cluster.", e);
-			return "Unknown address.";
-		}
+		return miniCluster.getRestAddress().toString();
 	}
 
 	enum MiniClusterId {

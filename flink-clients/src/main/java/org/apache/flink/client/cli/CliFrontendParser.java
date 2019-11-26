@@ -85,6 +85,9 @@ public class CliFrontendParser {
 	public static final Option SAVEPOINT_PATH_OPTION = new Option("s", "fromSavepoint", true,
 			"Path to a savepoint to restore the job from (for example hdfs:///flink/savepoint-1537).");
 
+	public static final Option SAVEPOINT_TIMEOUT_OPTION = new Option("st", "savepointTimeout", true,
+			"Timeout of a savepoint.");
+
 	public static final Option SAVEPOINT_ALLOW_NON_RESTORED_OPTION = new Option("n", "allowNonRestoredState", false,
 			"Allow to skip savepoint state that cannot be restored. " +
 					"You need to allow this if you removed an operator from your " +
@@ -167,6 +170,9 @@ public class CliFrontendParser {
 		SAVEPOINT_PATH_OPTION.setRequired(false);
 		SAVEPOINT_PATH_OPTION.setArgName("savepointPath");
 
+		SAVEPOINT_TIMEOUT_OPTION.setRequired(false);
+		SAVEPOINT_TIMEOUT_OPTION.setArgName("savepointTimeout");
+
 		SAVEPOINT_ALLOW_NON_RESTORED_OPTION.setRequired(false);
 
 		ZOOKEEPER_NAMESPACE_OPTION.setRequired(false);
@@ -192,7 +198,7 @@ public class CliFrontendParser {
 		PYMODULE_OPTION.setArgName("pyModule");
 	}
 
-	static final Options RUN_OPTIONS = getRunCommandOptions();
+	private static final Options RUN_OPTIONS = getRunCommandOptions();
 
 	private static Options buildGeneralOptions(Options options) {
 		options.addOption(HELP_OPTION);
@@ -234,6 +240,7 @@ public class CliFrontendParser {
 		Options options = buildGeneralOptions(new Options());
 		options = getProgramSpecificOptions(options);
 		options.addOption(SAVEPOINT_PATH_OPTION);
+		options.addOption(SAVEPOINT_TIMEOUT_OPTION);
 		return options.addOption(SAVEPOINT_ALLOW_NON_RESTORED_OPTION);
 	}
 
@@ -251,12 +258,14 @@ public class CliFrontendParser {
 
 	static Options getCancelCommandOptions() {
 		Options options = buildGeneralOptions(new Options());
-		return options.addOption(CANCEL_WITH_SAVEPOINT_OPTION);
+		return options.addOption(CANCEL_WITH_SAVEPOINT_OPTION)
+				.addOption(SAVEPOINT_TIMEOUT_OPTION);
 	}
 
 	static Options getStopCommandOptions() {
 		return buildGeneralOptions(new Options())
 				.addOption(STOP_WITH_SAVEPOINT_PATH)
+				.addOption(SAVEPOINT_TIMEOUT_OPTION)
 				.addOption(STOP_AND_DRAIN);
 	}
 
@@ -273,6 +282,7 @@ public class CliFrontendParser {
 	private static Options getRunOptionsWithoutDeprecatedOptions(Options options) {
 		Options o = getProgramSpecificOptionsWithoutDeprecatedOptions(options);
 		o.addOption(SAVEPOINT_PATH_OPTION);
+		o.addOption(SAVEPOINT_TIMEOUT_OPTION);
 		return o.addOption(SAVEPOINT_ALLOW_NON_RESTORED_OPTION);
 	}
 
@@ -284,18 +294,18 @@ public class CliFrontendParser {
 
 	private static Options getListOptionsWithoutDeprecatedOptions(Options options) {
 		options.addOption(RUNNING_OPTION);
-		options.addOption(ALL_OPTION);
-		options.addOption(SCHEDULED_OPTION);
-		return options;
+		return options.addOption(SCHEDULED_OPTION);
 	}
 
 	private static Options getCancelOptionsWithoutDeprecatedOptions(Options options) {
-		return options.addOption(CANCEL_WITH_SAVEPOINT_OPTION);
+		return options.addOption(CANCEL_WITH_SAVEPOINT_OPTION)
+				.addOption(SAVEPOINT_TIMEOUT_OPTION);
 	}
 
 	private static Options getStopOptionsWithoutDeprecatedOptions(Options options) {
 		return options
 				.addOption(STOP_WITH_SAVEPOINT_PATH)
+				.addOption(SAVEPOINT_TIMEOUT_OPTION)
 				.addOption(STOP_AND_DRAIN);
 	}
 
@@ -308,7 +318,7 @@ public class CliFrontendParser {
 	/**
 	 * Prints the help for the client.
 	 */
-	public static void printHelp(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelp(Collection<CustomCommandLine<?>> customCommandLines) {
 		System.out.println("./flink <ACTION> [OPTIONS] [ARGUMENTS]");
 		System.out.println();
 		System.out.println("The following actions are available:");
@@ -323,7 +333,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForRun(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForRun(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -351,7 +361,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForList(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForList(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -366,7 +376,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForStop(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForStop(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -381,7 +391,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForCancel(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForCancel(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -396,7 +406,7 @@ public class CliFrontendParser {
 		System.out.println();
 	}
 
-	public static void printHelpForSavepoint(Collection<CustomCommandLine> customCommandLines) {
+	public static void printHelpForSavepoint(Collection<CustomCommandLine<?>> customCommandLines) {
 		HelpFormatter formatter = new HelpFormatter();
 		formatter.setLeftPadding(5);
 		formatter.setWidth(80);
@@ -417,7 +427,7 @@ public class CliFrontendParser {
 	 * @param runOptions True if the run options should be printed, False to print only general options
 	 */
 	private static void printCustomCliOptions(
-			Collection<CustomCommandLine> customCommandLines,
+			Collection<CustomCommandLine<?>> customCommandLines,
 			HelpFormatter formatter,
 			boolean runOptions) {
 		// prints options from all available command-line classes
@@ -446,6 +456,17 @@ public class CliFrontendParser {
 	// --------------------------------------------------------------------------------------------
 	//  Line Parsing
 	// --------------------------------------------------------------------------------------------
+
+	public static RunOptions parseRunCommand(String[] args) throws CliArgsException {
+		try {
+			DefaultParser parser = new DefaultParser();
+			CommandLine line = parser.parse(RUN_OPTIONS, args, true);
+			return new RunOptions(line);
+		}
+		catch (ParseException e) {
+			throw new CliArgsException(e.getMessage());
+		}
+	}
 
 	public static CommandLine parse(Options options, String[] args, boolean stopAtNonOptions) throws CliArgsException {
 		final DefaultParser parser = new DefaultParser();

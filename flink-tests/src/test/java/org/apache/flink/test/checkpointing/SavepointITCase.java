@@ -29,7 +29,6 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
@@ -55,7 +54,6 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.testutils.EntropyInjectingTestFileSystem;
-import org.apache.flink.testutils.junit.category.AlsoRunWithSchedulerNG;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.TestLogger;
@@ -67,7 +65,6 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,7 +99,6 @@ import static org.junit.Assert.fail;
  * Integration test for triggering and resuming from savepoints.
  */
 @SuppressWarnings("serial")
-@Category(AlsoRunWithSchedulerNG.class)
 public class SavepointITCase extends TestLogger {
 
 	private static final Logger LOG = LoggerFactory.getLogger(SavepointITCase.class);
@@ -191,11 +187,12 @@ public class SavepointITCase extends TestLogger {
 		ClusterClient<?> client = cluster.getClusterClient();
 
 		try {
-			ClientUtils.submitJob(client, jobGraph);
+			client.setDetached(true);
+			client.submitJob(jobGraph, SavepointITCase.class.getClassLoader());
 
 			StatefulCounter.getProgressLatch().await();
 
-			return client.cancelWithSavepoint(jobId, null).get();
+			return client.cancelWithSavepoint(jobId, null, -1L);
 		} finally {
 			cluster.after();
 			StatefulCounter.resetForTest(parallelism);
@@ -232,7 +229,8 @@ public class SavepointITCase extends TestLogger {
 		ClusterClient<?> client = cluster.getClusterClient();
 
 		try {
-			ClientUtils.submitJob(client, jobGraph);
+			client.setDetached(true);
+			client.submitJob(jobGraph, SavepointITCase.class.getClassLoader());
 
 			// Await state is restored
 			StatefulCounter.getRestoreLatch().await();
@@ -240,7 +238,7 @@ public class SavepointITCase extends TestLogger {
 			// Await some progress after restore
 			StatefulCounter.getProgressLatch().await();
 
-			client.cancel(jobId).get();
+			client.cancel(jobId);
 
 			FutureUtils.retrySuccessfulWithDelay(
 				() -> client.getJobStatus(jobId),
@@ -281,7 +279,7 @@ public class SavepointITCase extends TestLogger {
 		final JobID jobID = new JobID();
 
 		try {
-			client.triggerSavepoint(jobID, null).get();
+			client.triggerSavepoint(jobID, null, -1L).get();
 
 			fail();
 		} catch (ExecutionException e) {
@@ -316,9 +314,10 @@ public class SavepointITCase extends TestLogger {
 		final JobGraph graph = new JobGraph(vertex);
 
 		try {
-			ClientUtils.submitJob(client, graph);
+			client.setDetached(true);
+			client.submitJob(graph, SavepointITCase.class.getClassLoader());
 
-			client.triggerSavepoint(graph.getJobID(), null).get();
+			client.triggerSavepoint(graph.getJobID(), null, -1L).get();
 
 			fail();
 		} catch (ExecutionException e) {
@@ -365,7 +364,8 @@ public class SavepointITCase extends TestLogger {
 			LOG.info("Submitting job " + jobGraph.getJobID() + " in detached mode.");
 
 			try {
-				ClientUtils.submitJobAndWaitForResult(client, jobGraph, SavepointITCase.class.getClassLoader());
+				client.setDetached(false);
+				client.submitJob(jobGraph, SavepointITCase.class.getClassLoader());
 			} catch (Exception e) {
 				Optional<JobExecutionException> expectedJobExecutionException = ExceptionUtils.findThrowable(e, JobExecutionException.class);
 				Optional<FileNotFoundException> expectedFileNotFoundException = ExceptionUtils.findThrowable(e, FileNotFoundException.class);
@@ -431,13 +431,14 @@ public class SavepointITCase extends TestLogger {
 
 			JobGraph originalJobGraph = env.getStreamGraph().getJobGraph();
 
-			JobSubmissionResult submissionResult = ClientUtils.submitJob(client, originalJobGraph);
+			client.setDetached(true);
+			JobSubmissionResult submissionResult = client.submitJob(originalJobGraph, SavepointITCase.class.getClassLoader());
 			JobID jobID = submissionResult.getJobID();
 
 			// wait for the Tasks to be ready
 			StatefulCounter.getProgressLatch().await(deadline.timeLeft().toMillis(), TimeUnit.MILLISECONDS);
 
-			savepointPath = client.triggerSavepoint(jobID, null).get();
+			savepointPath = client.triggerSavepoint(jobID, null, -1L).get();
 			LOG.info("Retrieved savepoint: " + savepointPath + ".");
 		} finally {
 			// Shut down the Flink cluster (thereby canceling the job)
@@ -481,7 +482,8 @@ public class SavepointITCase extends TestLogger {
 					"savepoint path " + savepointPath + " in detached mode.");
 
 			// Submit the job
-			ClientUtils.submitJob(client, modifiedJobGraph);
+			client.setDetached(true);
+			client.submitJob(modifiedJobGraph, SavepointITCase.class.getClassLoader());
 			// Await state is restored
 			StatefulCounter.getRestoreLatch().await(deadline.timeLeft().toMillis(), TimeUnit.MILLISECONDS);
 
@@ -662,7 +664,7 @@ public class SavepointITCase extends TestLogger {
 
 		Configuration config = getFileBasedCheckpointsConfig();
 		config.addAll(jobGraph.getJobConfiguration());
-		config.setString(TaskManagerOptions.LEGACY_MANAGED_MEMORY_SIZE, "0");
+		config.setString(TaskManagerOptions.MANAGED_MEMORY_SIZE, "0");
 
 		MiniClusterWithClientResource cluster = new MiniClusterWithClientResource(
 			new MiniClusterResourceConfiguration.Builder()
@@ -675,13 +677,14 @@ public class SavepointITCase extends TestLogger {
 
 		String savepointPath = null;
 		try {
-			ClientUtils.submitJob(client, jobGraph);
+			client.setDetached(true);
+			client.submitJob(jobGraph, SavepointITCase.class.getClassLoader());
 			for (OneShotLatch latch : iterTestSnapshotWait) {
 				latch.await();
 			}
-			savepointPath = client.triggerSavepoint(jobGraph.getJobID(), null).get();
+			savepointPath = client.triggerSavepoint(jobGraph.getJobID(), null, -1L).get();
 
-			client.cancel(jobGraph.getJobID()).get();
+			client.cancel(jobGraph.getJobID());
 			while (!client.getJobStatus(jobGraph.getJobID()).get().isGloballyTerminalState()) {
 				Thread.sleep(100);
 			}
@@ -689,12 +692,13 @@ public class SavepointITCase extends TestLogger {
 			jobGraph = streamGraph.getJobGraph();
 			jobGraph.setSavepointRestoreSettings(SavepointRestoreSettings.forPath(savepointPath));
 
-			ClientUtils.submitJob(client, jobGraph);
+			client.setDetached(true);
+			client.submitJob(jobGraph, SavepointITCase.class.getClassLoader());
 			for (OneShotLatch latch : iterTestRestoreWait) {
 				latch.await();
 			}
 
-			client.cancel(jobGraph.getJobID()).get();
+			client.cancel(jobGraph.getJobID());
 			while (!client.getJobStatus(jobGraph.getJobID()).get().isGloballyTerminalState()) {
 				Thread.sleep(100);
 			}

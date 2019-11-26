@@ -19,7 +19,6 @@
 package org.apache.flink.runtime.jobmaster;
 
 import org.apache.flink.api.common.time.Time;
-import org.apache.flink.client.ClientUtils;
 import org.apache.flink.client.program.MiniClusterClient;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
@@ -64,7 +63,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.isOneOf;
 
 /**
- * Tests for {@link org.apache.flink.runtime.jobmaster.JobMaster#triggerSavepoint(String, boolean, Time)}.
+ * Tests for {@link org.apache.flink.runtime.jobmaster.JobMaster#triggerSavepoint(String, boolean, Time, long)}.
  *
  * @see org.apache.flink.runtime.jobmaster.JobMaster
  */
@@ -91,6 +90,7 @@ public class JobMasterTriggerSavepointITCase extends AbstractTestBase {
 			miniClusterResource.getClusterClient() instanceof MiniClusterClient);
 
 		clusterClient = (MiniClusterClient) miniClusterResource.getClusterClient();
+		clusterClient.setDetached(true);
 
 		jobGraph = new JobGraph();
 
@@ -113,7 +113,7 @@ public class JobMasterTriggerSavepointITCase extends AbstractTestBase {
 				0),
 			null));
 
-		ClientUtils.submitJob(clusterClient, jobGraph);
+		clusterClient.submitJob(jobGraph, ClassLoader.getSystemClassLoader());
 		invokeLatch.await(60, TimeUnit.SECONDS);
 		waitForJob();
 	}
@@ -184,7 +184,7 @@ public class JobMasterTriggerSavepointITCase extends AbstractTestBase {
 		setUpWithCheckpointInterval(10L);
 
 		try {
-			clusterClient.cancelWithSavepoint(jobGraph.getJobID(), null).get();
+			clusterClient.cancelWithSavepoint(jobGraph.getJobID(), null, -1L);
 		} catch (Exception e) {
 			if (!ExceptionUtils.findThrowableWithMessage(e, "savepoint directory").isPresent()) {
 				throw e;
@@ -254,7 +254,7 @@ public class JobMasterTriggerSavepointITCase extends AbstractTestBase {
 	private String cancelWithSavepoint() throws Exception {
 		return clusterClient.cancelWithSavepoint(
 			jobGraph.getJobID(),
-			savepointDirectory.toAbsolutePath().toString()).get();
+			savepointDirectory.toAbsolutePath().toString(), -1L);
 	}
 
 }
