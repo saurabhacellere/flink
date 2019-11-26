@@ -84,7 +84,8 @@ public class JsonRowFormatFactoryTest extends TestLogger {
 		final Map<String, String> properties = toMap(
 			new Json()
 				.jsonSchema(JSON_SCHEMA)
-				.failOnMissingField(true));
+				.failOnMissingField(true)
+				.failureHandler("fail"));
 
 		testJsonSchemaSerializationSchema(properties);
 
@@ -110,7 +111,8 @@ public class JsonRowFormatFactoryTest extends TestLogger {
 		final DeserializationSchema<?> actual2 = TableFactoryService
 			.find(DeserializationSchemaFactory.class, properties)
 			.createDeserializationSchema(properties);
-		final JsonRowDeserializationSchema expected2 = new JsonRowDeserializationSchema.Builder(SCHEMA).build();
+		final JsonRowDeserializationSchema expected2 = new JsonRowDeserializationSchema(SCHEMA);
+		expected2.setFailOnMissingField(false);
 		assertEquals(expected2, actual2);
 	}
 
@@ -118,7 +120,7 @@ public class JsonRowFormatFactoryTest extends TestLogger {
 		final SerializationSchema<?> actual1 = TableFactoryService
 			.find(SerializationSchemaFactory.class, properties)
 			.createSerializationSchema(properties);
-		final SerializationSchema<?> expected1 = new JsonRowSerializationSchema.Builder(SCHEMA).build();
+		final SerializationSchema<?> expected1 = new JsonRowSerializationSchema(SCHEMA);
 		assertEquals(expected1, actual1);
 	}
 
@@ -126,9 +128,8 @@ public class JsonRowFormatFactoryTest extends TestLogger {
 		final DeserializationSchema<?> actual2 = TableFactoryService
 			.find(DeserializationSchemaFactory.class, properties)
 			.createDeserializationSchema(properties);
-		final JsonRowDeserializationSchema expected2 = new JsonRowDeserializationSchema.Builder(JSON_SCHEMA)
-			.failOnMissingField()
-			.build();
+		final JsonRowDeserializationSchema expected2 = new JsonRowDeserializationSchema(JSON_SCHEMA);
+		expected2.setFailOnMissingField(true);
 		assertEquals(expected2, actual2);
 	}
 
@@ -136,7 +137,7 @@ public class JsonRowFormatFactoryTest extends TestLogger {
 		final SerializationSchema<?> actual1 = TableFactoryService
 			.find(SerializationSchemaFactory.class, properties)
 			.createSerializationSchema(properties);
-		final SerializationSchema<?> expected1 = new JsonRowSerializationSchema.Builder(JSON_SCHEMA).build();
+		final SerializationSchema<?> expected1 = new JsonRowSerializationSchema(JSON_SCHEMA);
 		assertEquals(expected1, actual1);
 	}
 
