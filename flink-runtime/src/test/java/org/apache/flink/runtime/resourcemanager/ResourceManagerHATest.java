@@ -19,11 +19,14 @@
 package org.apache.flink.runtime.resourcemanager;
 
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRaterUtil;
 import org.apache.flink.runtime.heartbeat.TestingHeartbeatServices;
 import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManagerConfiguration;
 import org.apache.flink.runtime.rpc.RpcService;
@@ -52,7 +55,7 @@ public class ResourceManagerHATest extends TestLogger {
 
 		TestingLeaderElectionService leaderElectionService = new TestingLeaderElectionService() {
 			@Override
-			public void confirmLeadership(UUID leaderId, String leaderAddress) {
+			public void confirmLeaderSessionID(UUID leaderId) {
 				leaderSessionIdFuture.complete(leaderId);
 			}
 		};
@@ -68,8 +71,7 @@ public class ResourceManagerHATest extends TestLogger {
 				TestingUtils.infiniteTime(),
 				TestingUtils.infiniteTime(),
 				TestingUtils.infiniteTime(),
-				true,
-				false));
+				true));
 		ResourceManagerRuntimeServices resourceManagerRuntimeServices = ResourceManagerRuntimeServices.fromConfiguration(
 			resourceManagerRuntimeServicesConfiguration,
 			highAvailabilityServices,
@@ -87,11 +89,13 @@ public class ResourceManagerHATest extends TestLogger {
 				highAvailabilityServices,
 				heartbeatServices,
 				resourceManagerRuntimeServices.getSlotManager(),
+				NoOpMetricRegistry.INSTANCE,
 				resourceManagerRuntimeServices.getJobLeaderIdService(),
 				new ClusterInformation("localhost", 1234),
 				testingFatalErrorHandler,
-				UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup(),
-				Time.minutes(5L)) {
+				UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup(),
+				Time.minutes(5L),
+				FailureRaterUtil.createFailureRater(new Configuration())) {
 
 				@Override
 				public void revokeLeadership() {

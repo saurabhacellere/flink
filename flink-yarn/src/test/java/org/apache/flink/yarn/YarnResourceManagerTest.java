@@ -23,23 +23,24 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ResourceManagerOptions;
 import org.apache.flink.runtime.clusterframework.ApplicationStatus;
-import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.clusterframework.types.SlotID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRater;
+import org.apache.flink.runtime.failurerate.FailureRaterUtil;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.instance.HardwareDescription;
 import org.apache.flink.runtime.messages.Acknowledge;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.resourcemanager.JobLeaderIdService;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
 import org.apache.flink.runtime.resourcemanager.SlotRequest;
-import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.resourcemanager.utils.MockResourceManagerRuntimeServices;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
@@ -50,13 +51,11 @@ import org.apache.flink.runtime.taskexecutor.SlotStatus;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorRegistrationSuccess;
 import org.apache.flink.runtime.util.TestingFatalErrorHandler;
-import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.util.function.RunnableWithException;
 
 import org.apache.flink.shaded.guava18.com.google.common.collect.ImmutableList;
 
-import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Container;
@@ -68,8 +67,8 @@ import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.client.api.AMRMClient;
+import org.apache.hadoop.yarn.client.api.NMClient;
 import org.apache.hadoop.yarn.client.api.async.AMRMClientAsync;
-import org.apache.hadoop.yarn.client.api.async.NMClientAsync;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.hamcrest.Matchers;
 import org.junit.After;
@@ -81,16 +80,13 @@ import org.junit.rules.TemporaryFolder;
 import javax.annotation.Nullable;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
-import static org.apache.flink.configuration.GlobalConfiguration.FLINK_CONF_FILENAME;
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_APP_ID;
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_CLIENT_HOME_DIR;
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_CLIENT_SHIP_FILES;
@@ -98,9 +94,7 @@ import static org.apache.flink.yarn.YarnConfigKeys.ENV_FLINK_CLASSPATH;
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_HADOOP_USER_NAME;
 import static org.apache.flink.yarn.YarnConfigKeys.FLINK_JAR_PATH;
 import static org.apache.flink.yarn.YarnConfigKeys.FLINK_YARN_FILES;
-import static org.apache.flink.yarn.YarnResourceManager.ERROR_MASSAGE_ON_SHUTDOWN_REQUEST;
 import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
@@ -131,7 +125,7 @@ public class YarnResourceManagerTest extends TestLogger {
 	public TemporaryFolder folder = new TemporaryFolder();
 
 	@Before
-	public void setup() throws IOException {
+	public void setup() {
 		testingFatalErrorHandler = new TestingFatalErrorHandler();
 
 		flinkConfig = new Configuration();
@@ -149,9 +143,6 @@ public class YarnResourceManagerTest extends TestLogger {
 		env.put(ENV_FLINK_CLASSPATH, "");
 		env.put(ENV_HADOOP_USER_NAME, "foo");
 		env.put(FLINK_JAR_PATH, root.toURI().toString());
-		env.put(ApplicationConstants.Environment.PWD.key(), home.getAbsolutePath());
-
-		BootstrapTools.writeConfiguration(flinkConfig, new File(home.getAbsolutePath(), FLINK_CONF_FILENAME));
 	}
 
 	@After
@@ -167,24 +158,26 @@ public class YarnResourceManagerTest extends TestLogger {
 
 	static class TestingYarnResourceManager extends YarnResourceManager {
 		AMRMClientAsync<AMRMClient.ContainerRequest> mockResourceManagerClient;
-		NMClientAsync mockNMClient;
+		NMClient mockNMClient;
 
 		TestingYarnResourceManager(
-				RpcService rpcService,
-				String resourceManagerEndpointId,
-				ResourceID resourceId,
-				Configuration flinkConfig,
-				Map<String, String> env,
-				HighAvailabilityServices highAvailabilityServices,
-				HeartbeatServices heartbeatServices,
-				SlotManager slotManager,
-				JobLeaderIdService jobLeaderIdService,
-				ClusterInformation clusterInformation,
-				FatalErrorHandler fatalErrorHandler,
-				@Nullable String webInterfaceUrl,
-				AMRMClientAsync<AMRMClient.ContainerRequest> mockResourceManagerClient,
-				NMClientAsync mockNMClient,
-				ResourceManagerMetricGroup resourceManagerMetricGroup) {
+			RpcService rpcService,
+			String resourceManagerEndpointId,
+			ResourceID resourceId,
+			Configuration flinkConfig,
+			Map<String, String> env,
+			HighAvailabilityServices highAvailabilityServices,
+			HeartbeatServices heartbeatServices,
+			SlotManager slotManager,
+			MetricRegistry metricRegistry,
+			JobLeaderIdService jobLeaderIdService,
+			ClusterInformation clusterInformation,
+			FatalErrorHandler fatalErrorHandler,
+			@Nullable String webInterfaceUrl,
+			AMRMClientAsync<AMRMClient.ContainerRequest> mockResourceManagerClient,
+			NMClient mockNMClient,
+			JobManagerMetricGroup jobManagerMetricGroup,
+			FailureRater failureRater) {
 			super(
 				rpcService,
 				resourceManagerEndpointId,
@@ -194,11 +187,13 @@ public class YarnResourceManagerTest extends TestLogger {
 				highAvailabilityServices,
 				heartbeatServices,
 				slotManager,
+				metricRegistry,
 				jobLeaderIdService,
 				clusterInformation,
 				fatalErrorHandler,
 				webInterfaceUrl,
-				resourceManagerMetricGroup);
+				jobManagerMetricGroup,
+				failureRater);
 			this.mockNMClient = mockNMClient;
 			this.mockResourceManagerClient = mockResourceManagerClient;
 		}
@@ -220,7 +215,7 @@ public class YarnResourceManagerTest extends TestLogger {
 		}
 
 		@Override
-		protected NMClientAsync createAndStartNodeManagerClient(YarnConfiguration yarnConfiguration) {
+		protected NMClient createAndStartNodeManagerClient(YarnConfiguration yarnConfiguration) {
 			return mockNMClient;
 		}
 
@@ -228,7 +223,6 @@ public class YarnResourceManagerTest extends TestLogger {
 		protected void runAsync(final Runnable runnable) {
 			runnable.run();
 		}
-
 	}
 
 	class Context {
@@ -250,10 +244,15 @@ public class YarnResourceManagerTest extends TestLogger {
 
 		public String taskHost = "host1";
 
-		public NMClientAsync mockNMClient = mock(NMClientAsync.class);
+		public NMClient mockNMClient = mock(NMClient.class);
 
 		@SuppressWarnings("unchecked")
 		public AMRMClientAsync<AMRMClient.ContainerRequest> mockResourceManagerClient = mock(AMRMClientAsync.class);
+
+		public JobManagerMetricGroup mockJMMetricGroup =
+				UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup();
+
+		public FailureRater failureRater = FailureRaterUtil.createFailureRater(new Configuration());
 
 		/**
 		 * Create mock RM dependencies.
@@ -278,13 +277,15 @@ public class YarnResourceManagerTest extends TestLogger {
 							rmServices.highAvailabilityServices,
 							rmServices.heartbeatServices,
 							rmServices.slotManager,
+							rmServices.metricRegistry,
 							rmServices.jobLeaderIdService,
 							new ClusterInformation("localhost", 1234),
 							testingFatalErrorHandler,
 							null,
 							mockResourceManagerClient,
 							mockNMClient,
-							UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup());
+							mockJMMetricGroup,
+							failureRater);
 		}
 
 		/**
@@ -349,21 +350,6 @@ public class YarnResourceManagerTest extends TestLogger {
 	}
 
 	@Test
-	public void testShutdownRequestCausesFatalError() throws Exception {
-		new Context() {{
-			runTest(() -> {
-				resourceManager.onShutdownRequest();
-
-				Throwable t = testingFatalErrorHandler.getErrorFuture().get(2000L, TimeUnit.MILLISECONDS);
-				assertThat(ExceptionUtils.findThrowable(t, ResourceManagerException.class).isPresent(), is(true));
-				assertThat(ExceptionUtils.findThrowableWithMessage(t, ERROR_MASSAGE_ON_SHUTDOWN_REQUEST).isPresent(), is(true));
-
-				testingFatalErrorHandler.clearError();
-			});
-		}};
-	}
-
-	@Test
 	public void testStopWorker() throws Exception {
 		new Context() {{
 			runTest(() -> {
@@ -385,7 +371,7 @@ public class YarnResourceManagerTest extends TestLogger {
 
 				resourceManager.onContainersAllocated(ImmutableList.of(testingContainer));
 				verify(mockResourceManagerClient).addContainerRequest(any(AMRMClient.ContainerRequest.class));
-				verify(mockNMClient).startContainerAsync(eq(testingContainer), any(ContainerLaunchContext.class));
+				verify(mockNMClient).startContainer(eq(testingContainer), any(ContainerLaunchContext.class));
 
 				// Remote task executor registers with YarnResourceManager.
 				TaskExecutorGateway mockTaskExecutorGateway = mock(TaskExecutorGateway.class);
@@ -432,7 +418,7 @@ public class YarnResourceManagerTest extends TestLogger {
 
 				unregisterAndReleaseFuture.get();
 
-				verify(mockNMClient).stopContainerAsync(any(ContainerId.class), any(NodeId.class));
+				verify(mockNMClient).stopContainer(any(ContainerId.class), any(NodeId.class));
 				verify(mockResourceManagerClient).releaseAssignedContainer(any(ContainerId.class));
 			});
 
@@ -484,7 +470,7 @@ public class YarnResourceManagerTest extends TestLogger {
 				resourceManager.onContainersAllocated(ImmutableList.of(testingContainer));
 				verify(mockResourceManagerClient).addContainerRequest(any(AMRMClient.ContainerRequest.class));
 				verify(mockResourceManagerClient).removeContainerRequest(any(AMRMClient.ContainerRequest.class));
-				verify(mockNMClient).startContainerAsync(eq(testingContainer), any(ContainerLaunchContext.class));
+				verify(mockNMClient).startContainer(eq(testingContainer), any(ContainerLaunchContext.class));
 
 				// Callback from YARN when container is Completed, pending request can not be fulfilled by pending
 				// containers, need to request new container.

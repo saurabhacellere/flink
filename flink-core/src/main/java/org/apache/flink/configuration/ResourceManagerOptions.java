@@ -55,6 +55,20 @@ public class ResourceManagerOptions {
 			" default, the port of the JobManager, because the same ActorSystem is used." +
 			" Its not possible to use this configuration key to define port ranges.");
 
+
+	/**
+	 * Defines the maximum number of worker (YARN / Mesos) failures per minute before rejecting subsequent worker
+	 * requests until the failure rate falls below the maximum. It is to quickly catch external dependency caused
+	 * workers failure and terminate job accordingly. Be default, -1.0 is set to disable the feature.
+	 */
+	public static final ConfigOption<Double> MAXIMUM_WORKERS_FAILURE_RATE = ConfigOptions
+		.key("resourcemanager.maximum-workers-failure-rate")
+		.defaultValue(-1.0)
+		.withDescription("Defines the maximum number of worker (YARN / Mesos) failures per minute before rejecting" +
+			" subsequent worker requests until the failure rate falls below the maximum. It is to quickly catch" +
+			" external dependency caused workers failure and terminate job accordingly." +
+			" Be default, -1.0 is set to disable the feature.");
+
 	/**
 	 * Percentage of heap space to remove from containers (YARN / Mesos), to compensate
 	 * for other JVM memory usage.

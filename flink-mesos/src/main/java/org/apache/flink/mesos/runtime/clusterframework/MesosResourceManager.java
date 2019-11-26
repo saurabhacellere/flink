@@ -46,9 +46,11 @@ import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRater;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.metrics.groups.ResourceManagerMetricGroup;
+import org.apache.flink.runtime.metrics.MetricRegistry;
+import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.resourcemanager.JobLeaderIdService;
 import org.apache.flink.runtime.resourcemanager.ResourceManager;
 import org.apache.flink.runtime.resourcemanager.exceptions.ResourceManagerException;
@@ -147,24 +149,26 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 	private MesosConfiguration initializedMesosConfig;
 
 	public MesosResourceManager(
-			// base class
-			RpcService rpcService,
-			String resourceManagerEndpointId,
-			ResourceID resourceId,
-			HighAvailabilityServices highAvailabilityServices,
-			HeartbeatServices heartbeatServices,
-			SlotManager slotManager,
-			JobLeaderIdService jobLeaderIdService,
-			ClusterInformation clusterInformation,
-			FatalErrorHandler fatalErrorHandler,
-			// Mesos specifics
-			Configuration flinkConfig,
-			MesosServices mesosServices,
-			MesosConfiguration mesosConfig,
-			MesosTaskManagerParameters taskManagerParameters,
-			ContainerSpecification taskManagerContainerSpec,
-			@Nullable String webUiUrl,
-			ResourceManagerMetricGroup resourceManagerMetricGroup) {
+		// base class
+		RpcService rpcService,
+		String resourceManagerEndpointId,
+		ResourceID resourceId,
+		HighAvailabilityServices highAvailabilityServices,
+		HeartbeatServices heartbeatServices,
+		SlotManager slotManager,
+		MetricRegistry metricRegistry,
+		JobLeaderIdService jobLeaderIdService,
+		ClusterInformation clusterInformation,
+		FatalErrorHandler fatalErrorHandler,
+		// Mesos specifics
+		Configuration flinkConfig,
+		MesosServices mesosServices,
+		MesosConfiguration mesosConfig,
+		MesosTaskManagerParameters taskManagerParameters,
+		ContainerSpecification taskManagerContainerSpec,
+		@Nullable String webUiUrl,
+		JobManagerMetricGroup jobManagerMetricGroup,
+		FailureRater failureRater) {
 		super(
 			rpcService,
 			resourceManagerEndpointId,
@@ -172,10 +176,12 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			highAvailabilityServices,
 			heartbeatServices,
 			slotManager,
+			metricRegistry,
 			jobLeaderIdService,
 			clusterInformation,
 			fatalErrorHandler,
-			resourceManagerMetricGroup);
+			jobManagerMetricGroup,
+			failureRater);
 
 		this.mesosServices = Preconditions.checkNotNull(mesosServices);
 		this.actorSystem = Preconditions.checkNotNull(mesosServices.getLocalActorSystem());
@@ -442,9 +448,8 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 
 			LaunchableMesosWorker launchable = createLaunchableMesosWorker(worker.taskID());
 
-			LOG.info("Scheduling Mesos task {} with ({} MB, {} cpus, {} gpus, {} disk MB, {} Mbps).",
-				launchable.taskID().getValue(), launchable.taskRequest().getMemory(), launchable.taskRequest().getCPUs(),
-				launchable.taskRequest().getScalarRequests().get("gpus"), launchable.taskRequest().getDisk(), launchable.taskRequest().getNetworkMbps());
+			LOG.info("Scheduling Mesos task {} with ({} MB, {} cpus).",
+				launchable.taskID().getValue(), launchable.taskRequest().getMemory(), launchable.taskRequest().getCPUs());
 
 			// tell the task monitor about the new plans
 			taskMonitor.tell(new TaskMonitor.TaskGoalStateUpdated(extractGoalState(worker)), selfActor);
@@ -662,7 +667,9 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			assert(launched != null);
 			LOG.info("Worker {} failed with status: {}, reason: {}, message: {}.",
 				id, status.getState(), status.getReason(), status.getMessage());
-			startNewWorker(launched.profile());
+
+			recordWorkerFailure();
+			startNewWorkerIfNeeded(launched.profile(), workersInNew.size() * slotsPerWorker.size());
 		}
 
 		closeTaskManagerConnection(id, new Exception(status.getMessage()));
@@ -751,18 +758,6 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			@Override
 			public TaskSchedulerBuilder withLeaseRejectAction(Action1<VirtualMachineLease> action) {
 				builder.withLeaseRejectAction(action);
-				return this;
-			}
-
-			@Override
-			public TaskSchedulerBuilder withRejectAllExpiredOffers() {
-				builder.withRejectAllExpiredOffers();
-				return this;
-			}
-
-			@Override
-			public TaskSchedulerBuilder withLeaseOfferExpirySecs(long leaseOfferExpirySecs) {
-				builder.withLeaseOfferExpirySecs(leaseOfferExpirySecs);
 				return this;
 			}
 

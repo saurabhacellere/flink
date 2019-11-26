@@ -19,17 +19,20 @@
 package org.apache.flink.runtime.resourcemanager;
 
 import org.apache.flink.api.common.time.Time;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.clusterframework.types.SlotID;
 import org.apache.flink.runtime.entrypoint.ClusterInformation;
+import org.apache.flink.runtime.failurerate.FailureRaterUtil;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices;
 import org.apache.flink.runtime.instance.HardwareDescription;
 import org.apache.flink.runtime.instance.InstanceID;
 import org.apache.flink.runtime.leaderelection.LeaderElectionService;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
@@ -157,11 +160,13 @@ public class ResourceManagerTaskExecutorTest extends TestLogger {
 				highAvailabilityServices,
 				heartbeatServices,
 				slotManager,
+				NoOpMetricRegistry.INSTANCE,
 				jobLeaderIdService,
 				new ClusterInformation("localhost", 1234),
 				fatalErrorHandler,
-				UnregisteredMetricGroups.createUnregisteredResourceManagerMetricGroup(),
-				Time.minutes(5L));
+				UnregisteredMetricGroups.createUnregisteredJobManagerMetricGroup(),
+				Time.minutes(5L),
+				FailureRaterUtil.createFailureRater(new Configuration()));
 
 		resourceManager.start();
 
@@ -254,7 +259,7 @@ public class ResourceManagerTaskExecutorTest extends TestLogger {
 			assertTrue(response instanceof TaskExecutorRegistrationSuccess);
 
 			// on success, send slot report for taskmanager registration
-			final SlotReport slotReport = new SlotReport(new SlotStatus(new SlotID(taskExecutorResourceID, 0), ResourceProfile.ANY));
+			final SlotReport slotReport = new SlotReport(new SlotStatus(new SlotID(taskExecutorResourceID, 0), ResourceProfile.UNKNOWN));
 			rmGateway.sendSlotReport(taskExecutorResourceID,
 				((TaskExecutorRegistrationSuccess) response).getRegistrationId(), slotReport, TIMEOUT).get();
 
@@ -301,7 +306,7 @@ public class ResourceManagerTaskExecutorTest extends TestLogger {
 	private Collection<SlotStatus> createSlots(int numberSlots) {
 		return IntStream.range(0, numberSlots)
 			.mapToObj(index ->
-				new SlotStatus(new SlotID(taskExecutorResourceID, index), ResourceProfile.ANY))
+				new SlotStatus(new SlotID(taskExecutorResourceID, index), ResourceProfile.UNKNOWN))
 			.collect(Collectors.toList());
 	}
 
