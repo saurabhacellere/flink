@@ -27,14 +27,12 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.SetupableStreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperator;
-import org.apache.flink.streaming.runtime.io.RecordWriterOutput;
 import org.apache.flink.streaming.runtime.operators.StreamOperatorChainingTest;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.streamstatus.StreamStatusProvider;
 import org.apache.flink.streaming.runtime.tasks.OperatorChain.BroadcastingOutputCollector;
 import org.apache.flink.streaming.runtime.tasks.OperatorChain.ChainingOutput;
 import org.apache.flink.streaming.runtime.tasks.OperatorChain.WatermarkGaugeExposingOutput;
-import org.apache.flink.streaming.util.MockStreamTaskBuilder;
 
 import org.junit.Test;
 
@@ -79,7 +77,8 @@ public class OperatorChainTest {
 		checkArgument(operators.length > 0);
 
 		try (MockEnvironment env = MockEnvironment.builder().build()) {
-			final StreamTask<?, ?> containingTask = new MockStreamTaskBuilder(env).build();
+
+		final StreamTask<?, ?> containingTask = new OneInputStreamTask<T, OneInputStreamOperator<T, T>>(env);
 
 			final StreamStatusProvider statusProvider = mock(StreamStatusProvider.class);
 			final StreamConfig cfg = new StreamConfig(new Configuration());
@@ -106,7 +105,6 @@ public class OperatorChainTest {
 
 			return new OperatorChain<>(
 					ops,
-					new RecordWriterOutput<?>[0],
 					lastWriter,
 					head);
 		}
