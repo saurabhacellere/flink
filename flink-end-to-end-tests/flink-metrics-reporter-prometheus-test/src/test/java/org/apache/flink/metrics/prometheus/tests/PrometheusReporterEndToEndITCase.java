@@ -24,8 +24,8 @@ import org.apache.flink.metrics.prometheus.PrometheusReporter;
 import org.apache.flink.tests.util.AutoClosableProcess;
 import org.apache.flink.tests.util.CommandLineWrapper;
 import org.apache.flink.tests.util.FlinkDistribution;
-import org.apache.flink.tests.util.categories.TravisGroup1;
 import org.apache.flink.util.ExceptionUtils;
+import org.apache.flink.util.OperatingArchitecture;
 import org.apache.flink.util.OperatingSystem;
 import org.apache.flink.util.TestLogger;
 
@@ -38,7 +38,6 @@ import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +55,6 @@ import static org.apache.flink.tests.util.AutoClosableProcess.runNonBlocking;
 /**
  * End-to-end test for the PrometheusReporter.
  */
-@Category(TravisGroup1.class)
 public class PrometheusReporterEndToEndITCase extends TestLogger {
 
 	private static final Logger LOG = LoggerFactory.getLogger(PrometheusReporterEndToEndITCase.class);
@@ -68,17 +66,31 @@ public class PrometheusReporterEndToEndITCase extends TestLogger {
 
 	static {
 		final String base = "prometheus-" + PROMETHEUS_VERSION + '.';
+		final String os;
+		final String arch;
 		switch (OperatingSystem.getCurrentOperatingSystem()) {
 			case MAC_OS:
-				PROMETHEUS_FILE_NAME = base + "darwin-amd64";
+				os = "darwin";
 				break;
 			case WINDOWS:
-				PROMETHEUS_FILE_NAME = base + "windows-amd64";
+				os = "windows";
 				break;
 			default:
-				PROMETHEUS_FILE_NAME = base + "linux-amd64";
+				os = "linux";
 				break;
 		}
+		switch (OperatingArchitecture.getCurrentOperatingArchitecture()) {
+			case AMD64:
+				arch = "amd64";
+				break;
+			case ARM64:
+				arch = "arm64";
+				break;
+			default:
+				arch = "386";
+				break;
+		}
+		PROMETHEUS_FILE_NAME = base + os + "-" + arch;
 	}
 
 	private static final Pattern LOG_REPORTER_PORT_PATTERN = Pattern.compile(".*Started PrometheusReporter HTTP server on port ([0-9]+).*");
