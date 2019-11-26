@@ -31,8 +31,10 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -48,6 +50,8 @@ public abstract class ConnectTableDescriptor
 
 	private @Nullable Schema schemaDescriptor;
 
+	private List<String> partitionKeys = new ArrayList<>();
+
 	public ConnectTableDescriptor(Registration registration, ConnectorDescriptor connectorDescriptor) {
 		super(connectorDescriptor);
 		this.registration = registration;
@@ -58,6 +62,14 @@ public abstract class ConnectTableDescriptor
 	 */
 	public ConnectTableDescriptor withSchema(Schema schema) {
 		schemaDescriptor = Preconditions.checkNotNull(schema, "Schema must not be null.");
+		return this;
+	}
+
+	/**
+	 * Specifies the partition keys of this table.
+	 */
+	public ConnectTableDescriptor withPartitionKeys(List<String> partitionKeys) {
+		this.partitionKeys = Preconditions.checkNotNull(partitionKeys, "PartitionKeys must not be null.");
 		return this;
 	}
 
@@ -144,6 +156,7 @@ public abstract class ConnectTableDescriptor
 
 		CatalogTableImpl catalogTable = new CatalogTableImpl(
 			tableSchema,
+			partitionKeys,
 			properties,
 			""
 		);
