@@ -91,12 +91,17 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 	private int[] fields;
 	// Remember whether a row instance is reused. No need to set partition fields for reused rows
 	private transient boolean rowReused;
+	//We should limit the input read count of this splits, -1 represents no limit.
+	private long limit;
+	private boolean isLimit = false;
+	private long currentReadCount = 0L;
 
 	public HiveTableInputFormat(
 			JobConf jobConf,
 			CatalogTable catalogTable,
 			List<HiveTablePartition> partitions,
-			int[] projectedFields) {
+			int[] projectedFields,
+			long limit) {
 		super(jobConf.getCredentials());
 		checkNotNull(catalogTable, "catalogTable can not be null.");
 		this.partitions = checkNotNull(partitions, "partitions can not be null.");
@@ -105,6 +110,7 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 		this.partitionColNames = catalogTable.getPartitionKeys();
 		int rowArity = catalogTable.getSchema().getFieldCount();
 		fields = projectedFields != null ? projectedFields : IntStream.range(0, rowArity).toArray();
+		this.limit = limit;
 	}
 
 	@Override
@@ -144,6 +150,12 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 			throw new FlinkHiveException("Error happens when deserialize from storage file.", e);
 		}
 		rowReused = false;
+		if (limit > 0) {
+			isLimit = true;
+			currentReadCount = 0L;
+		} else {
+			isLimit = false;
+		}
 	}
 
 	@Override
@@ -206,6 +218,9 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 
 	protected void fetchNext() throws IOException {
 		hasNext = this.recordReader.next(key, value);
+		if (isLimit && currentReadCount >= limit) {
+			hasNext = false;
+		}
 		fetched = true;
 	}
 
@@ -243,6 +258,9 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 			rowReused = true;
 		}
 		this.fetched = false;
+		if (isLimit) {
+			currentReadCount++;
+		}
 		return reuse;
 	}
 
@@ -256,6 +274,7 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 		out.writeObject(partitionColNames);
 		out.writeObject(partitions);
 		out.writeObject(fields);
+		out.writeObject(limit);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -273,5 +292,6 @@ public class HiveTableInputFormat extends HadoopInputFormatCommonBase<Row, HiveT
 		partitionColNames = (List<String>) in.readObject();
 		partitions = (List<HiveTablePartition>) in.readObject();
 		fields = (int[]) in.readObject();
+		limit = (long) in.readObject();
 	}
 }
