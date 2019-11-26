@@ -90,7 +90,7 @@ under the License.
 
 		<dependency>
 			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-shaded-asm-7</artifactId>
+			<artifactId>flink-shaded-asm-6</artifactId>
 		</dependency>
 
 		<dependency>
@@ -286,8 +286,14 @@ under the License.
 		<dependency>
 			<groupId>org.apache.curator</groupId>
 			<artifactId>curator-test</artifactId>
-			<version>${curator.version}</version>
+			<version>${curator.test.version}</version>
 			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<groupId>org.apache.zookeeper</groupId>
+					<artifactId>zookeeper</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 
 		<dependency>
